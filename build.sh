@@ -26,6 +26,24 @@ gate() {
     DEP=$(grep -rEl '^[a-z0-9_-]+ = "[0-9^~*<>=]' crates/*/Cargo.toml 2>/dev/null || true)
     if [ -n "$DEP" ]; then echo "FAIL: crates.io deps found in:"; echo "$DEP"; exit 1; fi
     echo "ok (path deps only)"
+
+    echo "── audit: extensions register (silent-failure guard) ──"
+    # pi extensions fail SILENTLY on a bad runtime import — the tool just never
+    # registers and the model hallucinates its output. Static-lint every
+    # extension for the one thing that causes it: a non-type import from a pi
+    # package. (Type-only `import type ... from "@earendil-works/..."` is fine.)
+    BADIMP=$(grep -rn "from ['\"]@earendil-works/" extensions/*.ts | grep -v 'import type ' || true)
+    if [ -n "$BADIMP" ]; then echo "FAIL: non-type pi import (extension will silently not register):"; echo "$BADIMP"; exit 1; fi
+    echo "ok (all pi imports are type-only)"
+
+    echo "── smoke: pi loads and every extension tool registers ──"
+    EXP=$(ls extensions/*.ts | grep -v akurai-router | wc -l | tr -d ' ')
+    GOT=$(./pi -p 'List every tool you can call, names only, comma-separated. No prose.' </dev/null 2>/dev/null \
+        | grep -oE '\b(semdb|memory|codegraph|codeindex|vault|skills|schedule|search|notify|secrets|browser|orchestrate|mcp|sandbox|context|evals|rag|voice)\b' \
+        | sort -u | wc -l | tr -d ' ')
+    echo "extensions expecting tools: $EXP  |  tools the agent listed: $GOT"
+    if [ "$GOT" -lt 18 ]; then echo "FAIL: only $GOT/18 crate tools registered in pi"; exit 1; fi
+    echo "ok ($GOT/18 crate tools live)"
 }
 
 case "${1:-}" in

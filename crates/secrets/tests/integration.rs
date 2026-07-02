@@ -15,8 +15,13 @@ fn gated_get_flow() {
     // deny by default
     let denied = cli::run(&s(&["get","--store",&store,"--name","api","--as","agentA"]));
     assert!(denied.is_err());
-    // grant, then allowed
+    // policy-allow is admin-only: without the out-of-band signal it is refused.
+    unsafe { std::env::remove_var("SMARTAGENT_SECRETS_ADMIN") };
+    assert!(cli::run(&s(&["policy-allow","--store",&store,"--caller","agentA","--name","api"])).is_err());
+    // grant as admin, then allowed
+    unsafe { std::env::set_var("SMARTAGENT_SECRETS_ADMIN", "1") };
     cli::run(&s(&["policy-allow","--store",&store,"--caller","agentA","--name","api"])).unwrap();
+    unsafe { std::env::remove_var("SMARTAGENT_SECRETS_ADMIN") };
     let ok = cli::run(&s(&["get","--store",&store,"--name","api","--as","agentA"])).unwrap();
     assert_eq!(ok, "sekret");
     // audit has a deny then an allow

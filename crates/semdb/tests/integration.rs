@@ -9,8 +9,10 @@ use semdb::storage::Db;
 use semdb::vector;
 
 fn tmp(name: &str) -> PathBuf {
-    let mut p = std::env::temp_dir();
-    p.push(format!("semdb-it-{name}-{}", std::process::id()));
+    // In-repo scratch (rule 6: never /tmp). CARGO_MANIFEST_DIR is the crate dir.
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join(format!("semdb-it-{name}-{}", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p
 }
@@ -128,5 +130,58 @@ fn kill9_recovery() {
     let mut db3 = Db::open(&path).unwrap();
     db3.put("post-crash", "", vec![9.0]).unwrap();
     assert!(db3.get("post-crash").is_some());
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn mid_file_corruption_truncates_later_records() {
+    // Documented design: on reopen, replay stops at the first bad CRC and the
+    // file is truncated there — so a flipped byte in a *middle* record loses
+    // that record AND everything after it, even if those later records were
+    // themselves valid. This test pins that (lossy) contract so it can't
+    // change silently.
+    let path = tmp("midcorrupt");
+    {
+        let mut db = Db::create(&path).unwrap();
+        db.put("r1", "one", vec![1.0]).unwrap();
+        db.put("r2", "two", vec![2.0]).unwrap();
+        db.put("r3", "three", vec![3.0]).unwrap();
+    }
+    // Flip a byte in the middle of the file (inside record 2's region), past
+    // the 8-byte header of record 1.
+    let mut bytes = std::fs::read(&path).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xFF;
+    std::fs::write(&path, &bytes).unwrap();
+
+    let db = Db::open(&path).unwrap(); // must not error
+    // r1 survives; r2 (corrupted) and r3 (after the boundary) are gone.
+    assert!(db.get("r1").is_some(), "record before corruption should survive");
+    assert!(db.get("r3").is_none(), "records after a mid-file corruption are truncated away");
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn compact_survives_stale_tmp_and_preserves_live_after_delete() {
+    let path = tmp("compact");
+    let mut db = Db::create(&path).unwrap();
+    db.put("keep", "v", vec![1.0]).unwrap();
+    db.put("drop", "v", vec![2.0]).unwrap();
+    db.delete("drop").unwrap();
+
+    // A leftover .compact file from an interrupted prior compaction must not
+    // block the next one (it is opened create+truncate).
+    let stale = path.with_extension("compact");
+    std::fs::write(&stale, b"garbage from a crashed compact").unwrap();
+
+    db.compact().unwrap();
+    // Still writable, and a put after compact survives a reopen.
+    db.put("added", "v", vec![3.0]).unwrap();
+    drop(db);
+
+    let db2 = Db::open(&path).unwrap();
+    assert!(db2.get("keep").is_some());
+    assert!(db2.get("added").is_some());
+    assert!(db2.get("drop").is_none(), "deleted entry must not resurrect after compact");
     std::fs::remove_file(&path).unwrap();
 }
