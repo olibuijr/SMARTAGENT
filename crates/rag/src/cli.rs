@@ -66,11 +66,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 vec![vec; chunks.len()]
             } else {
                 let embedder = embedder(args)?;
-                let mut vectors = Vec::with_capacity(chunks.len());
-                for chunk in &chunks {
-                    vectors.push(embedder.embed(&chunk.text)?);
-                }
-                vectors
+                let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
+                embedder.embed_batch(&texts)?
             };
             // Re-ingest safety: drop any existing chunks for this doc first,
             // or an edited doc with fewer/reordered chunks leaves stale orphans.

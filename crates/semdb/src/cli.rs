@@ -42,13 +42,48 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         "del" => {
             let db_path = required(args, 1, "db path")?;
-            let id = flag(args, "--id").ok_or("--id required")?;
             let mut db = Db::open(Path::new(&db_path))?;
+            // --prefix deletes a whole family of rows in one call (doc chunks,
+            // a table's namespace) — the review's delete-by-filter gap.
+            if let Some(prefix) = flag(args, "--prefix") {
+                if prefix.is_empty() {
+                    return Err("--prefix must be non-empty".into());
+                }
+                let ids: Vec<String> = db.index.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+                for id in &ids {
+                    db.delete(id)?;
+                }
+                return Ok(format!("deleted {} rows with prefix '{prefix}'", ids.len()));
+            }
+            let id = flag(args, "--id").ok_or("--id or --prefix required")?;
             if db.delete(&id)? {
                 Ok(format!("deleted {id}"))
             } else {
                 Err(format!("id '{id}' not found"))
             }
+        }
+        "embed-batch" => {
+            // Bulk ingest: TSV lines `id<TAB>text` from --file, ONE embeddings
+            // POST and one db open for the whole set.
+            let db_path = required(args, 1, "db path")?;
+            let file = flag(args, "--file").ok_or("--file with id<TAB>text lines required")?;
+            let content = std::fs::read_to_string(&file).map_err(|e| format!("read {file}: {e}"))?;
+            let mut ids = Vec::new();
+            let mut texts = Vec::new();
+            for (i, line) in content.lines().enumerate() {
+                if line.trim().is_empty() { continue; }
+                let (id, text) = line.split_once('\t').ok_or_else(|| format!("line {}: expected id<TAB>text", i + 1))?;
+                ids.push(id.to_string());
+                texts.push(text.to_string());
+            }
+            if ids.is_empty() { return Ok("nothing to embed".into()); }
+            let (host, port, model) = embed_backend(args)?;
+            let vecs = http::fetch_embeddings(&host, port, &model, &texts)?;
+            let mut db = Db::open(Path::new(&db_path))?;
+            for ((id, text), vec) in ids.iter().zip(&texts).zip(vecs) {
+                db.put(id, &format!(r#"{{"text":"{}"}}"#, crate::json::escape(text)), vec)?;
+            }
+            Ok(format!("embedded {} rows (one request)", ids.len()))
         }
         "search" => {
             let db_path = required(args, 1, "db path")?;
@@ -156,6 +191,10 @@ pub fn run(args: &[String]) -> Result<String, String> {
 
 /// Shared search core: brute-force cosine or HNSW. Returns (id, score, meta).
 pub fn search(db: &Db, query: &[f32], k: usize, exact: bool) -> Vec<(String, f32, String)> {
+    // Rebuilding HNSW from scratch per query costs MORE than brute force
+    // until the graph is persisted — auto-exact below 10k rows makes the
+    // common case both faster and exactly correct.
+    let exact = exact || db.index.len() < 10_000;
     if exact {
         let mut scored: Vec<(String, f32, String)> = db
             .index
@@ -205,9 +244,10 @@ USAGE:
   semdb create  <db>
   semdb put     <db> --id X --vector '0.1,0.2,...' [--meta '<json>']
   semdb get     <db> --id X
-  semdb del     <db> --id X
-  semdb search  <db> (--vector '...' | --text '...') [--k 10] [--exact]
+  semdb del     <db> (--id X | --prefix P)
+  semdb search  <db> (--vector '...' | --text '...') [--k 10] [--exact]  (auto-exact <10k rows)
   semdb embed   <db> --id X --text '...' [--meta '<json>']
+  semdb embed-batch <db> --file lines.tsv    (id<TAB>text per line, ONE request)
   semdb stats   <db>
   semdb compact <db>
 

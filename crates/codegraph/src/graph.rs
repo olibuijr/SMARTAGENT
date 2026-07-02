@@ -102,6 +102,22 @@ impl Graph {
     }
 
     /// Functions that call `name`.
+    /// Symbols with no inbound calls/impls/refs — dead-code candidates.
+    /// `main`, test fns, and pub API roots still appear; the caller filters.
+    pub fn unused(&self) -> Vec<&Symbol> {
+        use std::collections::HashSet;
+        let referenced: HashSet<&str> = self
+            .edges
+            .iter()
+            .filter(|e| e.kind != "defines")
+            .map(|e| e.to.as_str())
+            .collect();
+        self.symbols
+            .iter()
+            .filter(|s| (s.kind == "fn" || s.kind == "struct" || s.kind == "enum") && !referenced.contains(s.name.as_str()) && s.name != "main")
+            .collect()
+    }
+
     pub fn callers(&self, name: &str) -> Vec<String> {
         let mut v: Vec<String> = self
             .edges

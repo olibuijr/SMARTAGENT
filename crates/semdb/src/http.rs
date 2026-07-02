@@ -20,6 +20,32 @@ pub fn post_json(host: &str, port: u16, path: &str, body: &str) -> Result<Value,
 }
 
 /// Call an OpenAI-compatible /v1/embeddings endpoint; return the vector.
+/// Batch embeddings: one POST with an array input (OpenAI-compatible servers
+/// accept `"input": [..]`). Amortizes the HTTP round-trip that made bulk
+/// ingest (rag, memory) serial and slow.
+pub fn fetch_embeddings(host: &str, port: u16, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let inputs = texts.iter().map(|t| format!("\"{}\"", json::escape(t))).collect::<Vec<_>>().join(",");
+    let body = format!(r#"{{"model":"{}","input":[{}]}}"#, json::escape(model), inputs);
+    let resp = post_json(host, port, "/v1/embeddings", &body)?;
+    let data = resp.get("data").and_then(|d| d.as_arr()).ok_or("response missing data[]")?;
+    if data.len() != texts.len() {
+        return Err(format!("embeddings count mismatch: sent {}, got {}", texts.len(), data.len()));
+    }
+    data.iter()
+        .map(|e| {
+            e.get("embedding")
+                .and_then(|x| x.as_arr())
+                .ok_or_else(|| "entry missing embedding".to_string())?
+                .iter()
+                .map(|v| v.as_f64().map(|f| f as f32).ok_or_else(|| "non-number in embedding".to_string()))
+                .collect()
+        })
+        .collect()
+}
+
 pub fn fetch_embedding(host: &str, port: u16, model: &str, text: &str) -> Result<Vec<f32>, String> {
     let body = format!(
         r#"{{"model":"{}","input":"{}"}}"#,

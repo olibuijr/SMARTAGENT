@@ -192,14 +192,21 @@ fn read_response_bytes(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
             if let Some(he) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
                 let head = std::str::from_utf8(&raw[..he]).unwrap_or("");
                 framing = Some((he, detect_framing(head)));
+            } else if raw.len() > 64 * 1024 {
+                // Header block never terminated — a hostile server could
+                // otherwise grow memory unboundedly before framing kicks in.
+                return Err("response headers exceed 64KB".into());
             }
         }
         let Some((header_end, ref f)) = framing else { continue };
         let body = &raw[header_end + 4..];
         match f {
             // Chunked: done when the terminating 0-size chunk has arrived.
+            // Only attempt the (O(body)) dechunk parse when the tail can
+            // plausibly hold the terminator — a full parse per socket read
+            // made large chunked bodies O(n²).
             Framing::Chunked => {
-                if dechunk(body).is_ok() {
+                if body.ends_with(b"\r\n\r\n") && dechunk(body).is_ok() {
                     return Ok(raw);
                 }
             }

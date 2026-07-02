@@ -23,6 +23,8 @@ members = [
     "crates/supervise",
     "crates/tasks",
     "crates/workflow",
+    "crates/hooks",
+    "desktop-agent",
 ]
 
 [workspace.package]

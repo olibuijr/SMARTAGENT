@@ -24,6 +24,10 @@ runs `supervise watch`.
 - `skills/Kanban`: methodology skill (six practices, column semantics, blocker/priority policy, anti-patterns) + three runnable workflows: `task-run` (observe→plan→execute→verify→learn, one skill per step), `triage`, `retro`.
 - Gate updated to 20/20 tool registration; statusline widget gained ▣ tasks + ▶ workflow segments.
 
+**Hooks system (new crate, 23 total):** `hooks` — user-configurable lifecycle hooks researched from Claude Code + codex CLI (3-agent research team). Config `config/hooks.conf` (additive [hook] blocks: event/matcher/command/timeout), commands in `hooks.d/`, Claude Code I/O contract (payload JSON on stdin; exit 0 allow with optional {"decision":"block"}/{"updatedInput"}/plain-text context; exit 2 BLOCK with stderr reason; timeout fails open loudly). `extensions/hooks.ts` bridges pi events: tool_call (block+rewrite), input (user_prompt block), before_agent_start (context injection), agent_end (stop audit). Firings audited to data/hooks.semdb; 🪝 statusline segment; seeded with a guard-destructive hook on sandbox — verified blocking `rm -rf /` end-to-end through pi.
+
+**P1 backlog burn-down (from the tool review):** semdb auto-exact <10k rows (HNSW-rebuild-per-query removed), batch embeddings (`fetch_embeddings`, `embed-batch`, rag ingest now ONE POST), `del --prefix`; httpc 64KB header cap + O(n) chunked reads; memory dedup-on-write (cosine ≥0.97 consolidates), explicit ts+hits meta, relevance-based eviction, ts-ordered recent; codegraph `unused` (dead-code candidates); vault `orphans` (+dead links), `tags`/`search --tag`, rename now rewrites [[x|alias]]/![[x]]/[[x#anchor]].
+
 **P0 fixes (12-subagent tool review, all 10 fixed):**
 - secrets: caller identity is now token-authenticated — `issue-token` (admin) mints per-caller 0600 tokens; `get` requires SMARTAGENT_CALLER_TOKEN/`--token` (constant-time verify, fail-closed, audited). `./pi` launcher injects pi's token; sandbox env-scrub + secrets-mask keep it from sandboxed commands.
 - mcp: JSON injection fixed (tool name escaped, --args validated as JSON).

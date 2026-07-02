@@ -60,9 +60,23 @@ impl Memory {
     }
 
     /// Store with an explicit vector (used by tests to avoid the network).
+    /// Dedup-on-write: if a near-identical memory already exists in the tier
+    /// (cosine ≥ 0.97), UPDATE that row instead of accumulating a duplicate/
+    /// contradiction — the Mem0 consolidation behavior, deterministic.
     pub fn remember_vec(&self, tier: &str, id: &str, text: &str, vector: Vec<f32>) -> Result<(), String> {
         let mut db = self.open_or_create(tier)?;
-        let meta = format!(r#"{{"text":"{}"}}"#, esc(text));
+        let ts = now_unix();
+        let meta = format!(r#"{{"text":"{}","ts":{ts},"hits":0}}"#, esc(text));
+        if vector.len() > 1 {
+            let top = cli::search(&db, &vector, 1, true);
+            if let Some((existing, score, _)) = top.first() {
+                if *score >= 0.97 && existing != id {
+                    let existing = existing.clone();
+                    db.put(&existing, &meta, vector)?;
+                    return Ok(());
+                }
+            }
+        }
         db.put(id, &meta, vector)?;
         if tier == "working" {
             evict_over_cap(&mut db)?;
@@ -125,9 +139,22 @@ impl Memory {
             return Ok(Vec::new());
         }
         let db = Db::open(&path)?;
-        let mut ids: Vec<String> = db.index.keys().cloned().collect();
-        ids.sort();
-        ids.reverse();
+        // Sort by the explicit `ts` field (custom/user ids broke the old
+        // id-prefix ordering); legacy rows without ts fall back to id order.
+        let mut keyed: Vec<(i64, String)> = db
+            .index
+            .iter()
+            .map(|(id, e)| {
+                let ts = semdb::json::parse(&e.meta)
+                    .ok()
+                    .and_then(|v| v.get("ts").and_then(|x| x.as_f64()))
+                    .unwrap_or(0.0) as i64;
+                (ts, id.clone())
+            })
+            .collect();
+        keyed.sort();
+        keyed.reverse();
+        let ids: Vec<String> = keyed.into_iter().map(|(_, id)| id).collect();
         let mut out = Vec::new();
         for id in ids.into_iter().take(n) {
             let text = db
@@ -168,22 +195,41 @@ fn validate_tier(tier: &str) -> Result<(), String> {
 }
 
 fn evict_over_cap(db: &mut Db) -> Result<(), String> {
-    // Keep it simple: if over cap, drop lexicographically-lowest ids until at cap.
-    // Callers use timestamp-prefixed ids so lowest == oldest.
-    let mut ids: Vec<String> = db.index.keys().cloned().collect();
-    if ids.len() <= WORKING_CAP {
+    if db.index.len() <= WORKING_CAP {
         return Ok(());
     }
-    ids.sort();
-    let excess = ids.len() - WORKING_CAP;
-    for id in ids.into_iter().take(excess) {
+    // Relevance-aware eviction: score = recall hits weighted, plus recency
+    // (explicit `ts` in meta; falls back to 0 for legacy rows so they age out
+    // first). Lowest score goes first — not blind FIFO.
+    let mut scored: Vec<(i64, String)> = db
+        .index
+        .iter()
+        .map(|(id, e)| {
+            let v = semdb::json::parse(&e.meta).ok();
+            let ts = v.as_ref().and_then(|v| v.get("ts").and_then(|x| x.as_f64())).unwrap_or(0.0) as i64;
+            let hits = v.as_ref().and_then(|v| v.get("hits").and_then(|x| x.as_f64())).unwrap_or(0.0) as i64;
+            (ts + hits * 3600, id.clone()) // one recall ≈ an hour of freshness
+        })
+        .collect();
+    scored.sort();
+    let excess = db.index.len() - WORKING_CAP;
+    for (_, id) in scored.into_iter().take(excess) {
         db.delete(&id)?;
     }
     Ok(())
 }
 
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 fn esc(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    // Full JSON escaping (\r, \t, control chars) via the shared serializer —
+    // the hand-rolled version broke meta on control characters.
+    semdb::json::escape(s)
 }
 
 fn text_from_meta(meta: &str) -> String {
@@ -242,5 +288,28 @@ mod tests {
         // oldest (0000) evicted
         let hits = m.recall(&[0.0], WORKING_CAP, &vec!["working".into()]).unwrap();
         assert!(hits.iter().all(|h| h.id != "0000"));
+    }
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn near_duplicate_updates_instead_of_inserting() {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/mem-dedup");
+        let _ = std::fs::remove_dir_all(&d);
+        let m = Memory::new(&d);
+        m.remember_vec("semantic", "a", "golf handicap is 3.5", vec![1.0, 0.0, 0.0]).unwrap();
+        // near-identical vector → update row "a", not a second row
+        m.remember_vec("semantic", "b", "golf handicap is 4.0", vec![0.999, 0.01, 0.0]).unwrap();
+        let db = Db::open(&d.join("semantic.semdb")).unwrap();
+        assert_eq!(db.index.len(), 1, "duplicate accumulated instead of consolidating");
+        assert!(db.get("a").unwrap().meta.contains("4.0"));
+        // orthogonal vector → genuinely new memory
+        m.remember_vec("semantic", "c", "depill needs a walk", vec![0.0, 1.0, 0.0]).unwrap();
+        let db = Db::open(&d.join("semantic.semdb")).unwrap();
+        assert_eq!(db.index.len(), 2);
     }
 }

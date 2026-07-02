@@ -33,6 +33,7 @@ const SEGMENTS: { key: string; args: string[]; line: Line }[] = [
 	{ key: "browser", args: ["statusline"], line: "infra" },
 	{ key: "search", args: ["statusline"], line: "infra" },
 	{ key: "codegraph", args: ["statusline", join(ROOT, "data", "codegraph.json")], line: "infra" },
+	{ key: "hooks", args: ["statusline", "--root", ROOT], line: "infra" },
 	{ key: "memory", args: ["statusline", "--dir", join(ROOT, "data", "memory")], line: "data" },
 	{ key: "rag", args: ["statusline", join(ROOT, "data", "rag.semdb")], line: "data" },
 	{ key: "schedule", args: ["statusline"], line: "data" },

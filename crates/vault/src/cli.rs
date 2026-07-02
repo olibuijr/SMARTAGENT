@@ -103,8 +103,40 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 None => Ok(graph::render(&adj)),
             }
         }
+        "orphans" => {
+            // Second-brain hygiene: notes with zero backlinks + [[targets]]
+            // that resolve to no note (dead links). Reuses the adjacency.
+            let vault = vault.ok_or("usage: vault orphans <vault>")?;
+            let adj = graph::build(vault)?;
+            use std::collections::BTreeSet;
+            let notes: BTreeSet<&String> = adj.keys().collect();
+            let mut linked: BTreeSet<&String> = BTreeSet::new();
+            let mut dead: BTreeSet<String> = BTreeSet::new();
+            for (_, targets) in adj.iter() {
+                for t in targets {
+                    if notes.contains(t) { linked.insert(t); } else { dead.insert(t.clone()); }
+                }
+            }
+            let orphans: Vec<&str> = adj.keys().filter(|n| !linked.contains(*n)).map(|s| s.as_str()).collect();
+            let mut out = Vec::new();
+            out.push(format!("orphans ({}): {}", orphans.len(), if orphans.is_empty() { "(none)".into() } else { orphans.join(", ") }));
+            out.push(format!("dead links ({}): {}", dead.len(), if dead.is_empty() { "(none)".into() } else { dead.iter().cloned().collect::<Vec<_>>().join(", ") }));
+            Ok(out.join("\n"))
+        }
+        "tags" => {
+            // List all tags (frontmatter `tags:` + inline #tag) with counts.
+            let vault = vault.ok_or("usage: vault tags <vault>")?;
+            let counts = collect_tags(vault)?;
+            if counts.is_empty() { return Ok("no tags".into()); }
+            Ok(counts.iter().map(|(t, n)| format!("{t}\t{n}")).collect::<Vec<_>>().join("\n"))
+        }
         "search" => {
             let vault = vault.ok_or("usage: vault search <vault> <query>")?;
+            // --tag T: list notes carrying a tag instead of keyword search.
+            if let Some(tag) = flag(args, "--tag") {
+                let notes = notes_with_tag(vault, &tag)?;
+                return Ok(if notes.is_empty() { format!("no notes tagged #{tag}") } else { notes.join("\n") });
+            }
             let query = args.get(2).ok_or("query required")?;
             let hits = search::search(vault, query)?;
             if hits.is_empty() {
@@ -163,16 +195,102 @@ fn rename_note(vault: &Path, old: &str, new_title: &str) -> Result<usize, String
         return Err(format!("{} already exists", new_path.display()));
     }
     std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
-    // Rewrite [[old_name]] → [[new_slug]] in every note.
-    let old_link = format!("[[{old_name}]]");
-    let new_link = format!("[[{new_slug}]]");
+    // Rewrite every wikilink form referencing old_name: [[old]], [[old|alias]],
+    // [[old#anchor]], and embeds ![[old]] — the bare-form-only rewrite silently
+    // broke aliased/anchored links.
     let mut rewritten = 0;
     for p in note::list(vault)? {
         let body = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
-        if body.contains(&old_link) {
-            rewritten += body.matches(&old_link).count();
-            std::fs::write(&p, body.replace(&old_link, &new_link)).map_err(|e| e.to_string())?;
+        let (new_body, n) = rewrite_links(&body, &old_name, &new_slug);
+        if n > 0 {
+            rewritten += n;
+            std::fs::write(&p, new_body).map_err(|e| e.to_string())?;
         }
     }
     Ok(rewritten)
+}
+
+/// Replace `[[old...]]` targets with `new`, preserving `|alias` and `#anchor`
+/// suffixes and the embed `!` prefix. Returns (rewritten body, count).
+fn rewrite_links(body: &str, old: &str, new: &str) -> (String, usize) {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    let mut count = 0;
+    while let Some(start) = rest.find("[[") {
+        let (head, tail) = rest.split_at(start);
+        out.push_str(head);
+        let Some(end) = tail.find("]]") else { out.push_str(tail); return (out, count) };
+        let inner = &tail[2..end];
+        // target = up to first '|' or '#'
+        let cut = inner.find(['|', '#']).unwrap_or(inner.len());
+        let (target, suffix) = inner.split_at(cut);
+        if target.trim() == old {
+            out.push_str(&format!("[[{new}{suffix}]]"));
+            count += 1;
+        } else {
+            out.push_str(&format!("[[{inner}]]"));
+        }
+        rest = &tail[end + 2..];
+    }
+    out.push_str(rest);
+    (out, count)
+}
+
+/// Tags = frontmatter `tags:` (comma/space separated) + inline `#tag` tokens.
+fn collect_tags(vault: &Path) -> Result<Vec<(String, usize)>, String> {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for p in note::list(vault)? {
+        for tag in note_tags(&std::fs::read_to_string(&p).map_err(|e| e.to_string())?) {
+            *counts.entry(tag).or_default() += 1;
+        }
+    }
+    Ok(counts.into_iter().collect())
+}
+
+fn notes_with_tag(vault: &Path, tag: &str) -> Result<Vec<String>, String> {
+    let want = tag.trim_start_matches('#').to_lowercase();
+    let mut out = Vec::new();
+    for p in note::list(vault)? {
+        let body = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
+        if note_tags(&body).iter().any(|t| *t == want) {
+            out.push(note::note_name(&p));
+        }
+    }
+    Ok(out)
+}
+
+fn note_tags(content: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    // frontmatter `tags: a, b c`
+    if let Some(rest) = content.strip_prefix("---") {
+        if let Some(end) = rest.find("\n---") {
+            for line in rest[..end].lines() {
+                if let Some(v) = line.strip_prefix("tags:") {
+                    for t in v.split([',', ' ']).map(str::trim).filter(|t| !t.is_empty()) {
+                        tags.push(t.trim_start_matches('#').to_lowercase());
+                    }
+                }
+            }
+        }
+    }
+    // inline #tag (word chars/dash), skipping code fences and md headings
+    let mut in_fence = false;
+    for line in note::strip_frontmatter(content).lines() {
+        let lt = line.trim_start();
+        if lt.starts_with("```") || lt.starts_with("~~~") { in_fence = !in_fence; continue; }
+        if in_fence || lt.starts_with('#') && lt.chars().take_while(|c| *c == '#').count() >= 1 && lt.contains(' ') && lt.starts_with('#') && lt.split_whitespace().next().map(|w| w.chars().all(|c| c == '#')).unwrap_or(false) { continue; }
+        let mut chars = line.char_indices().peekable();
+        while let Some((i, c)) = chars.next() {
+            if c == '#' && (i == 0 || !line[..i].ends_with(|p: char| p.is_alphanumeric())) {
+                let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
+                if tag.len() > 1 && tag.chars().any(|c| c.is_alphabetic()) {
+                    tags.push(tag.to_lowercase());
+                }
+            }
+        }
+    }
+    tags.sort();
+    tags.dedup();
+    tags
 }

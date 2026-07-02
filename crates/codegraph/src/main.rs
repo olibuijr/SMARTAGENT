@@ -43,6 +43,17 @@ fn run(args: &[String]) -> Result<String, String> {
             let chain = graph.call_path(from, to);
             Ok(if chain.is_empty() { format!("no call path {from} → {to}") } else { chain.join(" → ") })
         }
+        Some("unused") => {
+            // Dead-code candidates: defined symbols nothing calls/refs/impls.
+            let graph = Graph::load(&graph_arg(args)?)?;
+            let dead = graph.unused();
+            if dead.is_empty() { return Ok("no unused symbols".into()); }
+            let limit = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(50usize);
+            let total = dead.len();
+            let mut out: Vec<String> = dead.into_iter().take(limit).map(|s| format!("{}\t{}\t{}:{}", s.name, s.kind, s.file, s.line)).collect();
+            if total > limit { out.push(format!("…{total} total (--limit to widen)")); }
+            Ok(out.join("\n"))
+        }
         Some("stats") => {
             let graph = Graph::load(&graph_arg(args)?)?;
             Ok(graph.stats())
