@@ -1,4 +1,4 @@
-//! notify — ntfy-style push notifications over plain HTTP (via httpc).
+//! notify — ntfy-style push notifications over HTTP/HTTPS (via httpc).
 //! `notify send --topic T --message M [--title X] [--priority 1-5] [--tags a,b]
 //!         [--server http://host:port]`
 
@@ -44,12 +44,11 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-
 const HELP: &str = r#"
-notify — push notifications (ntfy protocol, plain HTTP)
+notify — push notifications (ntfy protocol, HTTP/HTTPS)
 
 USAGE:
   notify send --topic T --message M [--title X] [--priority 1-5]
               [--tags tag1,tag2] [--click URL] [--markdown]
-              [--server http://host:port]   (bearer auth via $NTFY_TOKEN)
+              [--server http(s)://host:port]   (bearer auth via $NTFY_TOKEN)
 "#;

@@ -28,17 +28,41 @@ impl Embedder {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        let inputs = texts.iter().map(|t| format!("\"{}\"", escape(t))).collect::<Vec<_>>().join(",");
-        let body = format!(r#"{{"model":"{}","input":[{}]}}"#, escape(&self.model), inputs);
+        let inputs = texts
+            .iter()
+            .map(|t| format!("\"{}\"", escape(t)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!(
+            r#"{{"model":"{}","input":[{}]}}"#,
+            escape(&self.model),
+            inputs
+        );
         let value = httpc::post_json(&self.url(), &body)?;
-        let data = value.get("data").and_then(Value::as_arr).ok_or("embedding response missing data[]")?;
+        let data = value
+            .get("data")
+            .and_then(Value::as_arr)
+            .ok_or("embedding response missing data[]")?;
         if data.len() != texts.len() {
-            return Err(format!("embeddings count mismatch: sent {}, got {}", texts.len(), data.len()));
+            return Err(format!(
+                "embeddings count mismatch: sent {}, got {}",
+                texts.len(),
+                data.len()
+            ));
         }
         data.iter()
             .map(|e| {
-                let emb = e.get("embedding").and_then(Value::as_arr).ok_or("entry missing embedding")?;
-                emb.iter().map(|v| v.as_f64().map(|f| f as f32).ok_or_else(|| "non-number".to_string())).collect()
+                let emb = e
+                    .get("embedding")
+                    .and_then(Value::as_arr)
+                    .ok_or("entry missing embedding")?;
+                emb.iter()
+                    .map(|v| {
+                        v.as_f64()
+                            .map(|f| f as f32)
+                            .ok_or_else(|| "non-number".to_string())
+                    })
+                    .collect()
             })
             .collect()
     }

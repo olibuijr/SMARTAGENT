@@ -16,7 +16,7 @@ impl Url {
             .ok_or_else(|| format!("no scheme in '{input}'"))?;
         if scheme != "http" && scheme != "https" {
             return Err(format!(
-                "unsupported scheme '{scheme}' (plain http only; proxy https)"
+                "unsupported scheme '{scheme}' (expected http or https)"
             ));
         }
         let (authority, path) = match rest.find('/') {

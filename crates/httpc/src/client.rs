@@ -1,8 +1,10 @@
-//! HTTP/1.1 client over std::net::TcpStream: GET/POST/PUT, headers, timeouts,
-//! Content-Length and chunked bodies, redirects (limit 5). Plain HTTP only.
+//! HTTP/1.1 client over std::net::TcpStream for HTTP and `openssl s_client` for
+//! HTTPS: GET/POST/PUT, headers, timeouts, Content-Length and chunked bodies,
+//! redirects (limit 5).
 
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, TcpStream, ToSocketAddrs};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::Duration;
 
 use crate::json::{self, Value};
@@ -54,11 +56,16 @@ impl Request {
             if self.follow_redirects && matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
                 if let Some(loc) = resp.header("location") {
                     let prev_host = Url::parse(&req.url).map(|u| u.host).unwrap_or_default();
-                    let next_url = if loc.starts_with("http") {
+                    let next_url = if loc.starts_with("http://") || loc.starts_with("https://") {
                         loc.to_string()
                     } else {
                         let u = Url::parse(&req.url)?;
-                        format!("http://{}:{}{}", u.host, u.port, loc)
+                        let port = if u.port == default_port(&u.scheme) {
+                            String::new()
+                        } else {
+                            format!(":{}", u.port)
+                        };
+                        format!("{}://{}{}{}", u.scheme, u.host, port, loc)
                     };
                     // 301/302/303 on a non-GET/HEAD become a bodyless GET
                     // (browser + RFC 9110 §15.4 behavior). 307/308 preserve
@@ -120,8 +127,11 @@ impl Response {
 
 fn send_once(req: &Request, url: &str) -> Result<Response, String> {
     let u = Url::parse(url)?;
+    if u.scheme == "https" {
+        return send_https(req, &u);
+    }
     if u.scheme != "http" {
-        return Err("https not supported directly — route via local proxy".into());
+        return Err(format!("unsupported scheme '{}'", u.scheme));
     }
     let addr = format!("{}:{}", u.host, u.port);
     // connect_timeout: a blackholed address (e.g. VPN peer down) must fail fast,
@@ -144,8 +154,12 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
             break;
         }
     }
-    let mut stream = stream
-        .ok_or_else(|| format!("connect {addr}: unreachable within {}s", connect_budget.as_secs()))?;
+    let mut stream = stream.ok_or_else(|| {
+        format!(
+            "connect {addr}: unreachable within {}s",
+            connect_budget.as_secs()
+        )
+    })?;
     stream
         .set_read_timeout(Some(Duration::from_secs(req.timeout_secs)))
         .map_err(|e| e.to_string())?;
@@ -153,7 +167,86 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
         .set_write_timeout(Some(Duration::from_secs(req.timeout_secs.min(30))))
         .map_err(|e| e.to_string())?;
 
-    let host_hdr = if u.port == 80 {
+    let wire = build_request_bytes(req, &u);
+    stream.write_all(&wire).map_err(|e| format!("send: {e}"))?;
+
+    let raw = read_response_bytes(&mut stream)?;
+    parse_response(&raw)
+}
+
+fn send_https(req: &Request, u: &Url) -> Result<Response, String> {
+    let addr = format!("{}:{}", u.host, u.port);
+    let wire = build_request_bytes(req, u);
+    let mut cmd = Command::new("timeout");
+    cmd.arg(format!("{}s", req.timeout_secs.max(1)))
+        .arg("openssl")
+        .arg("s_client")
+        .arg("-connect")
+        .arg(&addr)
+        .arg("-verify_return_error")
+        .arg("-verify_quiet")
+        .arg("-quiet")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(ca_file) = std::env::var_os("SMARTAGENT_HTTPC_CA_FILE") {
+        if !ca_file.is_empty() {
+            cmd.arg("-CAfile").arg(ca_file);
+        }
+    }
+    if u.host.parse::<IpAddr>().is_ok() {
+        cmd.arg("-verify_ip").arg(&u.host);
+    } else {
+        cmd.arg("-servername")
+            .arg(&u.host)
+            .arg("-verify_hostname")
+            .arg(&u.host);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn timeout/openssl for https {addr}: {e}"))?;
+    {
+        let stdin = child.stdin.as_mut().ok_or("openssl stdin unavailable")?;
+        stdin
+            .write_all(&wire)
+            .map_err(|e| format!("send tls request: {e}"))?;
+    }
+    drop(child.stdin.take());
+
+    let mut stdout = child.stdout.take().ok_or("openssl stdout unavailable")?;
+    let mut stderr = child.stderr.take();
+    let raw_result = read_response_bytes(&mut stdout);
+
+    // If framing told us the response is complete before the TLS process exits,
+    // stop the helper so tests and tools never leak long-lived s_client children.
+    let _ = child.kill();
+    let status = child.wait().ok();
+    let mut err = String::new();
+    if let Some(mut stderr) = stderr.take() {
+        let _ = stderr.read_to_string(&mut err);
+    }
+
+    let raw = raw_result.map_err(|e| format!("recv tls response from {addr}: {e}"))?;
+    parse_response(&raw).map_err(|e| {
+        format!(
+            "tls response from {addr}: {e}{}",
+            tls_error_suffix(status, &err)
+        )
+    })
+}
+
+fn default_port(scheme: &str) -> u16 {
+    if scheme == "https" {
+        443
+    } else {
+        80
+    }
+}
+
+fn build_request_bytes(req: &Request, u: &Url) -> Vec<u8> {
+    let host_hdr = if u.port == default_port(&u.scheme) {
         u.host.clone()
     } else {
         format!("{}:{}", u.host, u.port)
@@ -180,23 +273,30 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
     }
     head.push_str("\r\n");
 
-    stream
-        .write_all(head.as_bytes())
-        .map_err(|e| format!("send: {e}"))?;
-    if !req.body.is_empty() {
-        stream
-            .write_all(&req.body)
-            .map_err(|e| format!("send body: {e}"))?;
-    }
+    let mut wire = head.into_bytes();
+    wire.extend_from_slice(&req.body);
+    wire
+}
 
-    let raw = read_response_bytes(&mut stream)?;
-    parse_response(&raw)
+fn tls_error_suffix(status: Option<ExitStatus>, stderr: &str) -> String {
+    let detail = stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(4)
+        .collect::<Vec<_>>()
+        .join("; ");
+    match (status, detail.is_empty()) {
+        (Some(status), false) => format!(" (openssl status: {status}; {detail})"),
+        (Some(status), true) => format!(" (openssl status: {status})"),
+        (None, false) => format!(" ({detail})"),
+        (None, true) => String::new(),
+    }
 }
 
 /// Read a response without relying on the server closing the socket
 /// (Chrome's DevTools HTTP endpoint ignores `Connection: close`): stop as
 /// soon as Content-Length is satisfied or the chunked body terminates.
-fn read_response_bytes(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
+fn read_response_bytes<R: Read>(stream: &mut R) -> Result<Vec<u8>, String> {
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
     // Cache the header boundary + framing once found, so we don't re-scan the
@@ -219,7 +319,9 @@ fn read_response_bytes(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
                 return Err("response headers exceed 64KB".into());
             }
         }
-        let Some((header_end, ref f)) = framing else { continue };
+        let Some((header_end, ref f)) = framing else {
+            continue;
+        };
         let body = &raw[header_end + 4..];
         match f {
             // Chunked: done when the terminating 0-size chunk has arrived.
@@ -393,14 +495,6 @@ mod tests {
         assert_eq!(r.status, 200);
         assert_eq!(r.body, b"hello");
         assert_eq!(r.header("x-a"), Some("b"));
-    }
-
-    #[test]
-    fn rejects_https_direct() {
-        let e = Request::new("GET", "https://example.com")
-            .send()
-            .unwrap_err();
-        assert!(e.contains("proxy"), "{e}");
     }
 
     #[test]

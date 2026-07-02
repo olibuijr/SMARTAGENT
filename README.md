@@ -36,7 +36,7 @@ pure-Rust binary the agent calls through a pi extension:
 | `secrets` | [Infisical](https://github.com/Infisical/infisical) | Policy-gated, audited secret store (deny by default) |
 | `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open/click/type/back + compact snapshot |
 | `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out N parallel headless-pi subagents |
-| `mcp` | Model Context Protocol | MCP client (stdio + HTTP) |
+| `mcp` | Model Context Protocol | MCP client (stdio + HTTP/HTTPS) |
 | `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution (scrubbed env + namespaces) |
 | `context` | TELOS | Principal identity/context loader |
 | `evals` | [Langfuse](https://github.com/langfuse/langfuse) | Trace, score, regression-diff |
@@ -47,7 +47,7 @@ pure-Rust binary the agent calls through a pi extension:
 | `workflow` | PAI Algorithm | Markdown-defined process engine: a skill per step, evidence-gated |
 | `hooks` | Claude Code hooks | User-configurable lifecycle hooks (block/rewrite/inject), exit-2 contract |
 
-Plus `httpc` (shared HTTP/1.1 + JSON library), `session-memory` (a hookless
+Plus `httpc` (shared HTTP/HTTPS + JSON library), `session-memory` (a hookless
 extension that gives the agent continuity across sessions), and `statusline`
 (a TUI extension that paints live tool/service health under the input — see
 **Statusline** below).
@@ -192,8 +192,9 @@ $B search notes.semdb --text "sports" --k 5
 All runtime endpoints live in [`config/smartagent.conf`](config/smartagent.conf)
 (embeddings, SearXNG, ntfy, browser CDP, voice). Nothing is hardcoded; every
 value resolves **flag → env var → config file** via `semdb::config`. Embeddings
-inference is external (any OpenAI-compatible `/v1/embeddings` endpoint over plain
-HTTP; route TLS through a proxy if needed).
+inference is external (any OpenAI-compatible `/v1/embeddings` endpoint over HTTP
+or HTTPS; `httpc` uses the system `openssl s_client` helper for TLS and
+`SMARTAGENT_HTTPC_CA_FILE` for private roots).
 
 ## Long-running services
 

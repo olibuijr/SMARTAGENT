@@ -1,4 +1,4 @@
-//! ntfy protocol: publishing is a plain HTTP POST/PUT to <server>/<topic>
+//! ntfy protocol: publishing is an HTTP/HTTPS POST/PUT to <server>/<topic>
 //! with the message as body and metadata in headers.
 
 pub struct Message {
@@ -30,10 +30,16 @@ pub fn send(m: &Message) -> Result<String, String> {
         return Err("topic must be non-empty and contain no '/'".into());
     }
     clean("topic", &m.topic)?;
-    if let Some(t) = &m.title { clean("title", t)?; }
-    if let Some(t) = &m.tags { clean("tags", t)?; }
+    if let Some(t) = &m.title {
+        clean("title", t)?;
+    }
+    if let Some(t) = &m.tags {
+        clean("tags", t)?;
+    }
     let url = format!("{}/{}", m.server.trim_end_matches('/'), m.topic);
-    let mut req = httpc::request("POST", &url).body(m.message.as_bytes()).timeout(15);
+    let mut req = httpc::request("POST", &url)
+        .body(m.message.as_bytes())
+        .timeout(15);
     if let Some(t) = &m.title {
         req = req.header("Title", t);
     }
@@ -64,7 +70,11 @@ pub fn send(m: &Message) -> Result<String, String> {
     if resp.ok() {
         Ok(format!("sent to {url}"))
     } else {
-        Err(format!("HTTP {}: {}", resp.status, resp.text().unwrap_or_default()))
+        Err(format!(
+            "HTTP {}: {}",
+            resp.status,
+            resp.text().unwrap_or_default()
+        ))
     }
 }
 
@@ -76,7 +86,10 @@ mod tests {
 
     #[test]
     fn rejects_header_injection() {
-        for (title, tags) in [(Some("x\r\nEvil: 1".to_string()), None), (None, Some("a\nb".to_string()))] {
+        for (title, tags) in [
+            (Some("x\r\nEvil: 1".to_string()), None),
+            (None, Some("a\nb".to_string())),
+        ] {
             let err = send(&Message {
                 server: "http://127.0.0.1:1".into(),
                 topic: "t".into(),
@@ -115,7 +128,8 @@ mod tests {
                 }
             }
             let req = String::from_utf8_lossy(&data).to_string();
-            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap();
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                .unwrap();
             req
         });
         let m = Message {

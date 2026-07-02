@@ -20,7 +20,11 @@ impl HttpClient {
     /// `auth` becomes an `Authorization: Bearer …` header — most hosted MCP
     /// servers are unreachable without it.
     pub fn start_with_auth(url: &str, auth: Option<String>) -> Result<HttpClient, String> {
-        let mut c = HttpClient { url: url.to_string(), auth, next_id: 1 };
+        let mut c = HttpClient {
+            url: url.to_string(),
+            auth,
+            next_id: 1,
+        };
         c.call("initialize", jsonrpc::INIT_PARAMS)?;
         c.notify("notifications/initialized", "{}")?;
         Ok(c)

@@ -63,7 +63,7 @@ semdb (semantic database — the core):
 - [x] ISC-15: Anti: semdb never runs inference in-process
 
 Capability crates (each: binary runs, core verbs work, pi extension drives it):
-- [x] ISC-16: httpc: shared std-only HTTP/1.1 client module used by networked crates
+- [x] ISC-16: httpc: shared zero-crates HTTP/1.1 client module used by networked crates, with HTTPS transport through system `openssl s_client`
 - [x] ISC-17: codegraph: indexes a Rust repo → symbols/edges queryable (`defs`, `refs`, `callers`, `impls`, `path`, `unused`)
 - [x] ISC-18: memory: 3-tier remember/recall/update/recent/forget/promote backed by semdb
 - [ ] ISC-19: vault: markdown vault CRUD + [[wikilink]] graph + keyword/tag search are shipped; semantic vault search remains open
@@ -184,7 +184,7 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 
 - 2026-07-02: Forge/Cato codex agents skipped per standing user rule (Claude-family teams only) — delegation floor met via 9 research agents + worktree build agents.
 - 2026-07-02: SearXNG hosted not rewritten — engine-scraper maintenance is the value, client is the port surface.
-- 2026-07-02: TLS out of scope in-tool; https egress routed via akurai-router/localhost proxies.
+- 2026-07-02: TLS moved into `httpc`: HTTPS URLs now use the system `openssl s_client` helper with normal certificate verification and `SMARTAGENT_HTTPC_CA_FILE` for private roots.
 - 2026-07-02: E5 ISC floor (≥256) deferred — project ISA starts at 36 spine ISCs; per-crate ISCs grow during waves (refined: will expand as crates land).
 - 2026-07-02: TUI statusline shipped — pi natively supports `ctx.ui.setStatus` + `setWidget(placement: belowEditor)`; added `supervise statusline` Rust verb + `extensions/statusline.ts` (per-tool footer statuses from tool_execution events, services widget below input). No new tool registered; logic stays in Rust per constraint.
 - 2026-07-02: ISC-26 landed and certified — `crates/rag` ports the RAGFlow ingestion/retrieval slice into std-only Rust, stores chunks as semdb rows, returns `[ID:...]` cited chunks, has `extensions/rag.ts`, passes codex fusion tester, and was driven through `./pi -p`.

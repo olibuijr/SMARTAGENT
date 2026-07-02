@@ -81,7 +81,10 @@ fn reingest_replaces_stale_chunks() {
     assert!(out.contains("replaced"), "{out}");
     let semdb = Db::open(&db).unwrap();
     assert!(semdb.get("note:000000").is_some());
-    assert!(semdb.get("note:000001").is_none(), "stale chunk survived re-ingest");
+    assert!(
+        semdb.get("note:000001").is_none(),
+        "stale chunk survived re-ingest"
+    );
 }
 
 #[test]

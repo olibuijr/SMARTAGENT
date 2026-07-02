@@ -46,15 +46,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         Some("ingest") => {
             let db = path_arg(args, 1, "db")?;
-            // --url fetches page text over plain HTTP (via the shared httpc);
+            // --url fetches page text over HTTP/HTTPS (via the shared httpc);
             // otherwise ingest a local file (text or PDF-text).
             let (text, source, kind_str, default_id) = if let Some(url) = flag(args, "--url") {
-                let body = httpc::get(&url).map_err(|e| format!("fetch {url}: {e}"))?.text()?;
+                let body = httpc::get(&url)
+                    .map_err(|e| format!("fetch {url}: {e}"))?
+                    .text()?;
                 (strip_html(&body), url.clone(), "url".to_string(), url)
             } else {
                 let path = path_arg(args, 2, "file")?;
                 let extracted = pdftext::read_document(&path, kind(args)?)?;
-                (extracted.text, path.display().to_string(), extracted.kind, default_doc_id(&path))
+                (
+                    extracted.text,
+                    path.display().to_string(),
+                    extracted.kind,
+                    default_doc_id(&path),
+                )
             };
             let doc_id = flag(args, "--doc-id").unwrap_or(default_id);
             let cfg = chunk_config(args);
@@ -75,7 +82,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let removed = store::delete_doc(&db, &doc_id).unwrap_or(0);
             let n = store::put_chunks(&db, &chunks, &vectors)?;
             if removed > 0 {
-                Ok(format!("re-ingested {n} chunks from {source} as {doc_id} (replaced {removed})"))
+                Ok(format!(
+                    "re-ingested {n} chunks from {source} as {doc_id} (replaced {removed})"
+                ))
             } else {
                 Ok(format!("ingested {n} chunks from {source} as {doc_id}"))
             }
@@ -95,9 +104,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if args.iter().any(|a| a == "--ids-only") {
                 // Just citations + scores — the agent fetches full text via `get`
                 // for the chunks it actually wants.
-                return Ok(hits.iter().map(|h| format!("{:.4}\t{}", h.score, h.citation())).collect::<Vec<_>>().join("\n"));
+                return Ok(hits
+                    .iter()
+                    .map(|h| format!("{:.4}\t{}", h.score, h.citation()))
+                    .collect::<Vec<_>>()
+                    .join("\n"));
             }
-            let snip = flag(args, "--snippet-chars").and_then(|s| s.parse().ok()).unwrap_or(240usize);
+            let snip = flag(args, "--snippet-chars")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(240usize);
             Ok(format_hits(&hits, snip))
         }
         Some("get") => {
@@ -174,18 +189,28 @@ fn with_project_db(args: &[String]) -> Result<Vec<String>, String> {
     if args.first().map(String::as_str) == Some("chunk") {
         return Ok(args.to_vec());
     }
-    let Some(p) = flag(args, "--project") else { return Ok(args.to_vec()) };
+    let Some(p) = flag(args, "--project") else {
+        return Ok(args.to_vec());
+    };
     let db = semdb::workspace::data_path(&p, "rag.semdb")?;
     // Reading verbs on a never-ingested project: friendly message, not ENOENT.
     if args.first().map(String::as_str) != Some("ingest") && !db.exists() {
-        return Err(format!("no rag corpus for project '{p}' — ingest a document first"));
+        return Err(format!(
+            "no rag corpus for project '{p}' — ingest a document first"
+        ));
     }
     let mut out = vec![args[0].clone(), db.display().to_string()];
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
-        if a == "--project" { i += 2; continue; }
-        if a.starts_with("--project=") { i += 1; continue; }
+        if a == "--project" {
+            i += 2;
+            continue;
+        }
+        if a.starts_with("--project=") {
+            i += 1;
+            continue;
+        }
         out.push(a.clone());
         i += 1;
     }
@@ -199,12 +224,14 @@ fn path_arg(args: &[String], idx: usize, what: &str) -> Result<PathBuf, String> 
         .ok_or_else(|| format!("{what} required"))
 }
 
-
 fn format_hits(hits: &[RetrievedChunk], snippet_chars: usize) -> String {
     if hits.is_empty() {
         "no chunks".into()
     } else {
-        hits.iter().map(|h| format_hit(h, snippet_chars)).collect::<Vec<_>>().join("\n")
+        hits.iter()
+            .map(|h| format_hit(h, snippet_chars))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -276,8 +303,16 @@ fn strip_html(html: &str) -> String {
         }
         let c = bytes[i] as char;
         if c == '<' {
-            if lower[i..].starts_with("<script") { skip_to = Some("</script>"); i += 1; continue; }
-            if lower[i..].starts_with("<style") { skip_to = Some("</style>"); i += 1; continue; }
+            if lower[i..].starts_with("<script") {
+                skip_to = Some("</script>");
+                i += 1;
+                continue;
+            }
+            if lower[i..].starts_with("<style") {
+                skip_to = Some("</style>");
+                i += 1;
+                continue;
+            }
             in_tag = true;
         } else if c == '>' {
             in_tag = false;
@@ -288,7 +323,11 @@ fn strip_html(html: &str) -> String {
         i += 1;
     }
     let decoded = out
-        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-        .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ");
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
     decoded.split_whitespace().collect::<Vec<_>>().join(" ")
 }

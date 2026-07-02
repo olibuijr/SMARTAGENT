@@ -15,7 +15,10 @@ pub fn notification(method: &str, params: &str) -> String {
 pub fn result(response: &str) -> Result<Value, String> {
     let v = json::parse(response.trim()).map_err(|e| format!("bad json-rpc: {e}"))?;
     if let Some(err) = v.get("error") {
-        let msg = err.get("message").and_then(Value::as_str).unwrap_or("unknown");
+        let msg = err
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
         let code = err.get("code").and_then(Value::as_f64).unwrap_or(0.0);
         return Err(format!("json-rpc error {code}: {msg}"));
     }
@@ -23,7 +26,9 @@ pub fn result(response: &str) -> Result<Value, String> {
 }
 
 pub fn response_id(response: &str) -> Option<f64> {
-    json::parse(response.trim()).ok().and_then(|v| v.get("id").and_then(Value::as_f64))
+    json::parse(response.trim())
+        .ok()
+        .and_then(|v| v.get("id").and_then(Value::as_f64))
 }
 
 /// MCP tools/list result → Vec<(name, description)>.
@@ -35,8 +40,14 @@ pub fn parse_tools(result: &Value) -> Vec<(String, String)> {
             arr.iter()
                 .map(|t| {
                     (
-                        t.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-                        t.get("description").and_then(Value::as_str).unwrap_or("").to_string(),
+                        t.get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        t.get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
                     )
                 })
                 .collect()
@@ -72,7 +83,10 @@ mod tests {
 
     #[test]
     fn parses_result_and_error() {
-        let ok = result(r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"a","description":"d"}]}}"#).unwrap();
+        let ok = result(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"a","description":"d"}]}}"#,
+        )
+        .unwrap();
         let tools = parse_tools(&ok);
         assert_eq!(tools, vec![("a".to_string(), "d".to_string())]);
         let err = result(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"nope"}}"#);
@@ -81,7 +95,10 @@ mod tests {
 
     #[test]
     fn parses_call_content() {
-        let v = httpc::json::parse(r#"{"content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]}"#).unwrap();
+        let v = httpc::json::parse(
+            r#"{"content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]}"#,
+        )
+        .unwrap();
         assert_eq!(parse_call(&v), "hello\nworld");
     }
 }

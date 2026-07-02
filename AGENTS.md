@@ -43,7 +43,7 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    orchestrate/  subagent spawn/route/fan-out via akurai-router (LangGraph role);
                  subagent workspaces live in ./workspaces/ (project dir, gitignored),
                  launched from the project cwd
-   mcp/          MCP client bridge — connect pi to any MCP server (stdio + HTTP)
+   mcp/          MCP client bridge — connect pi to any MCP server (stdio + HTTP/HTTPS)
    context/      principal identity/context loader (TELOS pattern) injected per session
    schedule/     cron + wake-ups + durable background tasks
    skills/       SKILL.md loader (Agent Skills open standard)
@@ -70,7 +70,7 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
                  firings audited in a semdb table
 ```
 
-Embeddings inference is **external**: titan embeddinggemma (OpenAI-compatible), reached over the **akurai-vpn overlay** (titan = 100.88.0.2; this host = 100.88.0.5; interface `akurai0`) so it works off-LAN. The endpoint lives ONLY in `config/smartagent.conf` (`embeddings_endpoint`) — never hardcode an IP in code or docs; titan has changed address more than once (LAN currently 192.168.1.119 if the VPN is down — restart with `akurai-node tunnel`). semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
+Embeddings inference is **external**: titan embeddinggemma (OpenAI-compatible), reached over the **akurai-vpn overlay** (titan = 100.88.0.2; this host = 100.88.0.5; interface `akurai0`) so it works off-LAN. The endpoint lives ONLY in `config/smartagent.conf` (`embeddings_endpoint`) — never hardcode an IP in code or docs; titan has changed address more than once (LAN currently 192.168.1.119 if the VPN is down — restart with `akurai-node tunnel`). semdb stores and searches vectors itself; its current titan embedding endpoint is plain HTTP over the private VPN, while shared `httpc` supports HTTPS for other networked crates.
 
 ## Security posture (agent-driven tools)
 
@@ -139,7 +139,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `secrets` | `secrets` | Policy-gated secret store: set/get(as 'pi')/list/audit. Deny-by-default; policy-allow is admin-only, OFF the agent surface |
 | `browser` | `browser` | Real Chrome CDP: open/click/type(`--enter`)/back/wait/scroll/attr (`--quiet`/`--max-text`/`--max-links`), probe. Wrapped UNTRUSTED |
 | `orchestrate` | `orchestrate` | Fan out N headless-pi subagents: run, list, out (collect output). Fork-bomb depth guard |
-| `mcp` | `mcp` | MCP client (stdio+HTTP): tools (`--names-only`/`--filter`), call (`--head`). argv exec, no sh -c |
+| `mcp` | `mcp` | MCP client (stdio+HTTP/HTTPS): tools (`--names-only`/`--filter`), call (`--head`). argv exec, no sh -c |
 | `sandbox` | `sandbox` | Isolated exec: run (`--tail`, 16KB cap, `--stdin`, `--no-isolate`), clean. Env scrubbed + secrets tmpfs-masked, isolation ON |
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
 | `evals` | `evals` | Trace/score/diff: log, score (`--min-pass`/`--fail-only`), diff, runs |
@@ -159,7 +159,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 - Tests: unit tests in-module, integration under `crates/<name>/tests/`. Gates before merge.
 - **Test scratch path (standard everywhere):** `PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch")` — an in-repo, gitignored dir. `env!("CARGO_TARGET_TMPDIR")` does NOT exist at compile time; use `CARGO_MANIFEST_DIR`. Never `std::env::temp_dir()` / `/tmp`.
 - Versioning: workspace semver lockstep (`[workspace.package] version`), `CHANGELOG.md` per release.
-- **`semdb` is the shared storage library** other crates depend on via path dep. Its public API: `semdb::storage::Db` (`create`/`open`/`put`/`get`/`delete`/`index`), `semdb::cli::search(db, query, k, exact)` (cosine/HNSW), `semdb::http::fetch_embedding(host, port, model, text)`, `semdb::config::Config` (`load`/`resolve`/`workspaces_dir`/`data_dir`), `semdb::json` (parse/escape/Value). `httpc` is the shared HTTP+JSON library (`httpc::get`/`post_json`/`request`, `httpc::json`). Non-semantic tables store rows with a placeholder `[0.0]` vector.
+- **`semdb` is the shared storage library** other crates depend on via path dep. Its public API: `semdb::storage::Db` (`create`/`open`/`put`/`get`/`delete`/`index`), `semdb::cli::search(db, query, k, exact)` (cosine/HNSW), `semdb::http::fetch_embedding(host, port, model, text)`, `semdb::config::Config` (`load`/`resolve`/`workspaces_dir`/`data_dir`), `semdb::json` (parse/escape/Value). `httpc` is the shared HTTP/HTTPS+JSON library (`httpc::get`/`post_json`/`request`, `httpc::json`); HTTPS uses the system `openssl s_client` helper and `SMARTAGENT_HTTPC_CA_FILE` for private roots. Non-semantic tables store rows with a placeholder `[0.0]` vector.
 - Existing Rust to harvest: AkurAI-Framework (B+tree, HTTP), agentmem, AkurAI-Router, akurai-passvault.
 - ISA.md in this repo is the system of record — read it before any work; update ISCs as you land them.
 

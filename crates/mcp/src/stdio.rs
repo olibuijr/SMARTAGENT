@@ -65,7 +65,14 @@ impl StdioClient {
                 }
             });
         }
-        let mut c = StdioClient { child, stdin, lines, stderr_buf, next_id: 1, read_timeout_secs: 30 };
+        let mut c = StdioClient {
+            child,
+            stdin,
+            lines,
+            stderr_buf,
+            next_id: 1,
+            read_timeout_secs: 30,
+        };
         c.call("initialize", jsonrpc::INIT_PARAMS)?;
         c.notify("notifications/initialized", "{}")?;
         Ok(c)
@@ -93,26 +100,41 @@ impl StdioClient {
     }
 
     fn write_line(&mut self, msg: &str) -> Result<(), String> {
-        self.stdin.write_all(msg.as_bytes()).map_err(|e| e.to_string())?;
+        self.stdin
+            .write_all(msg.as_bytes())
+            .map_err(|e| e.to_string())?;
         self.stdin.write_all(b"\n").map_err(|e| e.to_string())?;
         self.stdin.flush().map_err(|e| e.to_string())
     }
 
     fn read_line(&mut self) -> Result<String, String> {
-        match self.lines.recv_timeout(std::time::Duration::from_secs(self.read_timeout_secs)) {
+        match self
+            .lines
+            .recv_timeout(std::time::Duration::from_secs(self.read_timeout_secs))
+        {
             Ok(line) => Ok(line),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                Err(format!("server silent for {}s{}", self.read_timeout_secs, self.stderr_tail()))
-            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+                "server silent for {}s{}",
+                self.read_timeout_secs,
+                self.stderr_tail()
+            )),
             Err(_) => Err(format!("server closed stdout{}", self.stderr_tail())),
         }
     }
 
     /// Last captured stderr (diagnostics for silent/dead servers).
     fn stderr_tail(&self) -> String {
-        let b = self.stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+        let b = self
+            .stderr_buf
+            .lock()
+            .map(|b| b.clone())
+            .unwrap_or_default();
         let t = b.trim();
-        if t.is_empty() { String::new() } else { format!("; server stderr: {}", &t[t.len().saturating_sub(400)..]) }
+        if t.is_empty() {
+            String::new()
+        } else {
+            format!("; server stderr: {}", &t[t.len().saturating_sub(400)..])
+        }
     }
 }
 

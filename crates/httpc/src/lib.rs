@@ -1,5 +1,6 @@
-//! httpc — pure-Rust, std-only HTTP/1.1 client library shared by all
-//! SMARTAGENT crates. Plain HTTP only; https egress routes via a local proxy.
+//! httpc — zero-crates HTTP/1.1 client library shared by all SMARTAGENT crates.
+//! HTTP uses `std::net::TcpStream`; HTTPS uses the system `openssl s_client`
+//! helper and the same request/response parser.
 
 pub mod args;
 pub mod client;
