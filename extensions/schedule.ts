@@ -30,23 +30,29 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["add", "list", "next", "rm", "tick"] },
-				cron: { type: "string", description: "5-field cron expression (add)" },
+				action: { type: "string", enum: ["add", "list", "next", "rm", "pause", "resume", "tick"] },
+				cron: { type: "string", description: "5-field cron expression for a recurring job (add)" },
+					at: { type: "string", description: "YYYY-MM-DDTHH:MM for a ONE-SHOT reminder that self-removes after firing (add)" },
 				notify: { type: "string", description: "Reminder message to push when the job fires (add). This is the only job type the agent can create." },
-				id: { type: "string", description: "Job id (add optional, rm required)" },
+				id: { type: "string", description: "Job id (add optional; rm/pause/resume required)" },
 			},
 			required: ["action"],
 		} as any,
 
 		async execute(_id: string, p: any) {
-			const out =
-				p.action === "add"
-					? run(["add", "--cron", p.cron ?? "", "--notify", p.notify ?? "", ...(p.id ? ["--id", p.id] : [])])
-					: p.action === "rm"
-						? run(["rm", "--id", p.id ?? ""])
-						: p.action === "tick"
-							? run(["run", "--once"])
-							: run([p.action]);
+			let out: string;
+			switch (p.action) {
+				case "add": {
+					const when = p.at ? ["--at", p.at] : ["--cron", p.cron ?? ""];
+					out = run(["add", ...when, "--notify", p.notify ?? "", ...(p.id ? ["--id", p.id] : [])]);
+					break;
+				}
+				case "rm": out = run(["rm", "--id", p.id ?? ""]); break;
+				case "pause": out = run(["pause", "--id", p.id ?? ""]); break;
+				case "resume": out = run(["resume", "--id", p.id ?? ""]); break;
+				case "tick": out = run(["run", "--once"]); break;
+				default: out = run([p.action]);
+			}
 			return { content: [{ type: "text", text: out }] };
 		},
 	});

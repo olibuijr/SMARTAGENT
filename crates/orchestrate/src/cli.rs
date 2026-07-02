@@ -63,6 +63,32 @@ pub fn run(args: &[String]) -> Result<String, String> {
             runs.sort();
             Ok(if runs.is_empty() { "no runs".into() } else { runs.join("\n") })
         }
+        Some("out") => {
+            // Collect each subagent's captured output for a run — otherwise the
+            // agent must read N workspace files by hand.
+            let id = args.get(1).ok_or("usage: orchestrate out <run-id> [--tail N]")?;
+            let tail = flag(args, "--tail").and_then(|s| s.parse().ok()).unwrap_or(2000usize);
+            let run_dir = workspaces_root().join(id);
+            let mut agents: Vec<PathBuf> = std::fs::read_dir(&run_dir)
+                .map_err(|_| format!("no run '{id}'"))?
+                .flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+            agents.sort();
+            if agents.is_empty() {
+                return Err(format!("run '{id}' has no agents"));
+            }
+            let mut out = Vec::new();
+            for a in agents {
+                let name = a.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let log = std::fs::read_to_string(a.join("out.log")).unwrap_or_else(|_| "(no output)".into());
+                let kept: String = {
+                    let chars: Vec<char> = log.chars().collect();
+                    let start = chars.len().saturating_sub(tail);
+                    chars[start..].iter().collect()
+                };
+                out.push(format!("── {name} ──\n{}", kept.trim()));
+            }
+            Ok(out.join("\n"))
+        }
         _ => Ok(HELP.trim().into()),
     }
 }

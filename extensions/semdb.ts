@@ -37,7 +37,7 @@ export default function (pi: ExtensionAPI) {
 			properties: {
 				action: {
 					type: "string",
-					enum: ["embed", "search", "get", "del", "stats"],
+					enum: ["embed", "search", "get", "del", "count", "ids", "stats"],
 					description: "Operation to perform",
 				},
 				id: { type: "string", description: "Entry id (embed/get/del)" },
@@ -59,6 +59,8 @@ export default function (pi: ExtensionAPI) {
 				case "search":
 					{ const a=["search", db, "--text", p.text ?? "", "--k", String(p.k ?? 5)]; if (p.idsOnly) a.push("--ids-only"); if (p.metaChars!=null) a.push("--meta-chars", String(p.metaChars)); out = run(a); }
 					break;
+				case "count": out = run(["count", db, ...(p.prefix ? ["--prefix", p.prefix] : [])]); break;
+				case "ids": out = run(["ids", db, ...(p.prefix ? ["--prefix", p.prefix] : []), ...(p.k ? ["--limit", String(p.k)] : [])]); break;
 				case "get":
 					out = run(["get", db, "--id", p.id ?? ""]);
 					break;

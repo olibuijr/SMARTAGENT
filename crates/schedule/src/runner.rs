@@ -40,6 +40,9 @@ pub fn tick(journal: &Journal) -> Result<Vec<(String, i32)>, String> {
     let now = now_unix();
     let mut results = Vec::new();
     for job in jobs.values() {
+        if !job.enabled {
+            continue; // paused
+        }
         let cron = Cron::parse(&job.cron)?;
         if let Some(fire) = due_fire(job, &cron, now) {
             let mut exit = run_cmd(&job.cmd);
@@ -48,6 +51,10 @@ pub fn tick(journal: &Journal) -> Result<Vec<(String, i32)>, String> {
                 // At-least-once: one retry, journaled as attempt 2.
                 exit = run_cmd(&job.cmd);
                 journal.append(&Event::Ran { id: job.id.clone(), fire, exit, attempt: 2 })?;
+            }
+            if job.once {
+                // One-shot: remove after it has fired.
+                journal.append(&Event::Removed { id: job.id.clone() })?;
             }
             results.push((job.id.clone(), exit));
         }
@@ -96,6 +103,7 @@ mod tests {
             id: "t1".into(),
             cron: "* * * * *".into(),
             cmd: format!("echo fired >> {}", out.display()),
+            once: false,
         })
         .unwrap();
         let results = tick(&j).unwrap();
@@ -110,7 +118,7 @@ mod tests {
     #[test]
     fn failed_job_retries_once() {
         let (j, _) = fresh_journal("retry");
-        j.append(&Event::Scheduled { id: "bad".into(), cron: "* * * * *".into(), cmd: "exit 3".into() }).unwrap();
+        j.append(&Event::Scheduled { id: "bad".into(), cron: "* * * * *".into(), cmd: "exit 3".into(), once: false }).unwrap();
         // The retry behavior (run twice on failure) is what matters; the final
         // exit code is reported. Run history is no longer persisted separately —
         // only the job's last_fire is, which the next assertion checks.

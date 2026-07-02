@@ -35,9 +35,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             let acc = score::accuracy(&scores);
             let passed = scores.iter().filter(|s| s.pass).count();
-            let mut lines: Vec<String> = scores.iter().map(|s| format!("{}\t{}", if s.pass { "PASS" } else { "FAIL" }, s.case)).collect();
+            // --fail-only: list just the failures (typical CI use). Otherwise all.
+            let fail_only = args.iter().any(|a| a == "--fail-only");
+            let mut lines: Vec<String> = scores.iter()
+                .filter(|s| !fail_only || !s.pass)
+                .map(|s| format!("{}\t{}", if s.pass { "PASS" } else { "FAIL" }, s.case))
+                .collect();
             lines.push(format!("accuracy: {passed}/{} = {:.1}%", scores.len(), acc * 100.0));
-            Ok(lines.join("\n"))
+            let report = lines.join("\n");
+            // --min-pass N: nonzero exit (Err) if accuracy is below the threshold,
+            // so a scheduler/CI gate can act without parsing the number.
+            if let Some(min) = flag(args, "--min-pass").and_then(|s| s.parse::<f64>().ok()) {
+                if acc < min {
+                    return Err(format!("{report}\nBELOW THRESHOLD: {:.3} < {:.3}", acc, min));
+                }
+            }
+            Ok(report)
         }
         Some("diff") => {
             let a = flag(args, "--run-a").or_else(|| flag(args, "--a")).ok_or("--run-a required")?;

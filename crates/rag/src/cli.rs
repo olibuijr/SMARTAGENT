@@ -45,17 +45,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         Some("ingest") => {
             let db = path_arg(args, 1, "db")?;
-            let path = path_arg(args, 2, "file")?;
-            let extracted = pdftext::read_document(&path, kind(args)?)?;
-            let doc_id = flag(args, "--doc-id").unwrap_or_else(|| default_doc_id(&path));
+            // --url fetches page text over plain HTTP (via the shared httpc);
+            // otherwise ingest a local file (text or PDF-text).
+            let (text, source, kind_str, default_id) = if let Some(url) = flag(args, "--url") {
+                let body = httpc::get(&url).map_err(|e| format!("fetch {url}: {e}"))?.text()?;
+                (strip_html(&body), url.clone(), "url".to_string(), url)
+            } else {
+                let path = path_arg(args, 2, "file")?;
+                let extracted = pdftext::read_document(&path, kind(args)?)?;
+                (extracted.text, path.display().to_string(), extracted.kind, default_doc_id(&path))
+            };
+            let doc_id = flag(args, "--doc-id").unwrap_or(default_id);
             let cfg = chunk_config(args);
-            let chunks = chunk_text(
-                &extracted.text,
-                &doc_id,
-                &path.display().to_string(),
-                &extracted.kind,
-                &cfg,
-            );
+            let chunks = chunk_text(&text, &doc_id, &source, &kind_str, &cfg);
             if chunks.is_empty() {
                 return Ok("no chunks".into());
             }
@@ -71,10 +73,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 vectors
             };
             let n = store::put_chunks(&db, &chunks, &vectors)?;
-            Ok(format!(
-                "ingested {n} chunks from {} as {doc_id}",
-                path.display()
-            ))
+            Ok(format!("ingested {n} chunks from {source} as {doc_id}"))
         }
         Some("retrieve") | Some("search") => {
             let db = path_arg(args, 1, "db")?;
@@ -214,3 +213,41 @@ USAGE:
 
 Embedding config: config/smartagent.conf (embeddings_endpoint, embeddings_model)
 "#;
+
+/// Crude HTML→text: drop <script>/<style>, strip tags, decode a few entities,
+/// collapse whitespace. Enough to ingest a page's readable text over HTTP.
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let bytes = html.as_bytes();
+    let lower = html.to_ascii_lowercase();
+    let mut i = 0;
+    let mut in_tag = false;
+    let mut skip_to: Option<&str> = None;
+    while i < bytes.len() {
+        if let Some(end) = skip_to {
+            if lower[i..].starts_with(end) {
+                i += end.len();
+                skip_to = None;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        let c = bytes[i] as char;
+        if c == '<' {
+            if lower[i..].starts_with("<script") { skip_to = Some("</script>"); i += 1; continue; }
+            if lower[i..].starts_with("<style") { skip_to = Some("</style>"); i += 1; continue; }
+            in_tag = true;
+        } else if c == '>' {
+            in_tag = false;
+            out.push(' ');
+        } else if !in_tag {
+            out.push(c);
+        }
+        i += 1;
+    }
+    let decoded = out
+        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ");
+    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
+}

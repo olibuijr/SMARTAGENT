@@ -35,6 +35,7 @@ export default function (pi: ExtensionAPI) {
 			properties: {
 				action: { type: "string", enum: ["ingest", "retrieve", "get", "delete-doc", "stats"] },
 				path: { type: "string", description: "File path for ingest" },
+				url: { type: "string", description: "URL to fetch + ingest (ingest; alternative to path)" },
 				query: { type: "string", description: "Retrieval query" },
 				docId: { type: "string", description: "Document id — scopes retrieve, or targets ingest/delete-doc" },
 				id: { type: "string", description: "Chunk id (get)" },
@@ -49,7 +50,7 @@ export default function (pi: ExtensionAPI) {
 			const db = p.db ?? DB;
 			let out: string;
 			if (p.action === "ingest") {
-				const args = ["ingest", db, p.path ?? ""];
+				const args = p.url ? ["ingest", db, "--url", p.url] : ["ingest", db, p.path ?? ""];
 				if (p.docId) args.push("--doc-id", p.docId);
 				out = run(args);
 			} else if (p.action === "retrieve") {

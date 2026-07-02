@@ -109,6 +109,23 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 db.records
             ))
         }
+        "count" => {
+            let db_path = required(args, 1, "db path")?;
+            let db = Db::open(Path::new(&db_path))?;
+            match flag(args, "--prefix") {
+                Some(p) => Ok(db.index.keys().filter(|k| k.starts_with(&p)).count().to_string()),
+                None => Ok(db.index.len().to_string()),
+            }
+        }
+        "ids" => {
+            let db_path = required(args, 1, "db path")?;
+            let db = Db::open(Path::new(&db_path))?;
+            let prefix = flag(args, "--prefix").unwrap_or_default();
+            let limit = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(usize::MAX);
+            let mut ids: Vec<&String> = db.index.keys().filter(|k| k.starts_with(&prefix)).collect();
+            ids.sort();
+            Ok(ids.into_iter().take(limit).cloned().collect::<Vec<_>>().join("\n"))
+        }
         "compact" => {
             let db_path = required(args, 1, "db path")?;
             let mut db = Db::open(Path::new(&db_path))?;

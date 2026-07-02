@@ -29,6 +29,8 @@ export default function (pi: ExtensionAPI) {
 				expected: { type: "string", description: "expected output for scoring (log)" },
 				latency_ms: { type: "number", description: "case latency in ms (log)" },
 				matcher: { type: "string", description: "score/diff matcher: exact|contains|regex-lite (default exact)" },
+				minPass: { type: "number", description: "score: error (nonzero) if accuracy below this 0..1 threshold" },
+				failOnly: { type: "boolean", description: "score: list only failing cases" },
 				runA: { type: "string", description: "baseline run id (diff)" },
 				runB: { type: "string", description: "candidate run id (diff)" },
 				db: { type: "string", description: "trace db file (default data/evals.jsonl)" },
@@ -45,7 +47,7 @@ export default function (pi: ExtensionAPI) {
 				if (p.latency_ms != null) args.push("--latency-ms", String(p.latency_ms));
 				out = run(args);
 			} else if (p.action === "score") {
-				out = run(["score", "--db", db, "--run", p.run ?? "", "--matcher", p.matcher ?? "exact"]);
+				{ const a = ["score", "--db", db, "--run", p.run ?? "", "--matcher", p.matcher ?? "exact"]; if (p.minPass != null) a.push("--min-pass", String(p.minPass)); if (p.failOnly) a.push("--fail-only"); out = run(a); }
 			} else if (p.action === "diff") {
 				out = run(["diff", "--db", db, "--run-a", p.runA ?? "", "--run-b", p.runB ?? "", "--matcher", p.matcher ?? "exact"]);
 			} else {
