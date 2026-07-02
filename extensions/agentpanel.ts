@@ -99,7 +99,13 @@ export default function (pi: ExtensionAPI) {
 				},
 				{
 					overlay: true,
-					overlayOptions: () => ({ width: PANE_WIDTH, anchor: "top-right" }),
+					// nonCapturing is LOAD-BEARING: custom() otherwise gives the
+					// overlay keyboard focus, and since this panel auto-opens at
+					// session_start it would swallow ALL typing — dead editor.
+					overlayOptions: () => ({ width: PANE_WIDTH, anchor: "top-right", nonCapturing: true }),
+					onHandle: (h: any) => {
+						if (h.isFocused?.()) h.unfocus?.();
+					},
 				},
 			)
 			.finally(() => {
