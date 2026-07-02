@@ -50,7 +50,8 @@ fn main() {
         "ask" => {
             let (agent, msg) = parse_client_args(&rest);
             let secs = httpc::args::flag(&rest, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(90);
-            client_ask(&agent, &msg, secs)
+            let stream = rest.iter().any(|a| a == "--stream");
+            client_ask(&agent, &msg, secs, stream)
         }
         "attach" => {
             let (agent, _) = parse_client_args(&rest);
@@ -120,7 +121,7 @@ fn connect() -> Result<UnixStream, String> {
 /// Request→reply: send a message and print the agent's reply turn (the Text
 /// broadcast), giving up after `timeout_secs` of silence. Used by the Telegram
 /// bridge — a chat needs an answer, not a delivery receipt.
-fn client_ask(agent: &str, message: &str, timeout_secs: u64) -> Result<(), String> {
+fn client_ask(agent: &str, message: &str, timeout_secs: u64, stream_mode: bool) -> Result<(), String> {
     let mut stream = connect()?;
     let line = format!(
         "{{\"op\":\"ask\",\"agent\":\"{}\",\"message\":\"{}\"}}\n",
@@ -134,13 +135,25 @@ fn client_ask(agent: &str, message: &str, timeout_secs: u64) -> Result<(), Strin
     for l in reader.lines() {
         let Ok(l) = l else { break }; // read timeout → stop waiting
         match server::client_line_kind(&l) {
-            server::LineKind::Text(t) => reply.push_str(&t),
+            server::LineKind::Text(t) => {
+                reply.push_str(&t);
+                // --stream: emit the growing reply as newline-delimited
+                // snapshots so the caller (Telegram bridge) can live-edit the
+                // message as tokens arrive.
+                if stream_mode {
+                    println!("{}", reply.replace('\n', "\\n"));
+                    use std::io::Write as _;
+                    let _ = std::io::stdout().flush();
+                }
+            }
             // "done" fires at each turn end; return once we have some reply.
             server::LineKind::Done => { if !reply.trim().is_empty() { break; } }
             server::LineKind::Info(_) => {}
         }
     }
-    print!("{}", reply.trim());
+    if !stream_mode {
+        print!("{}", reply.trim());
+    }
     Ok(())
 }
 

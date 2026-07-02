@@ -1,5 +1,8 @@
+mod api;
+
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use httpc::args::flag;
 use httpc::json::{self, Value};
@@ -21,6 +24,8 @@ fn run(args: &[String]) -> Result<String, String> {
         "send" => send(args),
         "poll" => poll(args),
         "listen" => listen(args),
+        "commands" => register_commands(),
+        "broadcast" => broadcast(args),
         "statusline" => Ok("ok|telegram".into()),
         _ => Ok(HELP.trim().into()),
     }
@@ -30,27 +35,46 @@ fn send(args: &[String]) -> Result<String, String> {
     let chat = flag(args, "--chat").ok_or("--chat required")?;
     allow_chat(&chat)?;
     let text = flag(args, "--text").ok_or("--text required")?;
+    let md = args.iter().any(|a| a == "--markdown");
     let token = bot_token()?;
     let chunks = chunks(&text, 4096);
     for c in &chunks {
-        let body = format!(r#"{{"chat_id":"{}","text":"{}"}}"#, json::escape(&chat), json::escape(c));
-        let url = format!("https://api.telegram.org/bot{token}/sendMessage");
-        let v = httpc::post_json(&url, &body)?;
-        if !is_ok(&v) { return Err(format!("sendMessage failed: {v:?}")); }
+        api::send_message(&token, &chat, c, md)?;
     }
     Ok(format!("sent {} chunk(s)", chunks.len()))
+}
+
+/// Broadcast a styled report to the allowed chats (Markdown). Used by the
+/// task-completion hook: `telegram broadcast --text "..."`.
+fn broadcast(args: &[String]) -> Result<String, String> {
+    let text = flag(args, "--text").ok_or("--text required")?;
+    let token = bot_token()?;
+    let chats = Config::load().resolve("telegram_allowed_chats", "SMARTAGENT_TELEGRAM_CHATS", None).unwrap_or_default();
+    let mut n = 0;
+    for chat in chats.split(',').map(str::trim).filter(|c| !c.is_empty()) {
+        for c in chunks(&text, 4096) {
+            let _ = api::send_message(&token, chat, &c, true);
+        }
+        n += 1;
+    }
+    Ok(format!("broadcast to {n} chat(s)"))
+}
+
+fn register_commands() -> Result<String, String> {
+    let token = bot_token()?;
+    let body = command_menu_body();
+    api::call(&token, "setMyCommands", &body)?;
+    Ok(format!("registered {} Telegram command(s). If your Telegram client still shows the old menu, close and reopen the chat (or restart the app) to refresh its cached commands.", TELEGRAM_COMMANDS.len()))
 }
 
 fn poll(args: &[String]) -> Result<String, String> {
     let token = bot_token()?;
     let timeout = flag(args, "--timeout").unwrap_or_else(|| "25".into());
     let offset = offset()?;
-    let url = format!("https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout={timeout}");
-    let v = httpc::request("GET", &url).timeout(timeout.parse::<u64>().unwrap_or(25) + 10).send()?.json()?;
-    if !is_ok(&v) { return Err(format!("getUpdates failed: {v:?}")); }
+    let result = api::get_updates(&token, offset, timeout.parse::<u64>().unwrap_or(0))?;
     let mut max_id = offset.saturating_sub(1);
     let mut out = Vec::new();
-    if let Some(items) = v.get("result").and_then(Value::as_arr) {
+    if let Some(items) = result.as_arr() {
         for it in items {
             let uid = u64v(it.get("update_id")).unwrap_or(0);
             max_id = max_id.max(uid);
@@ -72,11 +96,10 @@ fn listen(args: &[String]) -> Result<String, String> {
     eprintln!("[tg] listen up (gateway={:?}, poll=short, sleep={sleep}s)", gateway_agent);
     let mut backoff = sleep;
     loop {
-        // Short-poll (timeout=0): the httpc openssl transport kills long-poll
-        // connections (exit 124) — getUpdates returns immediately instead.
-        // A bridge must SURVIVE transient errors: log + backoff, never exit
-        // (exiting is what showed as DOWN in supervise).
-        match poll(&["poll".into(), "--timeout".into(), "0".into()]) {
+        // Long-poll (25s) over curl — reliable, and holds the connection so
+        // updates arrive promptly. A bridge must SURVIVE transient errors:
+        // log + backoff, never exit (exiting is what showed as DOWN).
+        match poll(&["poll".into(), "--timeout".into(), "25".into()]) {
             Ok(out) => {
                 backoff = sleep;
                 for line in out.lines().filter(|l| !l.trim().is_empty()) {
@@ -105,48 +128,105 @@ fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
     if let Some(result) = slash_command(&text) {
         let reply = result.unwrap_or_else(|e| format!("command error: {e}"));
         eprintln!("[tg] slash /{}: {} chars", text.split_whitespace().next().unwrap_or(""), reply.len());
-        let _ = send(&["send".into(), "--chat".into(), chat, "--text".into(), reply]);
+        match send(&["send".into(), "--chat".into(), chat.clone(), "--text".into(), reply]) {
+            Ok(r) => eprintln!("[tg] slash relayed to {chat}: {r}"),
+            Err(e) => eprintln!("[tg] slash sendMessage FAILED for {chat}: {e}"),
+        }
         return;
     }
     let Some(agent) = gateway_agent else { println!("{line}"); return };
-    let prompt = format!(
-        "Telegram message from @{from}: {text}\n(Reply concisely — your reply text is relayed straight back to Telegram.)"
-    );
-    match gateway_send(agent, &prompt) {
-        Ok(reply) => {
-            let reply = reply.trim();
-            eprintln!("[tg] gateway reply: {} chars", reply.len());
-            let out = if reply.is_empty() { "(the agent had no reply)" } else { reply };
-            match send(&["send".into(), "--chat".into(), chat.clone(), "--text".into(), out.to_string()]) {
-                Ok(r) => eprintln!("[tg] relayed to {chat}: {r}"),
-                Err(e) => eprintln!("[tg] sendMessage FAILED for {chat}: {e}"),
-            }
-        }
-        Err(e) => {
-            eprintln!("[tg] gateway send FAILED: {e}");
-            let _ = send(&["send".into(), "--chat".into(), chat, "--text".into(), format!("⚠ agent unavailable: {e}")]);
-        }
+    if let Err(e) = stream_reply(agent, &from, &text, &chat) {
+        eprintln!("[tg] stream FAILED: {e}");
+        let _ = send(&["send".into(), "--chat".into(), chat, "--text".into(), format!("⚠ agent unavailable: {e}")]);
     }
 }
 
-fn gateway_send(agent: &str, msg: &str) -> Result<String, String> {
-    // `ask` = request→reply: capture the agent's actual reply turn (send only
-    // returned a delivery receipt). 90s reply budget.
-    let out = Command::new("target/release/gateway")
-        .args(["ask", "--agent", agent, "--timeout", "90", msg])
-        .output().map_err(|e| format!("run gateway ask: {e}"))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+/// Streaming reply (hermes-style): send a placeholder, then live-edit it as
+/// the agent generates. `gateway ask --stream` prints growing snapshots; we
+/// throttle editMessageText to ~1 edit / 1.5s to respect Telegram rate limits.
+fn stream_reply(agent: &str, from: &str, text: &str, chat: &str) -> Result<(), String> {
+    let token = bot_token()?;
+    let prompt = format!(
+        "Telegram message from @{from}: {text}\n(Reply concisely — your reply is streamed straight to Telegram.)"
+    );
+    let mid = api::send_message(&token, chat, "💭 …", false)?;
+    let mut child = Command::new("target/release/gateway")
+        .args(["ask", "--agent", agent, "--timeout", "90", "--stream", &prompt])
+        .stdout(Stdio::piped()).stderr(Stdio::null())
+        .spawn().map_err(|e| format!("spawn gateway ask: {e}"))?;
+    let out = child.stdout.take().ok_or("no gateway stdout")?;
+    let mut last_edit = std::time::Instant::now();
+    let mut latest = String::new();
+    let mut shown = String::new();
+    for line in BufReader::new(out).lines() {
+        let Ok(line) = line else { break };
+        if line.trim().is_empty() { continue; }
+        latest = line.replace("\\n", "\n"); // un-escape the streamed snapshot
+        // Throttle: edit at most every 1.5s, only when the text grew.
+        if latest != shown && last_edit.elapsed().as_millis() >= 1500 {
+            let _ = api::edit_message(&token, chat, mid, &clip_tg(&latest), false);
+            shown = latest.clone();
+            last_edit = std::time::Instant::now();
+        }
+    }
+    let _ = child.wait();
+    // Final edit with the complete reply (Markdown for the finished message).
+    let final_text = if latest.trim().is_empty() { "(the agent had no reply)".to_string() } else { latest };
+    api::edit_message(&token, chat, mid, &clip_tg(&final_text), true)
+        .or_else(|_| api::edit_message(&token, chat, mid, &clip_tg(&final_text), false))?;
+    eprintln!("[tg] streamed reply to {chat}: {} chars", final_text.len());
+    Ok(())
+}
+
+/// Telegram single-message cap is 4096 chars — keep a margin.
+fn clip_tg(s: &str) -> String {
+    if s.chars().count() > 4000 {
+        format!("{}…", s.chars().take(4000).collect::<String>())
     } else {
-        Err(format!("gateway ask failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+        s.to_string()
     }
 }
 
 /// Telegram slash commands run the platform binaries directly (no LLM turn) and
 /// relay their output — same set as the TUI slash commands.
+struct BotCommand {
+    name: &'static str,
+    description: &'static str,
+}
+
+const TELEGRAM_COMMANDS: &[BotCommand] = &[
+    BotCommand { name: "help", description: "Show SMARTAGENT Telegram commands" },
+    BotCommand { name: "commands", description: "Show SMARTAGENT Telegram commands" },
+    BotCommand { name: "board", description: "Show the kanban board" },
+    BotCommand { name: "tasks", description: "List ready tasks" },
+    BotCommand { name: "status", description: "Show supervised service status" },
+    BotCommand { name: "skills", description: "List skills or match a query" },
+    BotCommand { name: "agents", description: "Show gateway fleet state" },
+    BotCommand { name: "runs", description: "Show active workflows" },
+    BotCommand { name: "memory", description: "Recall SMARTAGENT memory" },
+];
+
+fn command_help() -> String {
+    let mut out = String::from("SMARTAGENT bot. Talk to me normally, or use:");
+    for c in TELEGRAM_COMMANDS {
+        out.push_str(&format!("\n/{} — {}", c.name, c.description));
+    }
+    out
+}
+
+fn command_menu_body() -> String {
+    let commands = TELEGRAM_COMMANDS
+        .iter()
+        .map(|c| format!(r#"{{"command":"{}","description":"{}"}}"#, json::escape(c.name), json::escape(c.description)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(r#"{{"commands":[{commands}]}}"#)
+}
+
 fn slash_command(text: &str) -> Option<Result<String, String>> {
     let mut parts = text.trim().splitn(2, char::is_whitespace);
-    let cmd = parts.next()?.strip_prefix('/')?;
+    let raw_cmd = parts.next()?.strip_prefix('/')?;
+    let cmd = raw_cmd.split('@').next().unwrap_or(raw_cmd);
     let arg = parts.next().unwrap_or("").trim();
     let run = |bin: &str, args: &[&str]| -> Result<String, String> {
         let out = Command::new(format!("target/release/{bin}"))
@@ -155,8 +235,7 @@ fn slash_command(text: &str) -> Option<Result<String, String>> {
         Ok(if s.is_empty() { "(no output)".into() } else { s })
     };
     Some(match cmd {
-        "start" | "help" => Ok(
-            "SMARTAGENT bot. Talk to me normally, or use:\n/board — kanban board\n/tasks — task list\n/status — service status\n/skills [q] — skills\n/agents — fleet state\n/runs — active workflows\n/memory <q> — recall".into()),
+        "start" | "help" | "commands" => Ok(command_help()),
         "board" => run("tasks", &["board", "--db", "data/tasks.semdb"]),
         "tasks" => run("tasks", &["list", "--col", "ready", "--db", "data/tasks.semdb"]),
         "status" => run("supervise", &["status"]),
@@ -197,7 +276,6 @@ fn offset() -> Result<u64, String> { Ok(open_db()?.get(ROW_OFFSET).and_then(|e| 
 fn set_offset(n: u64) -> Result<(), String> { let mut db = open_db()?; db.put(ROW_OFFSET, &format!(r#"{{"offset":{n}}}"#), VEC0.to_vec()) }
 
 fn u64v(v: Option<&Value>) -> Option<u64> { v.and_then(Value::as_f64).map(|x| x.max(0.0) as u64) }
-fn is_ok(v: &Value) -> bool { matches!(v.get("ok"), Some(Value::Bool(true))) }
 fn val_s(v: &Value) -> String { match v { Value::Str(s) => s.clone(), _ => format!("{}", v.as_f64().unwrap_or(0.0) as i64) } }
 
 fn chunks(s: &str, max: usize) -> Vec<String> {
@@ -221,14 +299,38 @@ USAGE:
   telegram send --chat ID --text TEXT
   telegram poll [--timeout 25]
   telegram listen [--sleep 2] [--gateway AGENT]
+  telegram commands                 register Telegram slash-command menu
 
 Token is read only via secrets get name=telegram_bot_token as caller pi.
 Allowed chats come from config/smartagent.conf telegram_allowed_chats.
+
+Command menu refresh: `telegram commands` calls Bot API setMyCommands for the
+supported Telegram slash commands. Telegram clients can cache the old command
+menu; if changes do not appear immediately, close/reopen the bot chat or restart
+the Telegram app.
 "#;
 
 #[cfg(test)]
 mod tests {
-    use super::chunks;
+    use super::{chunks, command_help, command_menu_body, slash_command, TELEGRAM_COMMANDS};
+
+    #[test]
+    fn command_menu_lists_supported_slashes() {
+        let body = command_menu_body();
+        let help = command_help();
+        for c in TELEGRAM_COMMANDS {
+            assert!(body.contains(&format!("\"command\":\"{}\"", c.name)), "{body}");
+            assert!(help.contains(&format!("/{}", c.name)), "{help}");
+        }
+        assert!(body.contains("\"commands\""));
+    }
+
+    #[test]
+    fn slash_commands_accept_bot_suffix() {
+        let out = slash_command("/help@smartagent_bot").expect("recognized").unwrap();
+        assert!(out.contains("/board"), "{out}");
+        assert!(slash_command("/unknown@smartagent_bot").is_none());
+    }
 
     #[test]
     fn chunks_long_messages() {
