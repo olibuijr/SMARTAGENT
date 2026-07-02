@@ -67,6 +67,15 @@ fn run(args: &[String]) -> Result<String, String> {
             cdp.history(-1)?;
             cdp.snapshot_capped(mt, ml)
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: CDP endpoint reachability.
+            let v = httpc::request("GET", &format!("{}/json/version", base.trim_end_matches('/'))).timeout(4).send();
+            Ok(match v {
+                Ok(r) if r.ok() => "ok|🌐 chrome✓".to_string(),
+                Ok(r) => format!("err|🌐 chrome HTTP {}", r.status),
+                Err(_) => "err|🌐 chrome down".to_string(),
+            })
+        }
         Some("probe") => {
             let v = httpc::get(&format!("{}/json/version", base.trim_end_matches('/')))
                 .map_err(|e| format!("devtools unreachable at {base}: {e}"))?;

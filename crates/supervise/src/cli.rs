@@ -128,24 +128,28 @@ pub fn run(args: &[String]) -> Result<String, String> {
             Ok(out.join("\n"))
         }
         "statusline" => {
-            // Compact single line for UI statuslines: `name:state[:health]` per service.
+            // Compact `level|text` for UI statuslines: worst service state wins
+            // the level (ok < warn < err); text is `name:state` per service.
             let mut parts = Vec::new();
+            let mut worst = 0u8;
             for svc in ctx.registry.iter() {
                 let rec = ctx.store.get(svc.name);
                 let alive = ctx.alive(svc, &rec);
-                let mark = if alive {
+                let (mark, sev) = if alive {
                     match ctx.probe_ok(svc) {
-                        Some(false) => "probe-fail",
-                        _ => "up",
+                        Some(false) => ("probe-fail", 1),
+                        _ => ("up", 0),
                     }
                 } else if rec.desired_up {
-                    "DOWN"
+                    ("DOWN", 2)
                 } else {
-                    "off"
+                    ("off", 1)
                 };
+                worst = worst.max(sev);
                 parts.push(format!("{}:{}", svc.name, mark));
             }
-            Ok(parts.join(" "))
+            let level = ["ok", "warn", "err"][worst as usize];
+            Ok(format!("{level}|{}", parts.join(" ")))
         }
         "watch" => {
             // Self-healing loop: restart any enabled+desired service that died.
@@ -186,8 +190,9 @@ mod tests {
     fn statusline_is_one_compact_line() {
         let out = run(&["statusline".to_string()]).unwrap();
         assert!(!out.contains('\n'));
-        assert!(!out.is_empty());
-        for part in out.split(' ') {
+        let (level, body) = out.split_once('|').expect("level|text");
+        assert!(matches!(level, "ok" | "warn" | "err"));
+        for part in body.split(' ') {
             let (name, state) = part.split_once(':').expect("name:state token");
             assert!(!name.is_empty());
             assert!(matches!(state, "up" | "probe-fail" | "DOWN" | "off"));

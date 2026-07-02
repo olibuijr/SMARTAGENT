@@ -78,6 +78,14 @@ fn run(args: &[String]) -> Result<String, String> {
             if !res.stderr.is_empty() { out.push(format!("--- stderr ---\n{}", res.stderr)); }
             Ok(out.join("\n"))
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: achievable isolation on this host.
+            Ok(if exec::unshare_available() {
+                "ok|🧱 ns✓ limits✓".to_string()
+            } else {
+                "warn|🧱 fs-only (no unshare)".to_string()
+            })
+        }
         Some("clean") => {
             let hours = flag(args, "--older-than-hours").and_then(|s| s.parse().ok());
             let n = exec::clean(&sandbox_root(), hours)?;

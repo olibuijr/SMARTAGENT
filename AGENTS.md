@@ -139,7 +139,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `voice` | `voice` | STT/TTS bridge (Pipecat concept). BUILT+TESTED but DELISTED (extensions/disabled/) — no titan speech server deployed |
 | `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
 | _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |
-| _(no tool)_ | `supervise` | `statusline.ts`: TUI statusline — per-tool ⚙/✓/✗+duration footer statuses on tool_execution events, plus a belowEditor services widget fed by `supervise statusline` (refreshed on session start, after service-touching tools, every 30s) |
+| _(no tool)_ | all crates | `statusline.ts`: TUI statusline — per-tool ⚙/✓/✗+duration footer statuses (ANSI-colored) on tool_execution events, plus a two-line belowEditor widget: infra `⛭` (supervise services, 🧱 sandbox, 🔑 secrets auth, 🌐 chrome, 🔎 searx, 🕸 codegraph) and data `▦` (🧠 memory, 📚 rag, ⏰ schedule, 📊 evals, 🤖 orchestrate). Each segment is a Rust `<crate> statusline` verb emitting `level\|icon text` (ok/warn/err decided in Rust); TS only colors (green/yellow/red) and places. Refreshed at session start, after related tool runs, every 30s |
 
 ## Conventions
 

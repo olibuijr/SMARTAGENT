@@ -66,6 +66,17 @@ pub fn run(args: &[String]) -> Result<String, String> {
             Audit::open(&dir)?.event("policy-allow", &format!("{caller}->{name}"))?;
             Ok(format!("granted {caller} → {name}"))
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: does the given caller have an
+            // issued token AND does the env token verify right now?
+            let caller = flag(args, "--as").unwrap_or_else(|| "pi".into());
+            let presented = std::env::var("SMARTAGENT_CALLER_TOKEN").ok();
+            Ok(match crate::token::verify(&dir, &caller, presented.as_deref()) {
+                Ok(()) => format!("ok|🔑 {caller}✓"),
+                Err(e) if e.contains("no token issued") => format!("warn|🔑 {caller}: no token issued"),
+                Err(_) => format!("err|🔑 {caller}: NO TOKEN"),
+            })
+        }
         Some("issue-token") => {
             // Admin-only, like policy-allow: issuing an identity IS a grant.
             if std::env::var("SMARTAGENT_SECRETS_ADMIN").as_deref() != Ok("1") {

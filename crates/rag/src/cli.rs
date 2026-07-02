@@ -121,6 +121,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 "chunks: {chunks}\ndocuments: {docs}\nrecords: {records}"
             ))
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: corpus size.
+            let db = path_arg(args, 1, "db")?;
+            if !db.exists() {
+                return Ok("warn|📚 empty".into());
+            }
+            let (chunks, docs, _) = store::stats(&db)?;
+            Ok(format!("ok|📚 {docs}d/{chunks}c"))
+        }
         _ => Ok(HELP.trim().into()),
     }
 }

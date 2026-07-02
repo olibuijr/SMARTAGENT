@@ -47,6 +47,26 @@ fn run(args: &[String]) -> Result<String, String> {
             let graph = Graph::load(&graph_arg(args)?)?;
             Ok(graph.stats())
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: symbol count + index age.
+            let path = graph_arg(args)?;
+            if !path.exists() {
+                return Ok("warn|🕸 no index".into());
+            }
+            let graph = Graph::load(&path)?;
+            let age_days = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+                .map(|d| d.as_secs() / 86_400)
+                .unwrap_or(0);
+            let n = graph.symbols.len();
+            if age_days >= 7 {
+                Ok(format!("warn|🕸 {n}sym (stale {age_days}d)"))
+            } else {
+                Ok(format!("ok|🕸 {n}sym"))
+            }
+        }
         Some("search") => {
             let graph_path = graph_arg(args)?;
             let query = args.get(2).ok_or("usage: codegraph search <graph> <query> [--k N]")?;

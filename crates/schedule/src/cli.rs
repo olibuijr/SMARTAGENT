@@ -122,6 +122,30 @@ pub fn run(args: &[String]) -> Result<String, String> {
             journal.append(&Event::Removed { id: id.clone() })?;
             Ok(format!("removed {id}"))
         }
+        "statusline" => {
+            // Compact `level|text` for UI statuslines: soonest upcoming fire.
+            let jobs = journal.replay()?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let mut soonest: Option<(i64, String)> = None;
+            for j in jobs.values() {
+                if let Some(t) = Cron::parse(&j.cron)?.next_after(now) {
+                    if soonest.as_ref().map(|(s, _)| t < *s).unwrap_or(true) {
+                        soonest = Some((t, j.id.clone()));
+                    }
+                }
+            }
+            Ok(match soonest {
+                Some((t, id)) => {
+                    let mins = (t - now).max(0) / 60;
+                    let eta = if mins >= 120 { format!("{}h", mins / 60) } else { format!("{mins}m") };
+                    format!("ok|⏰ {id} in {eta}")
+                }
+                None => "warn|⏰ no jobs".to_string(),
+            })
+        }
         "list" => {
             let jobs = journal.replay()?;
             if jobs.is_empty() {

@@ -74,6 +74,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
             out.push(format!("new passes ({}): {}", fixes.len(), if fixes.is_empty() { "none".into() } else { fixes.join(", ") }));
             Ok(out.join("\n"))
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: pass ratio of the latest run
+            // (latest = last run id in trace order).
+            let traces = store::load(&db(args));
+            let last_run = match traces.last().map(|t| t.run.clone()) {
+                Some(r) => r,
+                None => return Ok("warn|📊 no runs".into()),
+            };
+            let scores = score::score_run(&traces, &last_run, Matcher::Exact);
+            if scores.is_empty() {
+                return Ok(format!("warn|📊 {last_run}: unscored"));
+            }
+            let passed = scores.iter().filter(|s| s.pass).count();
+            let level = if passed == scores.len() { "ok" } else if passed * 2 >= scores.len() { "warn" } else { "err" };
+            Ok(format!("{level}|📊 {passed}/{} {last_run}", scores.len()))
+        }
         Some("runs") => {
             let traces = store::load(&db(args));
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();

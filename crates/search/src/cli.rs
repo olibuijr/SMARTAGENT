@@ -46,6 +46,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: SearXNG reachability.
+            let instance = resolve_instance(args)?;
+            Ok(match searx::health(&instance) {
+                Ok(s) if s < 400 => "ok|🔎 searx✓".to_string(),
+                Ok(s) => format!("err|🔎 searx HTTP {s}"),
+                Err(_) => "err|🔎 searx unreachable".to_string(),
+            })
+        }
         Some("health") => {
             let instance = resolve_instance(args)?;
             let status = searx::health(&instance)?;

@@ -58,6 +58,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let m = Memory::new(&dir(args)?);
             Ok(m.stats()?.iter().map(|(t, n)| format!("{t}\t{n}")).collect::<Vec<_>>().join("\n"))
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: tier fill; warn near working-cap (50).
+            let m = Memory::new(&dir(args)?);
+            let stats = m.stats()?;
+            let get = |t: &str| stats.iter().find(|(n, _)| n == t).map(|(_, c)| *c).unwrap_or(0);
+            let (w, e, s) = (get("working"), get("episodic"), get("semantic"));
+            let level = if w >= 45 { "warn" } else { "ok" };
+            Ok(format!("{level}|🧠 w:{w} e:{e} s:{s}"))
+        }
         _ => Ok(HELP.trim().into()),
     }
 }

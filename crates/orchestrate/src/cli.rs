@@ -50,6 +50,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             fan_out(args, prompts)
         }
+        Some("statusline") => {
+            // `level|text` for UI statuslines: fan-out workspace count.
+            let root = workspaces_root();
+            let n = std::fs::read_dir(&root).map(|es| es.flatten().filter(|e| e.path().is_dir()).count()).unwrap_or(0);
+            Ok(if n == 0 { "ok|🤖 idle".to_string() } else { format!("ok|🤖 {n} runs") })
+        }
         Some("list") => {
             let root = workspaces_root();
             let mut runs = Vec::new();

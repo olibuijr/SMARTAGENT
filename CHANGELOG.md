@@ -30,8 +30,8 @@ runs `supervise watch`.
 - browser: fixed sleeps replaced with `document.readyState` polling (`wait_ready`) in navigate/click/enter/history — faster on fast pages, no race on slow ones.
 
 **TUI statusline (new):**
-- `supervise statusline` verb: compact one-line `name:state` service status for UI consumption (+ unit test).
-- `extensions/statusline.ts`: per-tool footer statuses (running/✓/✗ + duration, auto-clear) via pi `tool_execution_*` events + `ctx.ui.setStatus`, and a belowEditor services widget via `ctx.ui.setWidget` fed by the Rust verb. Guarded by `ctx.hasUI` (no-op headless).
+- `statusline` verb on 11 crates (supervise, sandbox, secrets, browser, search, codegraph, memory, rag, schedule, evals, orchestrate) emitting a uniform `level|icon text` protocol — severity (ok/warn/err) decided in Rust: secrets token verify, searx/chrome reachability, codegraph staleness ≥7d, memory working-cap ≥45/50, schedule soonest job ETA, evals last-run pass ratio, sandbox namespace capability.
+- `extensions/statusline.ts`: per-tool footer statuses (⚙ running/✓/✗ + duration, ANSI-colored, auto-clear) via pi `tool_execution_*` events, and a two-line belowEditor widget (infra `⛭` + data `▦` rows) painting each segment green/yellow/red by level. Segments re-probe after related tool runs and every 30s. Guarded by `ctx.hasUI` (no-op headless).
 
 **Agent capabilities & continuity:**
 - Session memory: session intent captured on shutdown → episodic; recent recall injected at launch.
