@@ -18,7 +18,7 @@ pub fn render(ui: &mut egui::Ui, app: &App, emits: &mut Vec<Emit>) {
     ui.add_space(12.0);
     ui.separator();
 
-    if row(ui, w, "✦  New session", theme::TEXT(), false).clicked() {
+    if row(ui, w, &format!("{}  New session", icons::NEW), theme::TEXT(), false).clicked() {
         emits.push(Emit::NewSession);
     }
     ui.add_space(6.0);
