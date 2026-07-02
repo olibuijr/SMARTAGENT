@@ -93,7 +93,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         "graph" => {
             let vault = vault.ok_or("usage: vault graph <vault>")?;
-            Ok(graph::render(&graph::build(vault)?))
+            let adj = graph::build(vault)?;
+            // --note X --depth N: scope to the neighborhood of one note.
+            match flag(args, "--note") {
+                Some(root) => {
+                    let depth = flag(args, "--depth").and_then(|s| s.parse().ok()).unwrap_or(1usize);
+                    Ok(graph::render_scoped(&adj, &root, depth))
+                }
+                None => Ok(graph::render(&adj)),
+            }
         }
         "search" => {
             let vault = vault.ok_or("usage: vault search <vault> <query>")?;

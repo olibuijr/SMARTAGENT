@@ -27,6 +27,8 @@ export default function (pi: ExtensionAPI) {
 				text: { type: "string", description: "text to append (append action)" },
 				query: { type: "string", description: "search query (search action)" },
 				head: { type: "number", description: "read: first N lines only (notes grow via append)" },
+				graphNote: { type: "string", description: "graph: scope to this note's neighborhood" },
+				depth: { type: "number", description: "graph: hops from graphNote (default 1)" },
 				vault: { type: "string", description: "vault dir (default data/vault)" },
 			},
 			required: ["action"],
@@ -41,7 +43,7 @@ export default function (pi: ExtensionAPI) {
 				case "rm": out = run(["rm", v, p.note ?? ""]); break;
 				case "mv": out = run(["mv", v, p.note ?? "", p.newName ?? ""]); break;
 				case "links": out = run(["links", v, p.note ?? ""]); break;
-				case "graph": out = run(["graph", v]); break;
+				case "graph": out = run(["graph", v, ...(p.graphNote ? ["--note", p.graphNote, "--depth", String(p.depth ?? 1)] : [])]); break;
 				case "search": out = run(["search", v, p.query ?? ""]); break;
 				default: out = run(["list", v]);
 			}

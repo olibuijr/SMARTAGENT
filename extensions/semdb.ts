@@ -43,6 +43,10 @@ export default function (pi: ExtensionAPI) {
 				id: { type: "string", description: "Entry id (embed/get/del)" },
 				text: { type: "string", description: "Text to embed or search for" },
 				k: { type: "number", description: "Result count for search (default 5)" },
+				idsOnly: { type: "boolean", description: "search: score+id only (skip meta text)" },
+				metaChars: { type: "number", description: "search: truncate meta blob in results" },
+				filter: { type: "string", description: "search: keep only rows whose meta has key=value" },
+				prefix: { type: "string", description: "count/ids: id prefix filter" },
 				db: { type: "string", description: "Database file (default data/smartagent.semdb)" },
 			},
 			required: ["action"],
@@ -57,7 +61,7 @@ export default function (pi: ExtensionAPI) {
 					out = run(["embed", db, "--id", p.id ?? "", "--text", p.text ?? ""]);
 					break;
 				case "search":
-					{ const a=["search", db, "--text", p.text ?? "", "--k", String(p.k ?? 5)]; if (p.idsOnly) a.push("--ids-only"); if (p.metaChars!=null) a.push("--meta-chars", String(p.metaChars)); out = run(a); }
+					{ const a=["search", db, "--text", p.text ?? "", "--k", String(p.k ?? 5)]; if (p.idsOnly) a.push("--ids-only"); if (p.metaChars!=null) a.push("--meta-chars", String(p.metaChars)); if (p.filter) a.push("--filter", p.filter); out = run(a); }
 					break;
 				case "count": out = run(["count", db, ...(p.prefix ? ["--prefix", p.prefix] : [])]); break;
 				case "ids": out = run(["ids", db, ...(p.prefix ? ["--prefix", p.prefix] : []), ...(p.k ? ["--limit", String(p.k)] : [])]); break;

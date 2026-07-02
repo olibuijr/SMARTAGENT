@@ -63,7 +63,20 @@ pub fn run(args: &[String]) -> Result<String, String> {
             } else {
                 return Err("--vector or --text required".into());
             };
-            let results = search(&db, &query, k, exact);
+            // --filter key=value keeps only rows whose meta JSON has that field.
+            // Over-fetch candidates first so the top-k survives filtering.
+            let filter = flag(args, "--filter").and_then(|f| f.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())));
+            let fetch_k = if filter.is_some() { (k * 8).max(64) } else { k };
+            let mut results = search(&db, &query, fetch_k, exact);
+            if let Some((fk, fv)) = &filter {
+                results.retain(|(_, _, meta)| {
+                    crate::json::parse(meta).ok()
+                        .and_then(|v| v.get(fk).and_then(|x| x.as_str().map(str::to_string)))
+                        .map(|got| &got == fv)
+                        .unwrap_or(false)
+                });
+                results.truncate(k);
+            }
             if results.is_empty() {
                 return Ok("no results".into());
             }

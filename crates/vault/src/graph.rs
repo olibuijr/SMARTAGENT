@@ -60,6 +60,39 @@ pub fn render(adj: &Adjacency) -> String {
     out.trim_end().to_string()
 }
 
+/// Render only the subgraph within `depth` hops of `root` (BFS over outgoing
+/// links) — scopes a big vault's graph to the neighborhood of interest.
+pub fn render_scoped(adj: &Adjacency, root: &str, depth: usize) -> String {
+    use std::collections::{BTreeSet, VecDeque};
+    let start = resolve_key(adj, root).unwrap_or_else(|| root.to_string());
+    let mut keep: BTreeSet<String> = BTreeSet::new();
+    let mut q = VecDeque::new();
+    q.push_back((start.clone(), 0usize));
+    keep.insert(start);
+    while let Some((node, d)) = q.pop_front() {
+        if d >= depth {
+            continue;
+        }
+        if let Some(tgts) = adj.get(&node) {
+            for t in tgts {
+                let key = resolve_key(adj, t).unwrap_or_else(|| t.clone());
+                if keep.insert(key.clone()) {
+                    q.push_back((key, d + 1));
+                }
+            }
+        }
+    }
+    let mut out = String::new();
+    for (src, tgts) in adj {
+        if !keep.contains(src) {
+            continue;
+        }
+        let shown: Vec<&String> = tgts.iter().filter(|t| keep.contains(&resolve_key(adj, t).unwrap_or_else(|| (*t).clone()))).collect();
+        out.push_str(&format!("{src} -> {}\n", if shown.is_empty() { "(none)".into() } else { shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ") }));
+    }
+    out.trim_end().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
