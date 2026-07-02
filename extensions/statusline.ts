@@ -116,15 +116,47 @@ export default function (pi: ExtensionAPI) {
 	let ui: any; // latest ctx.ui, captured from events (only used when hasUI)
 	let timer: ReturnType<typeof setInterval> | undefined;
 
+	// Visible width of a cell: ANSI codes count 0, wide glyphs (emoji/CJK) 2,
+	// variation selectors 0 — so padding aligns on screen, not in bytes.
+	const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+	function vwidth(s: string): number {
+		let w = 0;
+		for (const ch of stripAnsi(s)) {
+			const c = ch.codePointAt(0) ?? 0;
+			if (c === 0xfe0f || c === 0x200d) continue; // VS16 / ZWJ
+			const wide =
+				(c >= 0x1100 && c <= 0x115f) || (c >= 0x231a && c <= 0x23f3) ||
+				(c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
+				(c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) ||
+				(c >= 0x1f300 && c <= 0x1faff);
+			w += wide ? 2 : 1;
+		}
+		return w;
+	}
+
 	function render() {
 		if (!ui) return;
-		const row = ({ line, icon }: { line: Line; icon: string }) =>
-			`${icon} ` +
+		// Segments per line, in registry order.
+		const cells = LINES.map(({ line }) =>
 			SEGMENTS.filter((s) => s.line === line)
 				.map((s) => painted.get(s.key))
-				.filter(Boolean)
-				.join(" \x1b[2m·\x1b[0m ");
-		ui.setWidget("smartagent-statusline", LINES.map(row), {
+				.filter(Boolean) as string[],
+		);
+		// Column i is padded to the widest cell i across all lines, so the
+		// separators line up vertically in a grid.
+		const cols = Math.max(0, ...cells.map((r) => r.length));
+		const widths = Array.from({ length: cols }, (_, i) =>
+			Math.max(0, ...cells.map((r) => (r[i] ? vwidth(r[i]) : 0))),
+		);
+		const rows = cells.map(
+			(r, li) =>
+				`${LINES[li].icon} ` +
+				r
+					.map((c, i) => c + " ".repeat(Math.max(0, widths[i] - vwidth(c))))
+					.join(" \x1b[2m·\x1b[0m ")
+					.trimEnd(),
+		);
+		ui.setWidget("smartagent-statusline", rows, {
 			placement: "belowEditor",
 		});
 	}
