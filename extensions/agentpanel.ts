@@ -188,10 +188,11 @@ function render(width: number): string[] {
 		working.forEach((a, i) => {
 			const accent = accentOf(a.name);
 			const spin = fg(accent, SPIN[(frame + i) % SPIN.length]);
-			const head = `${fg(accent, avatar(a.name))} ${fg("46", "●")}${spin} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
+			const head = `${fg(accent, avatar(a.name))} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
+			const state = fg("46", "● working ") + spin;
+			const gap1 = Math.max(1, cardw - vlen(head) - vlen(state));
 			const tok = humanTokens(a.tokens);
-			const gapw = Math.max(1, cardw - vlen(head) - tok.length);
-			const body: string[] = [head + " ".repeat(gapw) + dim(tok)];
+			const body: string[] = [head + " ".repeat(gap1) + state];
 			const own = doingByOwner[a.name];
 			if (own) {
 				// task sub-card: boxed row inside the agent card
@@ -201,10 +202,17 @@ function render(width: number): string[] {
 			}
 			if (a.tools) {
 				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
-				body.push(dim("⚙ ") + fg("252", clip(a.tools, cardw - 6)) + " " + tick);
+				body.push(dim("⚙ ") + fg("253", clip(a.tools, cardw - 12)) + " " + tick + " ".repeat(Math.max(0, cardw - vlen(dim("⚙ ")) - Math.min(vlen(a.tools), cardw - 12) - 5 - tok.length)) + dim(tok));
 			}
 			if (a.words) {
-				body.push(dim("“" + clip(a.words, cardw - 4) + "”"));
+				// Two readable lines, bright — this is "what is it doing" for the
+				// user; a dim clipped fragment defeated the panel's purpose.
+				const max = (cardw - 4) * 2;
+				const wtext = clip(a.words, max);
+				const l1 = wtext.slice(0, cardw - 4);
+				const l2 = wtext.slice(cardw - 4);
+				body.push(fg("250", "“" + l1 + (l2 ? "" : "”")));
+				if (l2) body.push(fg("250", " " + l2 + "”"));
 			}
 			lines.push(...card(body, accent, w));
 		});
@@ -215,10 +223,11 @@ function render(width: number): string[] {
 			.filter((a) => a.state !== "working")
 			.forEach((a, i) => {
 				const tok = humanTokens(a.tokens);
-				const pulse = (frame + i * 2) % 6 < 3 ? fg("208", "●") : fg("130", "●");
-				const head = `${fg(accentOf(a.name), avatar(a.name))} ${pulse} ${fg("250", a.name)} ${dim("· " + a.role)}`;
-				const gapw = Math.max(1, cardw - vlen(head) - tok.length);
-				lines.push(...card([head + " ".repeat(gapw) + dim(tok)], "238", w));
+				const pulse = (frame + i * 2) % 6 < 3 ? fg("208", "● idle") : fg("130", "● idle");
+				const head = `${fg(accentOf(a.name), avatar(a.name))} ${fg("250", a.name)} ${dim("· " + a.role)}`;
+				const right = pulse + " " + dim(tok);
+				const gapw = Math.max(1, cardw - vlen(head) - vlen(right));
+				lines.push(...card([head + " ".repeat(gapw) + right], "238", w));
 			});
 	}
 
