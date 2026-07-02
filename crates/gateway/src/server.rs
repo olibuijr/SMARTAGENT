@@ -242,7 +242,7 @@ fn start_heartbeat(
             }
             HeartbeatAction::Prompt => {
                 let auto = format!(
-                    "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task is in doing → continue it; (b) doing empty, ready has items → pull the highest-priority one; (c) doing AND ready empty → load the Triage skill and promote exactly one backlog task by p1→p2→p3, oldest, then smallest id before pulling it. The backlog must never starve the loop. If you truly cannot act, say why in one sentence — never answer with an empty turn. One task in doing, maximum."
+                    "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task YOU pulled earlier is in doing → continue it; (b) otherwise, ready has an unclaimed item → pull the highest-priority one; (c) otherwise → load the Triage skill and promote exactly one UNCLAIMED backlog task by p1→p2→p3, oldest, then smallest id, and pull it. Tasks in doing/review that belong to OTHER agents are never a reason to stay idle — skip them and take unclaimed backlog work. If the backlog is truly empty of unclaimed tasks, say so in one sentence — never answer with an empty turn. One task in your doing, maximum."
                 );
                 let _ = child.lock().unwrap().command("prompt", Some(&auto));
             }
