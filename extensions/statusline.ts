@@ -6,11 +6,13 @@
  *  - Per-tool activity: tool_execution_start/end events → ctx.ui.setStatus(tool, …)
  *    (⚙ running, then ✓/✗ with duration; auto-clears after a few seconds).
  *  - Workspace line (belowEditor, first — most task-relevant): 🕸 code graph ·
- *    🗃 workspace repos indexed + files · 📋 tasks board · ▶ workflow run.
- *  - Data line (belowEditor): 🧠 memory tiers · 📚 rag corpus · ⏰ next job ·
- *    📊 evals · 🤖 orchestrate — volatile stats, re-probed after related tools run.
+ *    🗃 workspace repo index · 📋 tasks board · ▶ workflow run.
+ *  - Data line (belowEditor): 🧠 memory · 📚 rag corpus · ⏰ schedule ·
+ *    📊 evals · 🤖 orchestrate — re-probed after related tools run.
  *  - Infra line (belowEditor, last — least volatile): ⛭ services · 🧱 sandbox ·
  *    🔑 secrets auth · 🌐 chrome · 🔎 searx · 🪝 hooks.
+ *  Healthy segments collapse to `icon Name ✓`; a segment only spends width on
+ *  detail when its level is warn/err (the level is judged in Rust).
  *
  * Every segment comes from a Rust `statusline` verb emitting `level|icon text`;
  * severity classification lives in Rust, this file only maps level → ANSI color
@@ -61,25 +63,32 @@ const COLOR: Record<string, (s: string) => string> = {
 	warn: (s) => `\x1b[33m${s}${RESET}`, // yellow
 	err: (s) => `\x1b[1;31m${s}${RESET}`, // bold red
 };
-// Display label per segment (uppercase tool name, a couple of friendlier names).
+// Display label per segment (Title-case tool name, a few friendlier names).
 const LABEL: Record<string, string> = {
-	supervise: "SERVICES",
-	codegraph: "CODE",
-	codeindex: "INDEX",
-	orchestrate: "AGENTS",
+	supervise: "Services",
+	codegraph: "Code",
+	codeindex: "Index",
+	orchestrate: "Agents",
+	rag: "Docs",
 };
+const label = (key: string) => LABEL[key] ?? key[0].toUpperCase() + key.slice(1);
 const paint = (key: string, raw: string): string => {
 	const cut = raw.indexOf("|");
 	if (cut < 0) return raw;
 	const level = raw.slice(0, cut);
-	let text = raw.slice(cut + 1);
-	// Insert the label after the icon: `🧠 w:0 …` → `🧠 MEMORY: w:0 …`.
-	const label = LABEL[key] ?? key.toUpperCase();
+	const text = raw.slice(cut + 1);
 	const sp = text.indexOf(" ");
 	const first = sp > 0 ? text.slice(0, sp) : "";
 	const iconLike = first.length > 0 && /[^\x00-\x7f]/.test(first);
-	text = iconLike ? `${first} \x1b[1m${label}:\x1b[22m${text.slice(sp)}` : `\x1b[1m${label}:\x1b[22m ${text}`;
-	return (COLOR[level] ?? ((s: string) => s))(text);
+	// Healthy = `icon Name ✓` only — the details are noise when nothing is
+	// wrong; Rust already judged the level. warn/err keep the full message.
+	if (level === "ok") {
+		return `${iconLike ? `${first} ` : ""}\x1b[1m${label(key)}\x1b[22m ${COLOR.ok("✓")}`;
+	}
+	const body = iconLike
+		? `${first} \x1b[1m${label(key)}:\x1b[22m${text.slice(sp)}`
+		: `\x1b[1m${label(key)}:\x1b[22m ${text}`;
+	return (COLOR[level] ?? ((s: string) => s))(body);
 };
 
 // Tools whose footer activity is shown (all registered crate tools).
