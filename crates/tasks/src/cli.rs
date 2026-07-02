@@ -10,8 +10,13 @@ use httpc::args::{flag, has};
 use crate::board;
 use crate::store::{now, Store, Task, COLUMNS};
 
-fn db_path(args: &[String]) -> PathBuf {
-    flag(args, "--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/tasks.semdb"))
+fn db_path(args: &[String]) -> Result<PathBuf, String> {
+    // --project <name> = that workspace repo's own board
+    // (<repo>/.smartagent/tasks.semdb) — tasks never mix between repos.
+    if let Some(p) = flag(args, "--project") {
+        return semdb::workspace::data_path(&p, "tasks.semdb");
+    }
+    Ok(flag(args, "--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/tasks.semdb")))
 }
 
 fn valid_col(c: &str) -> Result<(), String> {
@@ -19,7 +24,7 @@ fn valid_col(c: &str) -> Result<(), String> {
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {
-    let store = Store::open(&db_path(args))?;
+    let store = Store::open(&db_path(args)?)?;
     match args.first().map(String::as_str) {
         Some("add") | Some("todo") => {
             let quick = args[0] == "todo"; // todo = frictionless capture into backlog
@@ -101,6 +106,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let mut fwd = vec!["move".to_string(), id, "done".to_string()];
             if has(args, "--force") { fwd.push("--force".into()); }
             if let Some(db) = flag(args, "--db") { fwd.push("--db".into()); fwd.push(db); }
+            if let Some(p) = flag(args, "--project") { fwd.push("--project".into()); fwd.push(p); }
             run(&fwd)
         }
         Some("next") => {
@@ -196,5 +202,7 @@ USAGE:
   tasks rm T-1
 
 Columns: backlog → ready → doing → review → done. Default db: data/tasks.semdb.
+Every verb accepts --project <name>: that workspace repo's OWN board at
+workspaces/<name>/.smartagent/tasks.semdb (boards never mix between repos).
 Kanban rules live in skills/Kanban (triage, pull, review, retro workflows).
 "#;

@@ -9,8 +9,13 @@ use httpc::args::flag;
 use crate::def::{self, Def};
 use crate::run::{now, Run, Store};
 
-fn db_path(args: &[String]) -> PathBuf {
-    flag(args, "--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/workflow.semdb"))
+fn db_path(args: &[String]) -> Result<PathBuf, String> {
+    // --project <name>: run state lives with that workspace repo, matching the
+    // per-repo tasks board its runs link to (T-n ids are board-scoped).
+    if let Some(p) = flag(args, "--project") {
+        return semdb::workspace::data_path(&p, "workflow.semdb");
+    }
+    Ok(flag(args, "--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/workflow.semdb")))
 }
 
 fn root(args: &[String]) -> PathBuf {
@@ -45,7 +50,7 @@ fn resolve_run(store: &Store, args: &[String]) -> Result<Run, String> {
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {
-    let store = Store::open(&db_path(args))?;
+    let store = Store::open(&db_path(args)?)?;
     match args.first().map(String::as_str) {
         Some("list") => {
             let defs = def::discover(&root(args))?;
@@ -157,6 +162,8 @@ USAGE:
   workflow runs                          all runs + status
   workflow abort [--run W-1]
 
-Run state: data/workflow.semdb. A step names the skill/tool to use — load it,
-do the step, verify, then advance with what you verified as evidence.
+Run state: data/workflow.semdb; --project <name> scopes runs to that workspace
+repo (workspaces/<name>/.smartagent/workflow.semdb, pairs with tasks --project).
+A step names the skill/tool to use — load it, do the step, verify, then
+advance with what you verified as evidence.
 "#;

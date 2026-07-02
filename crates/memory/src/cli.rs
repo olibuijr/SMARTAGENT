@@ -6,7 +6,12 @@ use std::path::PathBuf;
 use crate::tiers::{resolve_tiers, Memory};
 
 fn dir(args: &[String]) -> Result<PathBuf, String> {
-    flag(args, "--dir").map(PathBuf::from).ok_or_else(|| "--dir required".into())
+    // --project <name> = that workspace repo's own memory at
+    // <repo>/.smartagent/memory — per the project-facts memory policy.
+    if let Some(p) = flag(args, "--project") {
+        return semdb::workspace::data_path(&p, "memory");
+    }
+    flag(args, "--dir").map(PathBuf::from).ok_or_else(|| "--dir or --project required".into())
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {

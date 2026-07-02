@@ -127,8 +127,8 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 |------|---------------|--------------|
 | `akurai-router` | — (provider) | Registers AkurAI-Router models (claude/*, codex/*) as the pi provider |
 | `semdb` | `semdb` | Semantic DB: embed, search (`--ids-only`/`--meta-chars`/`--filter key=value`), get, del, count/ids (`--prefix`), stats |
-| `memory` | `memory` | 3-tier memory: remember, update, recall (`scope` tier), recent, forget, promote, stats. Session intents auto-recalled at launch |
-| `codegraph` | `codegraph` | Rust code graph: index, defs/refs/callers/impls (`--limit`), path (BFS call-path), semantic search, stats |
+| `memory` | `memory` | 3-tier memory: remember, update, recall (`scope` tier), recent, forget, promote, stats. `project` scopes to a workspace repo's own store (`.smartagent/memory`). Session intents auto-recalled at launch |
+| `codegraph` | `codegraph` | Rust code graph: index, defs/refs/callers/impls (`--limit`), path (BFS call-path), semantic search, stats. `--project` = that workspace repo's own graph (`.smartagent/codegraph.json`) — per-repo graphs never clobber |
 | `codeindex` | `codeindex` | Fast code search + workspace project index: search/files (`--project` scopes to a workspaces/ repo), projects (list repos + index status), index (per-repo file inventory → `<repo>/.smartagent/codeindex.semdb`, one project or all) |
 | `vault` | `vault` | Markdown brain: new, read (`--head`), append, rm, mv (link-rewrite), list, links, graph (`--note`/`--depth`), search |
 | `skills` | `skills` | Agent Skills loader: list, show (`--head`), search, match (prompt-scored auto-trigger) |
@@ -142,14 +142,14 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `sandbox` | `sandbox` | Isolated exec: run (`--tail`, 16KB cap, `--stdin`, `--no-isolate`), clean. Env scrubbed + secrets tmpfs-masked, isolation ON |
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
 | `evals` | `evals` | Trace/score/diff: log, score (`--min-pass`/`--fail-only`), diff, runs |
-| `rag` | `rag` | Document RAG: ingest (file or `--url`), retrieve (`--doc-id`/`--snippet-chars`/`--ids-only`), get, delete-doc, stats |
-| `tasks` | `tasks` | Kanban board: board/add/todo/next/move/done/show/list/crit/block/wip/metrics. WIP limits + criteria-gated done enforced in Rust; methodology in `skills/Kanban` |
-| `workflow` | `workflow` | Markdown-defined process engine (PAI skill-per-step pattern): list/show/start/step/advance(evidence-gated)/runs/abort. Definitions in `workflows/` + `skills/*/Workflows/` |
+| `rag` | `rag` | Document RAG: ingest (file or `--url`), retrieve (`--doc-id`/`--snippet-chars`/`--ids-only`), get, delete-doc, stats. `--project` = per-repo corpus (`.smartagent/rag.semdb`) |
+| `tasks` | `tasks` | Kanban board: board/add/todo/next/move/done/show/list/crit/block/wip/metrics. `--project` = that workspace repo's OWN board (`.smartagent/tasks.semdb`) — tasks never mix between repos. WIP limits + criteria-gated done enforced in Rust; methodology in `skills/Kanban` |
+| `workflow` | `workflow` | Markdown-defined process engine (PAI skill-per-step pattern): list/show/start/step/advance(evidence-gated)/runs/abort. `--project` keeps run state on the repo whose tasks board the run links. Definitions in `workflows/` + `skills/*/Workflows/` |
 | `voice` | `voice` | STT/TTS bridge (Pipecat concept). BUILT+TESTED but DELISTED (extensions/disabled/) — no titan speech server deployed |
 | `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
 | _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |
 | _(no tool)_ | `hooks` | `hooks.ts`: user-configurable lifecycle hooks (config/hooks.conf + hooks.d/) — tool_call block/rewrite, user_prompt block, session_start context injection, stop audit. Claude Code stdin-JSON/exit-2 contract; firings audited to data/hooks.semdb |
-| _(no tool)_ | all crates | `statusline.ts`: TUI statusline — per-tool ⚙/✓/✗+duration footer statuses (ANSI-colored) on tool_execution events, plus a two-line belowEditor widget: infra `⛭` (supervise services, 🧱 sandbox, 🔑 secrets auth, 🌐 chrome, 🔎 searx, 🕸 codegraph) and data `▦` (🧠 memory, 📚 rag, ⏰ schedule, 📊 evals, 🤖 orchestrate). Each segment is a Rust `<crate> statusline` verb emitting `level\|icon text` (ok/warn/err decided in Rust); TS only colors (green/yellow/red) and places. Refreshed at session start, after related tool runs, every 30s |
+| _(no tool)_ | all crates | `statusline.ts`: TUI statusline — per-tool ⚙/✓/✗+duration footer statuses (ANSI-colored) on tool_execution events, plus a THREE-line belowEditor widget grouped by scope: workspace `⌂` (🕸 codegraph, 🗃 codeindex repos-indexed+files, 📋 tasks, ▶ workflow), data `▦` (🧠 memory, 📚 rag, ⏰ schedule, 📊 evals, 🤖 orchestrate), infra `⛭` (supervise services, 🧱 sandbox, 🔑 secrets auth, 🌐 chrome, 🔎 searx, 🪝 hooks). Each segment is a Rust `<crate> statusline` verb emitting `level\|icon text` (ok/warn/err decided in Rust); TS only colors (green/yellow/red) and places. Refreshed at session start, after related tool runs, every 30s |
 
 ## Conventions
 

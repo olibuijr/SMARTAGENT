@@ -29,7 +29,9 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Document RAG store. Actions: 'ingest' chunks/embeds a text/PDF-text file; 'retrieve' semantically " +
 			"searches and returns cited chunks (scope to one document with docId); 'get' fetches one chunk's full " +
-			"text by id; 'delete-doc' removes a document by docId; 'stats' shows counts.",
+			"text by id; 'delete-doc' removes a document by docId; 'stats' shows counts. Set 'project' to use a " +
+			"workspace repo's OWN corpus (workspaces/<project>/.smartagent/rag.semdb) — per-repo documents never mix; " +
+			"omit it for the global corpus.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -42,32 +44,39 @@ export default function (pi: ExtensionAPI) {
 				k: { type: "number", description: "Result count for retrieve (default 5)" },
 				snippetChars: { type: "number", description: "truncate each chunk body (default 240)" },
 				idsOnly: { type: "boolean", description: "return only citations+scores, no chunk text (cheap; then use get)" },
-				db: { type: "string", description: "Database file (default data/rag.semdb)" },
+				db: { type: "string", description: "Database file (default data/rag.semdb; ignored when project is set)" },
+				project: { type: "string", description: "workspace repo name — use that repo's own corpus instead of the global one" },
 			},
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
-			const db = p.db ?? DB;
+			// project → per-repo db resolved in Rust (--project replaces the db
+			// positional); otherwise the explicit/default db path. The existsSync
+			// friendliness guard only applies to path-known (non-project) dbs.
+			const scoped = Boolean(p.project);
+			const dbArgs = scoped ? [] : [p.db ?? DB];
+			const scope = scoped ? ["--project", p.project] : [];
+			const present = scoped || existsSync(p.db ?? DB);
 			let out: string;
 			if (p.action === "ingest") {
-				const args = p.url ? ["ingest", db, "--url", p.url] : ["ingest", db, p.path ?? ""];
+				const args = p.url ? ["ingest", ...dbArgs, "--url", p.url] : ["ingest", ...dbArgs, p.path ?? ""];
 				if (p.docId) args.push("--doc-id", p.docId);
-				out = run(args);
+				out = run([...args, ...scope]);
 			} else if (p.action === "retrieve") {
-				if (!existsSync(db)) { out = "no chunks"; }
+				if (!present) { out = "no chunks"; }
 				else {
-					const args = ["retrieve", db, "--text", p.query ?? "", "--k", String(p.k ?? 5)];
+					const args = ["retrieve", ...dbArgs, "--text", p.query ?? "", "--k", String(p.k ?? 5)];
 					if (p.docId) args.push("--doc-id", p.docId); // scope to one document
 					if (p.idsOnly) args.push("--ids-only");
 					if (p.snippetChars != null) args.push("--snippet-chars", String(p.snippetChars));
-					out = untrusted("RETRIEVED DOCUMENTS", run(args));
+					out = untrusted("RETRIEVED DOCUMENTS", run([...args, ...scope]));
 				}
 			} else if (p.action === "get") {
-				out = existsSync(db) ? untrusted("DOCUMENT CHUNK", run(["get", db, "--id", p.id ?? ""])) : "no chunks";
+				out = present ? untrusted("DOCUMENT CHUNK", run(["get", ...dbArgs, "--id", p.id ?? "", ...scope])) : "no chunks";
 			} else if (p.action === "delete-doc") {
-				out = existsSync(db) ? run(["delete-doc", db, "--doc-id", p.docId ?? ""]) : "no chunks";
+				out = present ? run(["delete-doc", ...dbArgs, "--doc-id", p.docId ?? "", ...scope]) : "no chunks";
 			} else {
-				out = existsSync(db) ? run(["stats", db]) : "chunks: 0\ndocuments: 0\nrecords: 0";
+				out = present ? run(["stats", ...dbArgs, ...scope]) : "chunks: 0\ndocuments: 0\nrecords: 0";
 			}
 			return { content: [{ type: "text", text: out }] };
 		},

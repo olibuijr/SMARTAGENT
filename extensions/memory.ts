@@ -8,8 +8,11 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "memory");
 const DIR = join(ROOT, "data", "memory");
 
-function run(args: string[]): string {
-	try { return execFileSync(BIN, [...args, "--dir", DIR], { encoding: "utf8", timeout: 90_000, cwd: ROOT }).trim(); }
+function run(args: string[], project?: string): string {
+	// --project = that workspace repo's own memory (.smartagent/memory);
+	// otherwise the agent-global store.
+	const scope = project ? ["--project", project] : ["--dir", DIR];
+	try { return execFileSync(BIN, [...args, ...scope], { encoding: "utf8", timeout: 90_000, cwd: ROOT }).trim(); }
 	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
 }
 
@@ -17,7 +20,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "memory",
 		label: "Memory",
-		description: "Persistent 3-tier memory (working=recent, episodic=events, semantic=durable facts). Actions: 'remember' stores a fact; 'update' overwrites an existing fact by id (dedupe/correct — prefer over remembering a contradiction); 'recall' semantically searches (optionally scoped to one tier); 'recent' lists the newest N in a tier; 'forget' deletes by id; 'promote' moves a fact between tiers; 'stats' shows counts.",
+		description: "Persistent 3-tier memory (working=recent, episodic=events, semantic=durable facts). Actions: 'remember' stores a fact; 'update' overwrites an existing fact by id (dedupe/correct — prefer over remembering a contradiction); 'recall' semantically searches (optionally scoped to one tier); 'recent' lists the newest N in a tier; 'forget' deletes by id; 'promote' moves a fact between tiers; 'stats' shows counts. Set 'project' to use a workspace repo's OWN memory (workspaces/<project>/.smartagent/memory) — per the memory policy, durable facts about a repo belong in that repo's store, not the global one.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -30,32 +33,34 @@ export default function (pi: ExtensionAPI) {
 				scope: { type: "string", enum: ["all", "working", "episodic", "semantic"], description: "restrict recall to one tier (default all)" },
 				from: { type: "string", description: "source tier (promote)" },
 				to: { type: "string", description: "destination tier (promote)" },
+				project: { type: "string", description: "workspace repo name — use that repo's own memory store instead of the global one" },
 			},
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
+			const r = (a: string[]) => run(a, p.project);
 			let out: string;
 			switch (p.action) {
 				case "remember":
-					out = run(["remember", "--tier", p.tier ?? "semantic", "--text", p.text ?? "", ...(p.id ? ["--id", p.id] : [])]);
+					out = r(["remember", "--tier", p.tier ?? "semantic", "--text", p.text ?? "", ...(p.id ? ["--id", p.id] : [])]);
 					break;
 				case "update":
-					out = run(["remember", "--tier", p.tier ?? "semantic", "--id", p.id ?? "", "--text", p.text ?? ""]);
+					out = r(["remember", "--tier", p.tier ?? "semantic", "--id", p.id ?? "", "--text", p.text ?? ""]);
 					break;
 				case "recall":
-					out = run(["recall", "--text", p.text ?? "", "--k", String(p.k ?? 5), "--tier", p.scope ?? "all"]);
+					out = r(["recall", "--text", p.text ?? "", "--k", String(p.k ?? 5), "--tier", p.scope ?? "all"]);
 					break;
 				case "recent":
-					out = run(["recent", "--tier", p.tier ?? "episodic", "--n", String(p.n ?? 5)]);
+					out = r(["recent", "--tier", p.tier ?? "episodic", "--n", String(p.n ?? 5)]);
 					break;
 				case "forget":
-					out = run(["forget", "--tier", p.tier ?? "semantic", "--id", p.id ?? ""]);
+					out = r(["forget", "--tier", p.tier ?? "semantic", "--id", p.id ?? ""]);
 					break;
 				case "promote":
-					out = run(["promote", "--id", p.id ?? "", "--from", p.from ?? "", "--to", p.to ?? ""]);
+					out = r(["promote", "--id", p.id ?? "", "--from", p.from ?? "", "--to", p.to ?? ""]);
 					break;
 				default:
-					out = run(["stats"]);
+					out = r(["stats"]);
 			}
 			return { content: [{ type: "text", text: out }] };
 		},

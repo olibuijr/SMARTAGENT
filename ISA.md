@@ -98,6 +98,20 @@ Workspace project indexing (2026-07-02):
 - [x] ISC-44: cargo test green for codeindex (incl. project roundtrip + traversal-guard tests) and semdb (put_many)
 - [x] ISC-45: live `./pi` run indexes workspace repos with per-repo success/fail monitored
 
+Per-project scoping + 3-line statusline (2026-07-02):
+- [x] ISC-46: shared `semdb::workspace` module (root/list/resolve/data_path, traversal-guarded) with tests; codeindex delegates to it
+- [x] ISC-47: tasks `--project` = per-repo board at `<repo>/.smartagent/tasks.semdb`; boards proven isolated (A's task invisible on B and root)
+- [x] ISC-48: codegraph `--project` = per-repo graph for index AND queries (global single-slot clobbering fixed); 0-symbol non-Rust note
+- [x] ISC-49: memory `--project` = per-repo store at `.smartagent/memory` (memory-policy alignment); session intents stay global
+- [x] ISC-50: rag `--project` = per-repo corpus; friendly no-corpus error instead of ENOENT
+- [x] ISC-51: workflow `--project` = per-repo run state (pairs with the repo's tasks board its T-n ids reference)
+- [x] ISC-52: statusline widget = 3 scope-grouped lines (⌂ workspace / ▦ data / ⛭ infra), workspace first
+- [x] ISC-53: new `codeindex statusline` segment shows repos-indexed/total + files (`ok|🗃 27/27 repos, 2554 files`), warn on unindexed/stale
+- [x] ISC-54: Anti: `--project` cannot escape workspaces root (traversal rejected) and never touches host-global stores
+- [x] ISC-55: Anti: default (no project) behavior of every tool unchanged; global stores had no repo-scoped data needing migration (verified)
+- [x] ISC-56: extensions expose `project` param (tasks/codegraph/memory/rag/workflow); `./build.sh` gate green, 20/20 tools register
+- [x] ISC-57: codex fusion tester 10/10 PASS + live `./pi` run 6/6 PASS on project scoping
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |
@@ -144,4 +158,5 @@ Workspace project indexing (2026-07-02):
 - 2026-07-02: E5 ISC floor (≥256) deferred — project ISA starts at 36 spine ISCs; per-crate ISCs grow during waves (refined: will expand as crates land).
 - 2026-07-02: TUI statusline shipped — pi natively supports `ctx.ui.setStatus` + `setWidget(placement: belowEditor)`; added `supervise statusline` Rust verb + `extensions/statusline.ts` (per-tool footer statuses from tool_execution events, services widget below input). No new tool registered; logic stays in Rust per constraint.
 - 2026-07-02: ISC-26 landed and certified — `crates/rag` ports the RAGFlow ingestion/retrieval slice into std-only Rust, stores chunks as semdb rows, returns `[ID:...]` cited chunks, has `extensions/rag.ts`, passes codex fusion tester, and was driven through `./pi -p`.
+- 2026-07-02: Per-project scoping generalized (ISC-46..57) — SystemsThinking pass found three miscoupled stores beyond the tasks ask: codegraph (per-repo data in ONE global slot → silent clobbering on repo switch), memory (policy says per-repo, default was global-only), workflow (runs reference board-scoped T-n ids, must follow the board). Mechanism: shared `semdb::workspace` (resolve/data_path under `<repo>/.smartagent/`), thin `--project` flag per crate, extensions pass `project` through — zero logic in TS. Kept host-global by design: vault, evals, schedule, secrets, session intents. codegraph stays Rust-only (TS repos index 0 symbols — explanatory note added at index time, multi-language lexing is a separate backlog item). Statusline: 2 crowded lines → 3 scope-grouped lines (⌂ workspace / ▦ data / ⛭ infra); new codeindex segment. Delegation floor: Forge/Cato skipped per standing Claude-family-only rule; codex exec fusion tester (10/10 PASS) is the cross-vendor check.
 - 2026-07-02: codeindex gained workspace-project support (ISC-37..45) — projects moved into workspaces/ were invisible (`workspaces` in ALWAYS-skip, no project concept). Design: per-repo structural file inventory in `<repo>/.smartagent/codeindex.semdb` (semdb table per memory policy; no vectors — no meaning-based lookup needed), `--project` scoping for live search, `index --all` restricted to git repos (numeric orchestrate run-dirs and infra dirs excluded). semdb gained `put_many` (single-fsync bulk insert) because per-put `sync_data` would cost one fsync per file row. Fixed latent `positional_dir` bug: flag values (e.g. `-t rs`) could be mistaken for the search dir.

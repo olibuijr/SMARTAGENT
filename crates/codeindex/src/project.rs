@@ -6,9 +6,12 @@
 //! placeholder vector) plus one summary row. Structural rows only: no
 //! embeddings, so indexing needs no network.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use semdb::storage::Db;
+// Project discovery/resolution is the shared semdb::workspace mechanism; this
+// module keeps only what is codeindex-specific (building/reading the index).
+pub use semdb::workspace::{list, resolve_in as resolve, root as workspaces_root, Project};
 
 use crate::gitignore::Rules;
 use crate::walk;
@@ -19,60 +22,9 @@ const SUMMARY_ID: &str = "__codeindex_summary__";
 /// blobs for a line count wastes index time on artifacts.
 const MAX_LINECOUNT_BYTES: u64 = 2_000_000;
 
-pub struct Project {
-    pub name: String,
-    pub path: PathBuf,
-    pub is_repo: bool,
-}
-
 pub struct IndexStats {
     pub files: usize,
     pub bytes: u64,
-}
-
-/// Absolute workspaces root from config (`workspaces_dir`).
-pub fn workspaces_root() -> Result<PathBuf, String> {
-    let root = semdb::config::Config::load().workspaces_dir();
-    if root.is_dir() {
-        Ok(root)
-    } else {
-        Err(format!("workspaces dir not found: {}", root.display()))
-    }
-}
-
-/// All project candidates: direct child dirs, sorted, hidden dirs skipped.
-pub fn list(root: &Path) -> Vec<Project> {
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for e in entries.flatten() {
-            let path = e.path();
-            let name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n.to_string(),
-                None => continue,
-            };
-            if !path.is_dir() || name.starts_with('.') {
-                continue;
-            }
-            let is_repo = path.join(".git").exists();
-            out.push(Project { name, path, is_repo });
-        }
-    }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    out
-}
-
-/// Resolve a project name to its directory. Rejects path traversal so
-/// `--project` can never escape the workspaces root.
-pub fn resolve(root: &Path, name: &str) -> Result<PathBuf, String> {
-    if name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err(format!("invalid project name: {name}"));
-    }
-    let p = root.join(name);
-    if p.is_dir() {
-        Ok(p)
-    } else {
-        Err(format!("no such project under workspaces: {name}"))
-    }
 }
 
 /// (Re)build the file index for one project. Fresh rebuild each run: the old
@@ -150,6 +102,7 @@ pub fn human_age(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn scratch(name: &str) -> PathBuf {
         let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -181,19 +134,5 @@ mod tests {
         assert_eq!(s2.files, 3);
     }
 
-    #[test]
-    fn list_marks_repos_and_resolve_guards_traversal() {
-        let ws = scratch("ci-projlist");
-        std::fs::create_dir_all(ws.join("repo/.git")).unwrap();
-        std::fs::create_dir_all(ws.join("plain")).unwrap();
-        std::fs::create_dir_all(ws.join(".hidden")).unwrap();
-        let ps = list(&ws);
-        let names: Vec<&str> = ps.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["plain", "repo"]);
-        assert!(ps.iter().find(|p| p.name == "repo").unwrap().is_repo);
-        assert!(!ps.iter().find(|p| p.name == "plain").unwrap().is_repo);
-        assert!(resolve(&ws, "repo").is_ok());
-        assert!(resolve(&ws, "../escape").is_err());
-        assert!(resolve(&ws, "missing").is_err());
-    }
+    // Discovery/resolution tests live with the shared impl: semdb::workspace.
 }

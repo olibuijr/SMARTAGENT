@@ -12,6 +12,7 @@ use crate::pdftext::{self, Kind};
 use crate::store::{self, RetrievedChunk};
 
 pub fn run(args: &[String]) -> Result<String, String> {
+    let args = &with_project_db(args)?;
     match args.first().map(String::as_str) {
         Some("chunk") => {
             let path = path_arg(args, 1, "file")?;
@@ -166,6 +167,31 @@ fn chunk_config(args: &[String]) -> ChunkConfig {
     }
 }
 
+/// Rewrite `<verb> --project X …` into `<verb> <db-path> …` so every
+/// db-positional verb gains per-repo scoping (<repo>/.smartagent/rag.semdb)
+/// without repositioning its other args. `chunk` takes no db — left alone.
+fn with_project_db(args: &[String]) -> Result<Vec<String>, String> {
+    if args.first().map(String::as_str) == Some("chunk") {
+        return Ok(args.to_vec());
+    }
+    let Some(p) = flag(args, "--project") else { return Ok(args.to_vec()) };
+    let db = semdb::workspace::data_path(&p, "rag.semdb")?;
+    // Reading verbs on a never-ingested project: friendly message, not ENOENT.
+    if args.first().map(String::as_str) != Some("ingest") && !db.exists() {
+        return Err(format!("no rag corpus for project '{p}' — ingest a document first"));
+    }
+    let mut out = vec![args[0].clone(), db.display().to_string()];
+    let mut i = 1;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--project" { i += 2; continue; }
+        if a.starts_with("--project=") { i += 1; continue; }
+        out.push(a.clone());
+        i += 1;
+    }
+    Ok(out)
+}
+
 fn path_arg(args: &[String], idx: usize, what: &str) -> Result<PathBuf, String> {
     args.get(idx)
         .map(Path::new)
@@ -224,6 +250,8 @@ USAGE:
   rag delete-doc <db> --doc-id ID
   rag stats      <db>
 
+Every db-taking verb also accepts --project <name> in place of <db>: that
+workspace repo's own corpus at workspaces/<name>/.smartagent/rag.semdb.
 Embedding config: config/smartagent.conf (embeddings_endpoint, embeddings_model)
 "#;
 

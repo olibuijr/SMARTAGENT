@@ -16,15 +16,29 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &[String]) -> Result<String, String> {
+    let args = &with_project_graph(args)?;
     match args.first().map(String::as_str) {
         Some("index") => {
-            let repo = args.get(1).map(PathBuf::from).ok_or("usage: codegraph index <repo-dir> --out <graph> [--embed]")?;
-            let out = flag(args, "--out").map(PathBuf::from).ok_or("--out required")?;
+            // --project <name>: index that workspace repo into ITS OWN graph at
+            // <repo>/.smartagent/codegraph.json — the single global slot
+            // (data/codegraph.json) otherwise clobbers on every repo switch.
+            let (repo, out) = if let Some(p) = flag(args, "--project") {
+                (semdb::workspace::resolve(&p)?, semdb::workspace::data_path(&p, "codegraph.json")?)
+            } else {
+                (
+                    args.get(1).filter(|a| !a.starts_with('-')).map(PathBuf::from)
+                        .ok_or("usage: codegraph index <repo-dir> --out <graph> | index --project <name> [--embed]")?,
+                    flag(args, "--out").map(PathBuf::from).ok_or("--out required")?,
+                )
+            };
             let mut graph = Graph::new();
             let mut files = 0;
             walk_rs(&repo, &repo, &mut graph, &mut files);
             graph.save(&out)?;
             let mut msg = format!("indexed {files} files → {} symbols, {} edges → {}", graph.symbols.len(), graph.edges.len(), out.display());
+            if graph.symbols.is_empty() {
+                msg.push_str("\nnote: 0 symbols — codegraph lexes Rust sources only; a non-Rust repo indexes empty (use codeindex for text search there)");
+            }
             if has(args, "--embed") {
                 let idx = symbol_index_path(&out);
                 let n = symdb::build_index(&graph, &idx)?;
@@ -111,7 +125,28 @@ fn query(args: &[String], f: impl Fn(&Graph, &str) -> Vec<String>, empty: &str) 
 }
 
 fn graph_arg(args: &[String]) -> Result<PathBuf, String> {
-    args.get(1).map(PathBuf::from).ok_or_else(|| "graph file required".into())
+    args.get(1).filter(|a| !a.starts_with('-')).map(PathBuf::from).ok_or_else(|| "graph file required (or --project <name>)".into())
+}
+
+/// Rewrite `<verb> --project X …` into `<verb> <graph-path> …` for the
+/// graph-reading verbs, so positional args (symbol names) keep their slots.
+/// `index` handles --project itself (it needs repo dir AND out path).
+fn with_project_graph(args: &[String]) -> Result<Vec<String>, String> {
+    if args.first().map(String::as_str) == Some("index") {
+        return Ok(args.to_vec());
+    }
+    let Some(p) = flag(args, "--project") else { return Ok(args.to_vec()) };
+    let graph = semdb::workspace::data_path(&p, "codegraph.json")?;
+    let mut out = vec![args[0].clone(), graph.display().to_string()];
+    let mut i = 1;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--project" { i += 2; continue; }
+        if a.starts_with("--project=") { i += 1; continue; }
+        out.push(a.clone());
+        i += 1;
+    }
+    Ok(out)
 }
 
 fn symbol_index_path(graph: &Path) -> PathBuf {
@@ -145,12 +180,15 @@ codegraph — Rust code knowledge graph (CodeGraph concept)
 
 USAGE:
   codegraph index <repo-dir> --out <graph.json> [--embed]
+  codegraph index --project <name> [--embed]      graph → workspaces/<name>/.smartagent/codegraph.json
   codegraph defs    <graph.json> <name>
   codegraph refs    <graph.json> <name>
   codegraph callers <graph.json> <fn>
   codegraph search  <graph.json> <query> [--k 5]   (needs --embed at index time)
   codegraph stats   <graph.json>
 
-Structural queries (defs/refs/callers) walk the graph; search is semdb-backed
-semantic symbol lookup over embeddings.
+Every graph-reading verb also accepts --project <name> in place of the
+graph path (per-repo graphs never clobber each other). Structural queries
+(defs/refs/callers) walk the graph; search is semdb-backed semantic symbol
+lookup over embeddings.
 "#;

@@ -14,9 +14,11 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "tasks");
 const DB = join(ROOT, "data", "tasks.semdb");
 
-function run(args: string[]): string {
+function run(args: string[], project?: string): string {
+	// --project = that workspace repo's own board; otherwise the root board.
+	const scope = project ? ["--project", project] : ["--db", DB];
 	try {
-		return execFileSync(BIN, [...args, "--db", DB], { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim();
+		return execFileSync(BIN, [...args, ...scope], { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim();
 	} catch (e: any) {
 		return `error: ${e.stderr?.toString().trim() || e.message}`;
 	}
@@ -32,6 +34,8 @@ export default function (pi: ExtensionAPI) {
 			"is capacity. Actions: board (render columns), add/todo (capture; criteria as 'a;b;c'), " +
 			"next (what to pull), move, done, show, list, crit (add/check/uncheck acceptance criteria), " +
 			"block/unblock (reason required), wip (limits), metrics (cycle time/throughput), rm. " +
+			"Set 'project' to use a workspace repo's OWN board (workspaces/<project>/.smartagent/tasks.semdb) " +
+			"— per-repo tasks never mix; omit it for the root SMARTAGENT board. " +
 			"Load the kanban skill (skills show kanban) for methodology; run 'workflow start task-run " +
 			"--task T-n' to work a task through the phase loop.",
 		parameters: {
@@ -53,6 +57,7 @@ export default function (pi: ExtensionAPI) {
 				doing: { type: "number", description: "wip: doing limit" },
 				review: { type: "number", description: "wip: review limit" },
 				force: { type: "boolean", description: "override WIP/criteria gates (avoid — see kanban skill)" },
+				project: { type: "string", description: "workspace repo name — use that repo's own board instead of the root board" },
 			},
 			required: ["action"],
 		} as any,
@@ -97,7 +102,7 @@ export default function (pi: ExtensionAPI) {
 					break;
 			}
 			if (p.force) a.push("--force");
-			return { content: [{ type: "text", text: run(a) }] };
+			return { content: [{ type: "text", text: run(a, p.project) }] };
 		},
 	});
 }

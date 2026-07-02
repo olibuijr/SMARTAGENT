@@ -17,8 +17,9 @@ instead of guessing or shelling out manually.
   verified — write the actual probe result, not "done".
 - **Pick skills with match.** `skills match '<the task sentence>'` scores all
   skills against the prompt; load the winner with `show` before specialized work.
-- **Statusline is live state.** The two colored rows under the input show
-  service/auth health (⛭) and data/flow state (▦). Red = act now (service
+- **Statusline is live state.** The three colored rows under the input show
+  workspace/code state (⌂ — code graph, repos indexed, tasks, workflow run),
+  data/flow state (▦), and service/auth health (⛭). Red = act now (service
   DOWN, token failing); yellow = attention (stale index, WIP full, blockers).
 - **Token discipline:** most tools take scope/limit flags — use them. Default
   to the cheapest form that answers the question (count/ids/files before rows;
@@ -26,12 +27,12 @@ instead of guessing or shelling out manually.
 
 ## Tools
 
-- **tasks** — kanban board (backlog→ready→doing→review→done): board, add/todo (criteria as 'a;b;c'), next (pull-based), move, done, show, list, crit add/check/uncheck, block/unblock (reason required), wip, metrics (cycle time/throughput), rm.
-- **workflow** — process engine: list, show, start (`task_id` links a board task), step (current instructions), advance (`evidence` REQUIRED, ≥10 chars, 'done'/'ok' rejected), runs, abort. Built-ins: task-run, triage (backlog hygiene), retro (flow improvement).
+- **tasks** — kanban board (backlog→ready→doing→review→done): board, add/todo (criteria as 'a;b;c'), next (pull-based), move, done, show, list, crit add/check/uncheck, block/unblock (reason required), wip, metrics (cycle time/throughput), rm. `project` = that workspace repo's OWN board — per-repo tasks never mix; omit for the root board.
+- **workflow** — process engine: list, show, start (`task_id` links a board task), step (current instructions), advance (`evidence` REQUIRED, ≥10 chars, 'done'/'ok' rejected), runs, abort. `project` keeps run state on a workspace repo — use the SAME project as the tasks board the run's task lives on. Built-ins: task-run, triage (backlog hygiene), retro (flow improvement).
 - **skills** — SKILL.md loader: list, match (score against a whole prompt — best picker), search (single term), show (`head` for progressive disclosure).
 - **semdb** — vector store. embed, search (`idsOnly`, `metaChars` to shrink), get, del, count (`prefix`), ids (`prefix`), stats. Vector dims are enforced per db.
-- **memory** — 3-tier memory. remember, update (correct by id — prefer over remembering a contradiction), recall (`scope` to one tier), recent, forget, promote, stats. Past-session intents auto-recalled at launch.
-- **codegraph** — Rust code graph: index, defs, refs, callers, impls, path (BFS call-path between two fns), search (semantic symbol), stats. `limit` caps output.
+- **memory** — 3-tier memory. remember, update (correct by id — prefer over remembering a contradiction), recall (`scope` to one tier), recent, forget, promote, stats. `project` = that workspace repo's own store — durable facts about a repo go THERE, not in the global store (memory policy). Past-session intents auto-recalled at launch.
+- **codegraph** — Rust code graph: index, defs, refs, callers, impls, path (BFS call-path between two fns), search (semantic symbol), stats. `limit` caps output. `project` = that workspace repo's own graph for indexing AND queries — per-repo graphs never clobber each other.
 - **codeindex** — fast code search + workspace project index. `mode`: count (totals only) / files (names) / lines (default, capped at `max`=50). Use count/files first to gauge breadth cheaply. `projects` lists repos under workspaces/ with index status; `index` builds a per-repo file inventory (`project` for one, omit for all — reports OK/FAIL per repo); `project` scopes search/files to one workspace repo.
 - **vault** — markdown brain: new, read (`head`), append, rm, mv (rewrites [[links]]), list, links, graph, search (keyword).
 - **schedule** — durable scheduler. add (`notify` message; `cron` recurring OR `at` YYYY-MM-DDTHH:MM one-shot — local time via utc_offset_minutes config), pause, resume, list, next, rm, tick. A supervised daemon fires jobs. Arbitrary shell is admin-only.
@@ -45,7 +46,7 @@ instead of guessing or shelling out manually.
 - **sandbox** — isolated shell exec (secrets masked, env scrubbed, ulimit caps): run (`tail` keeps last output — right for build logs; default 16KB cap), clean. Warns if namespace isolation is unavailable.
 - **context** — principal identity/context loader: compose, validate, stat.
 - **evals** — trace/score/diff: log, score (`minPass` → error below threshold, `failOnly`), diff, runs.
-- **rag** — document RAG: ingest (file or `url`, http; re-ingest replaces old chunks), retrieve (`docId` scope, `snippetChars`, `idsOnly`), get (full chunk), delete-doc, stats.
+- **rag** — document RAG: ingest (file or `url`, http; re-ingest replaces old chunks), retrieve (`docId` scope, `snippetChars`, `idsOnly`), get (full chunk), delete-doc, stats. `project` = that workspace repo's own corpus.
 
 _(voice — STT/TTS — built but disabled: no titan speech server. See extensions/disabled/.)_
 

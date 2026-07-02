@@ -10,3 +10,4 @@ pub mod http;
 pub use httpc::json;
 pub mod storage;
 pub mod vector;
+pub mod workspace;

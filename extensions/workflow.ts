@@ -14,9 +14,12 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "workflow");
 const DB = join(ROOT, "data", "workflow.semdb");
 
-function run(args: string[]): string {
+function run(args: string[], project?: string): string {
+	// --project = run state lives with that workspace repo (pairs with the
+	// repo's own tasks board); otherwise the root db. Defs always from ROOT.
+	const scope = project ? ["--project", project] : ["--db", DB];
 	try {
-		return execFileSync(BIN, [...args, "--root", ROOT, "--db", DB], { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim();
+		return execFileSync(BIN, [...args, "--root", ROOT, ...scope], { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim();
 	} catch (e: any) {
 		return `error: ${e.stderr?.toString().trim() || e.message}`;
 	}
@@ -33,7 +36,9 @@ export default function (pi: ExtensionAPI) {
 			"triage (backlog refinement), retro (flow retrospective). Actions: list (discover), " +
 			"show (outline), start (begin; link a board task with task_id), step (current instructions), " +
 			"advance (complete step with evidence), runs, abort. Follow the printed step instructions, " +
-			"load the step's skill, verify, then advance.",
+			"load the step's skill, verify, then advance. Set 'project' to keep run state with a workspace " +
+			"repo (workspaces/<project>/.smartagent/workflow.semdb) — use the SAME project as the tasks " +
+			"board the run's task lives on.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -42,6 +47,7 @@ export default function (pi: ExtensionAPI) {
 				run: { type: "string", description: "run id (W-1); defaults to latest running" },
 				task_id: { type: "string", description: "start: link a kanban task (T-n)" },
 				evidence: { type: "string", description: "advance: WHAT you verified and HOW (required, ≥10 chars)" },
+				project: { type: "string", description: "workspace repo name — keep run state on that repo (match the tasks board)" },
 			},
 			required: ["action"],
 		} as any,
@@ -52,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 			if (p.task_id) a.push("--task", p.task_id);
 			if (p.run) a.push("--run", p.run);
 			if (p.evidence) a.push("--evidence", p.evidence);
-			return { content: [{ type: "text", text: run(a) }] };
+			return { content: [{ type: "text", text: run(a, p.project) }] };
 		},
 	});
 }

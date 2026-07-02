@@ -774,6 +774,7 @@ name = "desktop-agent"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "httpc",
 ]
 
 [[package]]

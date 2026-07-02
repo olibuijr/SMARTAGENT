@@ -2,13 +2,15 @@
  * statusline — pi extension that surfaces SMARTAGENT tool + service statuses
  * in the TUI, using pi's footer status entries and a belowEditor widget.
  *
- * Three surfaces:
+ * Four surfaces:
  *  - Per-tool activity: tool_execution_start/end events → ctx.ui.setStatus(tool, …)
  *    (⚙ running, then ✓/✗ with duration; auto-clears after a few seconds).
- *  - Infra line (belowEditor): ⛭ services · 🧱 sandbox · 🔑 secrets auth ·
- *    🌐 chrome · 🔎 searx · 🕸 codegraph — slow-changing host/infra state.
+ *  - Workspace line (belowEditor, first — most task-relevant): 🕸 code graph ·
+ *    🗃 workspace repos indexed + files · 📋 tasks board · ▶ workflow run.
  *  - Data line (belowEditor): 🧠 memory tiers · 📚 rag corpus · ⏰ next job ·
  *    📊 evals · 🤖 orchestrate — volatile stats, re-probed after related tools run.
+ *  - Infra line (belowEditor, last — least volatile): ⛭ services · 🧱 sandbox ·
+ *    🔑 secrets auth · 🌐 chrome · 🔎 searx · 🪝 hooks.
  *
  * Every segment comes from a Rust `statusline` verb emitting `level|icon text`;
  * severity classification lives in Rust, this file only maps level → ANSI color
@@ -25,22 +27,31 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = (name: string) => join(ROOT, "target", "release", name);
 
 // ── Segment registry: tool → binary args + which widget line it lives on ──
-type Line = "infra" | "data";
+// Lines are scope-grouped: workspace (per-repo work state) → data (agent
+// stores) → infra (host services). Workspace first: most task-relevant.
+type Line = "workspace" | "data" | "infra";
 const SEGMENTS: { key: string; args: string[]; line: Line }[] = [
-	{ key: "supervise", args: ["statusline"], line: "infra" },
-	{ key: "sandbox", args: ["statusline"], line: "infra" },
-	{ key: "secrets", args: ["statusline", "--store", join(ROOT, "data", "secrets")], line: "infra" },
-	{ key: "browser", args: ["statusline"], line: "infra" },
-	{ key: "search", args: ["statusline"], line: "infra" },
-	{ key: "codegraph", args: ["statusline", join(ROOT, "data", "codegraph.json")], line: "infra" },
-	{ key: "hooks", args: ["statusline", "--root", ROOT], line: "infra" },
+	{ key: "codegraph", args: ["statusline", join(ROOT, "data", "codegraph.json")], line: "workspace" },
+	{ key: "codeindex", args: ["statusline"], line: "workspace" },
+	{ key: "tasks", args: ["statusline", "--db", join(ROOT, "data", "tasks.semdb")], line: "workspace" },
+	{ key: "workflow", args: ["statusline", "--root", ROOT, "--db", join(ROOT, "data", "workflow.semdb")], line: "workspace" },
 	{ key: "memory", args: ["statusline", "--dir", join(ROOT, "data", "memory")], line: "data" },
 	{ key: "rag", args: ["statusline", join(ROOT, "data", "rag.semdb")], line: "data" },
 	{ key: "schedule", args: ["statusline"], line: "data" },
 	{ key: "evals", args: ["statusline", "--db", join(ROOT, "data", "evals.jsonl")], line: "data" },
 	{ key: "orchestrate", args: ["statusline"], line: "data" },
-	{ key: "tasks", args: ["statusline", "--db", join(ROOT, "data", "tasks.semdb")], line: "data" },
-	{ key: "workflow", args: ["statusline", "--root", ROOT, "--db", join(ROOT, "data", "workflow.semdb")], line: "data" },
+	{ key: "supervise", args: ["statusline"], line: "infra" },
+	{ key: "sandbox", args: ["statusline"], line: "infra" },
+	{ key: "secrets", args: ["statusline", "--store", join(ROOT, "data", "secrets")], line: "infra" },
+	{ key: "browser", args: ["statusline"], line: "infra" },
+	{ key: "search", args: ["statusline"], line: "infra" },
+	{ key: "hooks", args: ["statusline", "--root", ROOT], line: "infra" },
+];
+// Line prefix icons, in display order.
+const LINES: { line: Line; icon: string }[] = [
+	{ line: "workspace", icon: "⌂" },
+	{ line: "data", icon: "▦" },
+	{ line: "infra", icon: "⛭" },
 ];
 
 // ANSI severity palette (raw escapes — runtime pi-tui imports are forbidden).
@@ -54,6 +65,7 @@ const COLOR: Record<string, (s: string) => string> = {
 const LABEL: Record<string, string> = {
 	supervise: "SERVICES",
 	codegraph: "CODE",
+	codeindex: "INDEX",
 	orchestrate: "AGENTS",
 };
 const paint = (key: string, raw: string): string => {
@@ -85,8 +97,9 @@ const REFRESH_AFTER: Record<string, string[]> = {
 	memory: ["memory"],
 	rag: ["rag"],
 	evals: ["evals"],
-	orchestrate: ["orchestrate"],
+	orchestrate: ["orchestrate", "codeindex"],
 	codegraph: ["codegraph"],
+	codeindex: ["codeindex"],
 	secrets: ["secrets"],
 	sandbox: ["sandbox"],
 	tasks: ["tasks"],
@@ -105,13 +118,13 @@ export default function (pi: ExtensionAPI) {
 
 	function render() {
 		if (!ui) return;
-		const row = (line: Line, icon: string) =>
+		const row = ({ line, icon }: { line: Line; icon: string }) =>
 			`${icon} ` +
 			SEGMENTS.filter((s) => s.line === line)
 				.map((s) => painted.get(s.key))
 				.filter(Boolean)
 				.join(" \x1b[2m·\x1b[0m ");
-		ui.setWidget("smartagent-statusline", [row("infra", "⛭"), row("data", "▦")], {
+		ui.setWidget("smartagent-statusline", LINES.map(row), {
 			placement: "belowEditor",
 		});
 	}

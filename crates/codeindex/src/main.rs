@@ -121,6 +121,31 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             Ok(out.join("\n"))
         }
+        Some("statusline") => {
+            // `level|icon text` for the TUI workspace line: repos indexed / total
+            // + total indexed files. warn (not err) when unindexed or stale so a
+            // fresh checkout degrades gracefully instead of screaming.
+            let root = match project::workspaces_root() {
+                Ok(r) => r,
+                Err(_) => return Ok("warn|🗃 no workspaces".into()),
+            };
+            let repos: Vec<project::Project> = project::list(&root).into_iter().filter(|p| p.is_repo).collect();
+            if repos.is_empty() {
+                return Ok("warn|🗃 no repos".into());
+            }
+            let (mut indexed, mut files, mut stale) = (0usize, 0usize, 0usize);
+            for r in &repos {
+                if let Some((n, age)) = project::status(&r.path) {
+                    indexed += 1;
+                    files += n;
+                    if age >= 7 * 86_400 { stale += 1; }
+                }
+            }
+            let fh = if files >= 10_000 { format!("{:.1}k", files as f64 / 1000.0) } else { files.to_string() };
+            let level = if indexed == repos.len() && stale == 0 { "ok" } else { "warn" };
+            let tail = if stale > 0 { format!(" ({stale} stale)") } else { String::new() };
+            Ok(format!("{level}|🗃 {indexed}/{} repos, {fh} files{tail}", repos.len()))
+        }
         _ => Ok(HELP.trim().into()),
     }
 }
