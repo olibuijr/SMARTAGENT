@@ -29,7 +29,7 @@ export default function (pi: ExtensionAPI) {
 		name: "tasks",
 		label: "Kanban tasks",
 		description:
-			"Kanban board (backlog→ready→doing→review→done), policies ENFORCED: WIP limits, criteria-gated done, pull-based next. Actions: board, add/todo (criteria 'a;b;c'), next, move, done, show, list, crit add/check/uncheck, block/unblock, wip, metrics, rm. project = a workspace repo's own board.",
+			"Kanban board (backlog→ready→doing→review→done), policies ENFORCED: WIP limits, criteria-gated done, pull-based next. Actions: board, add (→ready, auto-queued) / todo (→backlog capture), next, move, done, show, list, crit add/check/uncheck, block/unblock, wip, metrics, rm. project = a workspace repo's own board.",
 		parameters: {
 			type: "object",
 			properties: {

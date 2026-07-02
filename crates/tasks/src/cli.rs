@@ -40,7 +40,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if !matches!(prio.as_str(), "p1" | "p2" | "p3") {
                 return Err("prio must be p1|p2|p3".into());
             }
-            let col = if quick { "backlog".to_string() } else { flag(args, "--col").unwrap_or_else(|| "backlog".into()) };
+            // `add` queues to READY by default — the autonomous fleet only
+            // auto-pulls from ready, so backlog-by-default stalled real work
+            // (Óli 2026-07-02: tasks must be queued + handed off on creation).
+            // `todo` stays backlog: frictionless idea capture, triaged later.
+            let col = if quick { "backlog".to_string() } else { flag(args, "--col").unwrap_or_else(|| "ready".into()) };
             valid_col(&col)?;
             let t = Task {
                 id: store.next_id()?,
