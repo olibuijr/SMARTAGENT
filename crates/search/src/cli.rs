@@ -59,3 +59,17 @@ USAGE:
 
 Instance resolution: --instance → $SEARX_INSTANCE → config searx_instance.
 "#;
+
+#[cfg(test)]
+mod neg_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_bad_args() {
+        let s=|v:&[&str]|v.iter().map(|x|x.to_string()).collect::<Vec<_>>();
+        assert!(run(&s(&["query"])).is_err());  // missing terms
+        // unknown subcommand falls through to help (Ok), not an error:
+        assert!(run(&s(&["bogus"])).is_ok());
+    }
+
+}

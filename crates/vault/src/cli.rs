@@ -90,3 +90,18 @@ USAGE:
   vault graph  <vault>
   vault search <vault> <query>
 "#;
+
+#[cfg(test)]
+mod neg_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_bad_args() {
+        let s=|v:&[&str]|v.iter().map(|x|x.to_string()).collect::<Vec<_>>();
+        assert!(run(&s(&["new"])).is_err());          // missing vault
+        assert!(run(&s(&["new",".scratch/negtest-vault"])).is_err()); // missing title
+        assert!(run(&s(&["read",".scratch/negtest-vault"])).is_err()); // missing note
+        assert!(run(&s(&["append",".scratch/negtest-vault","n"])).is_err()); // missing text
+    }
+
+}

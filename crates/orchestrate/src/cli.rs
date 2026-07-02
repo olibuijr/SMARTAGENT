@@ -104,3 +104,18 @@ USAGE:
 Each agent is a headless `./pi --thinking low -p '<prompt>' < /dev/null` run in
 its own workspaces/<run-id>/agent-<n>/ dir (stdout+stderr → out.log).
 "#;
+
+#[cfg(test)]
+mod neg_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_bad_args() {
+        let s=|v:&[&str]|v.iter().map(|x|x.to_string()).collect::<Vec<_>>();
+        assert!(run(&s(&["run"])).is_err());              // missing --agents
+        assert!(run(&s(&["run","--agents","2"])).is_err()); // missing --prompt
+        assert!(run(&s(&["fan"])).is_err());              // missing --prompts-file
+        assert!(run(&s(&["fan","--prompts-file",".scratch/nonexistent-neg"])).is_err());
+    }
+
+}
