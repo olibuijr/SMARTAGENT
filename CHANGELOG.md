@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased — 2026-07-02 (post-v0.1.0 hardening + expansion)
+## 0.2.0 — 2026-07-02
+- Tool review P0/P1 complete: secrets caller-token auth, hooks system, kanban tasks + workflow engine, colored statusline, batch embeddings, hardened sandbox/search/mcp/notify
+
+### Detail (post-v0.1.0 hardening + expansion)
 
 **New crate:** `supervise` (20 total) — internal pure-Rust process manager that
 spawns/tracks/health-checks/self-heals the long-running services (scheduler
