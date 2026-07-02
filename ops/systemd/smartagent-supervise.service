@@ -1,0 +1,19 @@
+[Unit]
+# OPTIONAL boot seed. This is the ONLY systemd unit SMARTAGENT uses, and it
+# exists solely to launch the internal supervisor at boot. `supervise watch`
+# then starts and self-heals every other service (scheduler, chromium) in pure
+# Rust — no per-service systemd. If you'd rather not use systemd at all, start
+# the supervisor any other way (login shell rc, `supervise watch &`, or ask the
+# agent to run `supervise up`); it does not depend on this unit.
+Description=SMARTAGENT internal supervisor (watch loop)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/SMARTAGENT
+ExecStart=%h/Projects/SMARTAGENT/target/release/supervise watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

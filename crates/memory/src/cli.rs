@@ -43,6 +43,16 @@ pub fn run(args: &[String]) -> Result<String, String> {
             m.promote(&id, &from, &to)?;
             Ok(format!("promoted {id}: {from} → {to}"))
         }
+        Some("recent") => {
+            let m = Memory::new(&dir(args)?);
+            let tier = flag(args, "--tier").unwrap_or_else(|| "episodic".into());
+            let n = flag(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(5);
+            let rows = m.recent(&tier, n)?;
+            if rows.is_empty() {
+                return Ok("no memories".into());
+            }
+            Ok(rows.iter().map(|(_, t)| format!("- {t}")).collect::<Vec<_>>().join("\n"))
+        }
         Some("stats") => {
             let m = Memory::new(&dir(args)?);
             Ok(m.stats()?.iter().map(|(t, n)| format!("{t}\t{n}")).collect::<Vec<_>>().join("\n"))

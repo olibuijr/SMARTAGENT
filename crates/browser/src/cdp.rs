@@ -74,6 +74,40 @@ impl Cdp {
         self.call("Runtime.enable", "{}")?;
         self.eval(SNAPSHOT_JS)
     }
+
+    /// Click the first element matching a CSS selector. Returns a status line.
+    pub fn click(&mut self, selector: &str) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let js = format!(
+            r#"(function(){{var e=document.querySelector("{}");if(!e)return "not found: {}";e.scrollIntoView();e.click();return "clicked";}})()"#,
+            json::escape(selector),
+            json::escape(selector)
+        );
+        let r = self.eval(&js)?;
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        Ok(r)
+    }
+
+    /// Type text into an input/textarea matching a selector, firing input +
+    /// change events so frameworks (React etc.) register the value.
+    pub fn type_text(&mut self, selector: &str, text: &str) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let js = format!(
+            r#"(function(){{var e=document.querySelector("{}");if(!e)return "not found: {}";e.focus();e.value="{}";e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return "typed";}})()"#,
+            json::escape(selector),
+            json::escape(selector),
+            json::escape(text)
+        );
+        self.eval(&js)
+    }
+
+    /// Navigate history back/forward and let the page settle.
+    pub fn history(&mut self, delta: i32) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let r = self.eval(&format!("(function(){{history.go({delta});return 'ok';}})()"))?;
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        Ok(r)
+    }
 }
 
 /// JS that builds a compact, token-frugal snapshot (Browser Use style).

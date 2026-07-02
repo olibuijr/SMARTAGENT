@@ -80,6 +80,9 @@ dependencies = [
 [[package]]
 name = "schedule"
 version = "0.1.0"
+dependencies = [
+ "semdb",
+]
 
 [[package]]
 name = "search"
@@ -103,6 +106,14 @@ version = "0.1.0"
 [[package]]
 name = "skills"
 version = "0.1.0"
+
+[[package]]
+name = "supervise"
+version = "0.1.0"
+dependencies = [
+ "httpc",
+ "semdb",
+]
 
 [[package]]
 name = "vault"

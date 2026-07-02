@@ -72,6 +72,18 @@ if [ -f "$TOOLS_BRIEF" ]; then
     set -- --append-system-prompt "$TOOLS_BRIEF" "$@"
 fi
 
+# Session memory: inject the most-recent episodic memories (past session
+# intents, stored on shutdown by the session-memory extension) so the agent
+# picks up with continuity instead of amnesia. Safe: pure context append.
+MEM_BIN="$ROOT/target/release/memory"
+if [ -x "$MEM_BIN" ] && [ -d "$ROOT/data/memory" ]; then
+    RECENT="$("$MEM_BIN" recent --dir "$ROOT/data/memory" --tier episodic --n 5 2>/dev/null)"
+    if [ -n "$RECENT" ] && [ "$RECENT" != "no memories" ]; then
+        set -- --append-system-prompt "Recent context from past sessions (episodic memory):
+$RECENT" "$@"
+    fi
+fi
+
 # Run in the invocation cwd (agent dir/sessions/extension bins are absolute).
 cd "$INVOKE_CWD"
 exec "$PI_BIN" "$@"

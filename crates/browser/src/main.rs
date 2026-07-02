@@ -20,6 +20,24 @@ fn run(args: &[String]) -> Result<String, String> {
             cdp.navigate(url)?;
             cdp.snapshot()
         }
+        Some("click") => {
+            let sel = args.get(1).ok_or("usage: browser click <css-selector>")?;
+            let mut cdp = Cdp::connect(&base)?;
+            let status = cdp.click(sel)?;
+            Ok(format!("[{status}]\n{}", cdp.snapshot()?))
+        }
+        Some("type") => {
+            let sel = args.get(1).ok_or("usage: browser type <css-selector> <text>")?;
+            let text = args.get(2).ok_or("usage: browser type <css-selector> <text>")?;
+            let mut cdp = Cdp::connect(&base)?;
+            let status = cdp.type_text(sel, text)?;
+            Ok(format!("[{status}]\n{}", cdp.snapshot()?))
+        }
+        Some("back") => {
+            let mut cdp = Cdp::connect(&base)?;
+            cdp.history(-1)?;
+            cdp.snapshot()
+        }
         Some("probe") => {
             let v = httpc::get(&format!("{}/json/version", base.trim_end_matches('/')))
                 .map_err(|e| format!("devtools unreachable at {base}: {e}"))?;
@@ -43,9 +61,12 @@ const HELP: &str = r#"
 browser — Browser Use port (pure-Rust CDP client)
 
 USAGE:
-  browser open  <url> [--devtools http://127.0.0.1:9222]
-  browser probe [--devtools http://127.0.0.1:9222]
+  browser open  <url>            [--devtools http://127.0.0.1:9222]
+  browser click <css-selector>   click an element, return the new snapshot
+  browser type  <css-selector> <text>   fill an input, return the new snapshot
+  browser back                   history back, return the new snapshot
+  browser probe                  check the DevTools connection
 
 Requires Chrome/Chromium launched with --remote-debugging-port=9222.
-Returns a compact snapshot (title, visible text, links) for the agent.
+open/click/type/back return a compact snapshot (title, visible text, links).
 "#;

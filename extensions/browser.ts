@@ -21,21 +21,27 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "browser",
 		label: "Browser",
-		description: "Drive a real Chrome over the DevTools Protocol (Browser Use port). Action 'open' navigates to a URL and returns a compact snapshot (title, visible text, links); 'probe' checks the DevTools connection. Requires Chrome started with --remote-debugging-port=9222.",
+		description: "Drive a real Chrome over the DevTools Protocol (Browser Use port). Actions: 'open' navigates to a URL; 'click' clicks a CSS selector; 'type' fills an input (selector + text); 'back' goes back; each returns a fresh compact snapshot (title, visible text, links). 'probe' checks the DevTools connection. Requires Chrome started with --remote-debugging-port=9222.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["open", "probe"] },
+				action: { type: "string", enum: ["open", "click", "type", "back", "probe"] },
 				url: { type: "string", description: "URL to open (open action)" },
+				selector: { type: "string", description: "CSS selector (click/type actions)" },
+				text: { type: "string", description: "text to type (type action)" },
 			},
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
-			if (p.action === "open") {
-				const out = run(["open", p.url ?? ""]);
-				return { content: [{ type: "text", text: untrusted("WEB PAGE", out) }] };
+			let out: string;
+			switch (p.action) {
+				case "open": out = run(["open", p.url ?? ""]); break;
+				case "click": out = run(["click", p.selector ?? ""]); break;
+				case "type": out = run(["type", p.selector ?? "", p.text ?? ""]); break;
+				case "back": out = run(["back"]); break;
+				default: return { content: [{ type: "text", text: run(["probe"]) }] };
 			}
-			return { content: [{ type: "text", text: run(["probe"]) }] };
+			return { content: [{ type: "text", text: untrusted("WEB PAGE", out) }] };
 		},
 	});
 }

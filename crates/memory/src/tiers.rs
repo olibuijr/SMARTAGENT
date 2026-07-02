@@ -122,6 +122,30 @@ impl Memory {
         self.recall(&qv, k, tiers)
     }
 
+    /// The N most-recent entries in a tier (ids are timestamp-prefixed, so
+    /// lexicographically-highest == newest). Returns (id, text), newest first.
+    pub fn recent(&self, tier: &str, n: usize) -> Result<Vec<(String, String)>, String> {
+        validate_tier(tier)?;
+        let path = self.tier_path(tier);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let db = Db::open(&path)?;
+        let mut ids: Vec<String> = db.index.keys().cloned().collect();
+        ids.sort();
+        ids.reverse();
+        let mut out = Vec::new();
+        for id in ids.into_iter().take(n) {
+            let text = db
+                .get(&id)
+                .and_then(|e| semdb::json::parse(&e.meta).ok())
+                .and_then(|v| v.get("text").and_then(|t| t.as_str().map(str::to_string)))
+                .unwrap_or_default();
+            out.push((id, text));
+        }
+        Ok(out)
+    }
+
     pub fn stats(&self) -> Result<Vec<(String, usize)>, String> {
         let mut out = Vec::new();
         for tier in TIERS {

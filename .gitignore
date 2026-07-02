@@ -1,8 +1,43 @@
+# SMARTAGENT runtime & data (never commit)
+# .refrepos = cloned reference repos (read-only, large, embedded git repos)
 .refrepos/
-target/
-*.log
-workspaces/
+# .pi = vendored pi runtime, sessions, agent config + router key/auth
 .pi/
+# data = durable stores: semdb tables, secrets, schedule journal
 data/
+# workspaces = subagent runs + sandbox scratch
+workspaces/
+# throwaway probes / test dbs
 .scratch/
-.pi/chrome-profile/
+
+# Secrets (defense in depth — must never be tracked)
+*.key
+*.pem
+*.env
+.env
+.env.*
+secrets.key
+*credentials*
+config/*.local.conf
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node / bun (extension runtime)
+node_modules/
+bun.lockb
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
