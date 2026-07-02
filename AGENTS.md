@@ -90,6 +90,32 @@ Models are served via **AkurAI-Router** (`../AkurAI-Router`). If pi model calls 
 - **Extension pattern (hard rule):** extensions in `extensions/*.ts` are auto-loaded by the launcher. They must use ONLY type-only imports from pi packages plus `node:` builtins — runtime imports (`defineTool`, `typebox`) fail silently and the tool never registers. Use `pi.registerTool({...})` with a plain JSON-schema `parameters` object, and shell out to `target/release/<crate>` via `execFileSync`. No logic in TS.
 - Every crate gets an extension; every crate's acceptance test is a natural-language `./pi -p` prompt exercising the tool.
 
+### Extensions catalog (KEEP CURRENT)
+
+Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename, or remove an extension, update this table in the same commit** — it is the canonical description of the agent's capabilities.
+
+| Tool | Backing crate | What it does |
+|------|---------------|--------------|
+| `akurai-router` | — (provider) | Registers AkurAI-Router models (claude/*, codex/*) as the pi provider |
+| `semdb` | `semdb` | Semantic database: embed/search/get/del/stats over a vector store |
+| `memory` | `memory` | 3-tier persistent memory (working/episodic/semantic): remember, recall, stats |
+| `codegraph` | `codegraph` | Rust code knowledge graph: index, defs/refs/callers, semantic symbol search |
+| `codeindex` | `codeindex` | Fast code search (ripgrep-style): regex/literal search, file listing |
+| `vault` | `vault` | Markdown second brain: new/read/append/list/links/graph/search |
+| `skills` | `skills` | Agent Skills (SKILL.md) loader: list/show/search |
+| `schedule` | `schedule` | Durable cron scheduler: add/list/next/rm/tick |
+| `search` | `search` | SearXNG web search: query, health |
+| `notify` | `notify` | Push notifications (ntfy): send |
+| `secrets` | `secrets` | Policy-gated secret store: set/get(as caller)/list/audit/policy-allow |
+| `browser` | `browser` | Real Chrome over CDP (Browser Use port): open (snapshot), probe |
+| `orchestrate` | `orchestrate` | Fan out N parallel headless-pi subagents: run, list |
+| `mcp` | `mcp` | MCP client (stdio + HTTP): tools, call |
+| `sandbox` | `sandbox` | Isolated command execution (Daytona concept): run, clean |
+| `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
+| `evals` | `evals` | Trace + score + regression diff (Langfuse concept): log/score/diff/runs |
+| `rag` | `rag` | Document ingestion + retrieval (RAGFlow concept): ingest, ask, sources |
+| `voice` | `voice` | STT/TTS bridge (Pipecat concept): stt, tts, probe |
+
 ## Conventions
 
 - Build: `cargo build --release` at workspace root; each crate also builds standalone.

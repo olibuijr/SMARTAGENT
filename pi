@@ -43,5 +43,12 @@ for ext in "$ROOT"/extensions/*.ts; do
     [ -e "$ext" ] && set -- -e "$ext" "$@"
 done
 
+# Inject the tools brief into the agent's initial context so it never has to
+# guess what capabilities exist. Kept current alongside the extensions catalog.
+TOOLS_BRIEF="$ROOT/AGENT_TOOLS.md"
+if [ -f "$TOOLS_BRIEF" ]; then
+    set -- --append-system-prompt "$TOOLS_BRIEF" "$@"
+fi
+
 cd "$ROOT"
 exec "$PI_BIN" "$@"

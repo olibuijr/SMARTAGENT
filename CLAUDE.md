@@ -6,6 +6,8 @@
 
 **Memory policy (always):** store durable project facts in the SMARTAGENT-scoped semantic DB for the project root or workspace root (not raw `cwd`) under `workspaces/`. A repo/workspace-local `.smartagent/semdb` at the project root is the default convention. **Do not use Claude/Codex CLI integrated memory or any other global memory** for project facts.
 
+**Extensions catalog:** the full list of `./pi` tools/extensions and what each does lives in [AGENTS.md](./AGENTS.md) → "Extensions catalog". Keep that table current — update it in the same commit whenever you add, rename, or remove an extension.
+
 Hard rules (repeated here because they bite):
 
 - **Pure Rust, `std` only, zero crates.io deps** in every `crates/*` tool. pi extensions are thin TS glue only — no logic.
