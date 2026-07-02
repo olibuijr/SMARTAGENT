@@ -26,6 +26,7 @@ export default function (pi: ExtensionAPI) {
 				net: { type: "boolean", description: "allow network (default false when isolated)" },
 				tail: { type: "boolean", description: "keep the LAST output bytes not the first (right for build logs)" },
 				maxOutput: { type: "number", description: "output byte cap (default 16384)" },
+				stdin: { type: "string", description: "file piped to the command stdin" },
 			},
 			required: ["command"],
 		} as any,
@@ -35,6 +36,7 @@ export default function (pi: ExtensionAPI) {
 			if (p.net) flags.push("--net");
 			if (p.tail) flags.push("--tail");
 			if (p.maxOutput) flags.push("--max-output", String(p.maxOutput));
+			if (p.stdin) flags.push("--stdin", p.stdin);
 			flags.push("--", "sh", "-c", p.command ?? "");
 			return { content: [{ type: "text", text: run(flags) }] };
 		},

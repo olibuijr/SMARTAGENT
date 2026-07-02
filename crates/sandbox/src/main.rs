@@ -63,6 +63,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 // flood the agent's context. Raise with --max-output when needed.
                 max_output: flag(args, "--max-output").and_then(|s| s.parse().ok()).unwrap_or(16_384),
                 tail: has(args, "--tail"),
+                stdin: flag(args, "--stdin").map(PathBuf::from),
                 masks: sensitive_paths(),
             };
             let res = exec::run(&spec)?;

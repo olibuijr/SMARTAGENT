@@ -119,23 +119,23 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | Tool | Backing crate | What it does |
 |------|---------------|--------------|
 | `akurai-router` | — (provider) | Registers AkurAI-Router models (claude/*, codex/*) as the pi provider |
-| `semdb` | `semdb` | Semantic database: embed/search/get/del/stats over a vector store |
-| `memory` | `memory` | 3-tier persistent memory (working/episodic/semantic): remember, recall, recent, stats. Session intents auto-recalled at launch |
-| `codegraph` | `codegraph` | Rust code knowledge graph: index, defs/refs/callers, semantic symbol search |
-| `codeindex` | `codeindex` | Fast code search (ripgrep-style): regex/literal search, file listing |
-| `vault` | `vault` | Markdown second brain: new/read/append/list/links/graph/search |
-| `skills` | `skills` | Agent Skills (SKILL.md) loader: list/show/search |
-| `schedule` | `schedule` | Durable cron scheduler: add(--notify reminder; arbitrary --cmd admin-only)/list/next/rm/tick. Supervised daemon fires jobs |
-| `search` | `search` | SearXNG web search: query, health. Results wrapped UNTRUSTED |
+| `semdb` | `semdb` | Semantic DB: embed, search (`--ids-only`/`--meta-chars`/`--filter key=value`), get, del, count/ids (`--prefix`), stats |
+| `memory` | `memory` | 3-tier memory: remember, update, recall (`scope` tier), recent, forget, promote, stats. Session intents auto-recalled at launch |
+| `codegraph` | `codegraph` | Rust code graph: index, defs/refs/callers/impls (`--limit`), path (BFS call-path), semantic search, stats |
+| `codeindex` | `codeindex` | Fast code search: search (mode lines/files/count, `-m` cap 50), files (`--limit`) |
+| `vault` | `vault` | Markdown brain: new, read (`--head`), append, rm, mv (link-rewrite), list, links, graph (`--note`/`--depth`), search |
+| `skills` | `skills` | Agent Skills loader: list, show (`--head`), search |
+| `schedule` | `schedule` | Durable scheduler: add (`--notify`; `--cron` recurring OR `--at` one-shot), pause/resume, list/next/rm/tick. Supervised daemon fires jobs |
+| `search` | `search` | SearXNG search: query (`--time-range`/`--site`/`--urls-only`/`--snippet-chars`, k=5), health. Wrapped UNTRUSTED |
 | `notify` | `notify` | Push notifications (ntfy): send |
 | `secrets` | `secrets` | Policy-gated secret store: set/get(as 'pi')/list/audit. Deny-by-default; policy-allow is admin-only, OFF the agent surface |
-| `browser` | `browser` | Real Chrome over CDP (Browser Use port): open/click/type/back (each returns a snapshot), probe. Web content wrapped UNTRUSTED |
-| `orchestrate` | `orchestrate` | Fan out N parallel headless-pi subagents: run, list |
-| `mcp` | `mcp` | MCP client (stdio + HTTP): tools, call |
-| `sandbox` | `sandbox` | Isolated command execution (Daytona concept): run, clean. Env scrubbed + namespace isolation ON by default |
+| `browser` | `browser` | Real Chrome CDP: open/click/type(`--enter`)/back/wait/scroll/attr (`--quiet`/`--max-text`/`--max-links`), probe. Wrapped UNTRUSTED |
+| `orchestrate` | `orchestrate` | Fan out N headless-pi subagents: run, list, out (collect output). Fork-bomb depth guard |
+| `mcp` | `mcp` | MCP client (stdio+HTTP): tools (`--names-only`/`--filter`), call (`--head`). argv exec, no sh -c |
+| `sandbox` | `sandbox` | Isolated exec: run (`--tail`, 16KB cap, `--stdin`, `--no-isolate`), clean. Env scrubbed + secrets tmpfs-masked, isolation ON |
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
-| `evals` | `evals` | Trace + score + regression diff (Langfuse concept): log/score/diff/runs |
-| `rag` | `rag` | Document ingestion + cited retrieval (RAGFlow concept): ingest, retrieve, stats |
+| `evals` | `evals` | Trace/score/diff: log, score (`--min-pass`/`--fail-only`), diff, runs |
+| `rag` | `rag` | Document RAG: ingest (file or `--url`), retrieve (`--doc-id`/`--snippet-chars`/`--ids-only`), get, delete-doc, stats |
 | `voice` | `voice` | STT/TTS bridge (Pipecat concept). BUILT+TESTED but DELISTED (extensions/disabled/) — no titan speech server deployed |
 | `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
 | _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |

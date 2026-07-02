@@ -31,6 +31,8 @@ pub struct SandboxSpec {
     /// Keep the LAST `max_output` bytes instead of the first — right for build
     /// logs where the tail (errors/summary) matters, not the head.
     pub tail: bool,
+    /// Optional file piped to the command's stdin (else /dev/null).
+    pub stdin: Option<PathBuf>,
     /// Paths tmpfs-masked inside the namespace (e.g. data/secrets, .pi) so a
     /// sandboxed command can't read them. Only applied when isolation is active.
     pub masks: Vec<PathBuf>,
@@ -72,9 +74,13 @@ pub fn run(spec: &SandboxSpec) -> Result<SandboxResult, String> {
     let err_path = workspace.join(".stderr");
 
     let mut command = build_command(spec, use_ns);
+    let stdin_cfg = match &spec.stdin {
+        Some(p) => Stdio::from(File::open(p).map_err(|e| format!("open stdin {}: {e}", p.display()))?),
+        None => Stdio::null(),
+    };
     command
         .current_dir(&workspace)
-        .stdin(Stdio::null())
+        .stdin(stdin_cfg)
         .stdout(Stdio::from(File::create(&out_path).map_err(|e| e.to_string())?))
         .stderr(Stdio::from(File::create(&err_path).map_err(|e| e.to_string())?));
 
@@ -221,6 +227,7 @@ mod tests {
             net: false,
             isolate: false,
             tail: false,
+            stdin: None,
             masks: vec![],
             timeout: Duration::from_secs(timeout),
             max_output: 1_000_000,
