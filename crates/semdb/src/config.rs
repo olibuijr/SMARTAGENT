@@ -3,7 +3,7 @@
 //! logic — defaults live in the config file, overridable by flag or env.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Config {
     map: HashMap<String, String>,
@@ -41,6 +41,26 @@ impl Config {
             }
         }
         self.map.get(key).cloned()
+    }
+
+    /// Absolute workspaces root: config `workspaces_dir` resolved against the
+    /// repo root (the dir containing config/smartagent.conf). Defaults to
+    /// `<repo>/workspaces`. All crates align to this single location.
+    pub fn workspaces_dir(&self) -> PathBuf {
+        self.repo_relative("workspaces_dir", "workspaces")
+    }
+
+    /// Absolute data dir for durable stores; defaults to `<repo>/data`.
+    pub fn data_dir(&self) -> PathBuf {
+        self.repo_relative("data_dir", "data")
+    }
+
+    fn repo_relative(&self, key: &str, default: &str) -> PathBuf {
+        let rel = self.map.get(key).map(String::as_str).unwrap_or(default);
+        let base = find()
+            .and_then(|p| p.parent().and_then(|d| d.parent()).map(Path::to_path_buf))
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join(rel)
     }
 }
 
