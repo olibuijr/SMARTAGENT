@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "evals");
-const DEFAULT_DB = join(ROOT, "data", "evals.jsonl");
+const DEFAULT_DB = join(ROOT, "data", "evals.semdb");
 
 function run(args: string[]): string {
 	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim(); }
@@ -17,7 +17,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "evals",
 		label: "Evals",
-		description: "Trace logging, scoring, and regression diffing (Langfuse concept). Actions: 'log' records one case trace under a run; 'score' scores a run against expected outputs (matcher exact|contains|regex-lite); 'diff' compares two runs for regressions and new passes; 'runs' lists runs and case counts. Use to measure and track agent quality over time.",
+		description: "Trace logging, scoring, and regression diffing (Langfuse concept). Actions: 'log' records one case trace under a run; 'score' scores a run against expected outputs (matcher exact|contains|regex-lite); 'diff' compares two runs for regressions and new passes; 'runs' lists runs and case counts. Traces are stored in a semdb table. Use to measure and track agent quality over time.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI) {
 				failOnly: { type: "boolean", description: "score: list only failing cases" },
 				runA: { type: "string", description: "baseline run id (diff)" },
 				runB: { type: "string", description: "candidate run id (diff)" },
-				db: { type: "string", description: "trace db file (default data/evals.jsonl)" },
+				db: { type: "string", description: "trace semdb file (default data/evals.semdb; legacy *.jsonl paths map to *.semdb)" },
 			},
 			required: ["action"],
 		} as any,

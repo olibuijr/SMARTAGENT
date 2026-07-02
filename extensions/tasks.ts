@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI) {
 			"Kanban task board (backlog→ready→doing→review→done). Policies are ENFORCED: WIP limits " +
 			"block over-committing, 'done' requires all criteria checked, 'next' only pulls when there " +
 			"is capacity. Actions: board (render columns), add/todo (capture; criteria as 'a;b;c'), " +
-			"next (what to pull), move, done, show, list, crit (add/check/uncheck acceptance criteria), " +
+			"next (what to pull), move (sets owner when moved to doing), done, show, list, crit (add/check/uncheck acceptance criteria), " +
 			"block/unblock (reason required), wip (limits), metrics (cycle time/throughput), rm. " +
 			"Set 'project' to use a workspace repo's OWN board (workspaces/<project>/.smartagent/tasks.semdb) " +
 			"— per-repo tasks never mix; omit it for the root SMARTAGENT board. " +
@@ -51,6 +51,9 @@ export default function (pi: ExtensionAPI) {
 				prio: { type: "string", enum: ["p1", "p2", "p3"], description: "priority for add" },
 				criteria: { type: "string", description: "add: semicolon-separated acceptance criteria" },
 				tags: { type: "string", description: "add: comma-separated tags; list: single tag filter" },
+				owner: { type: "string", description: "list: owner/assignee filter" },
+				mine: { type: "boolean", description: "list: only tasks owned by this agent" },
+				others: { type: "boolean", description: "list: only tasks owned by other agents" },
 				crit_op: { type: "string", enum: ["add", "check", "uncheck"], description: "crit sub-action" },
 				crit_arg: { type: "string", description: "crit: criterion text (add) or number (check/uncheck)" },
 				col: { type: "string", description: "list: column filter" },
@@ -95,6 +98,9 @@ export default function (pi: ExtensionAPI) {
 				case "list":
 					if (p.col) a.push("--col", p.col);
 					if (p.tags) a.push("--tag", p.tags);
+					if (p.owner) a.push("--owner", p.owner);
+					if (p.mine) a.push("--mine");
+					if (p.others) a.push("--others");
 					break;
 				case "wip":
 					if (p.doing != null) a.push("--doing", String(p.doing));

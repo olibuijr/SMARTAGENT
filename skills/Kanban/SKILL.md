@@ -23,8 +23,9 @@ kanban practitioner thinks. Workflows in `Workflows/` are runnable via the
 4. **Explicit policies** — done means ALL criteria checked. Write criteria at
    add-time (`--criteria 'a;b;c'`), each one a binary check a tool can verify
    — the ISA/ISC discipline. A task without criteria is a wish, not work.
-5. **Feedback loops** — run the `triage` workflow when the backlog grows past
-   ~10, and the `retro` workflow after every few completed tasks.
+5. **Feedback loops** — load the `triage` skill for backlog ordering or
+   priority sweeps, run the `triage` workflow when the backlog grows past ~10,
+   and the `retro` workflow after every few completed tasks.
 6. **Improve** — retro learnings go to the memory tool (semantic tier), so the
    next session starts smarter.
 
@@ -56,3 +57,4 @@ nothing is.
 - `--force` past a WIP limit to feel productive — that's pushing, not pulling.
 - Marking done with `--force` because the criteria "probably pass".
 - Letting backlog items age without triage until the board lies.
+- Inventing ad-hoc pull order; use the `triage` skill when `ready` is empty or priorities are disputed.

@@ -201,9 +201,9 @@ fn start_event_pump(
                         broadcast(&clients, "{\"ev\":\"done\"}\n");
                     }
                 }
-                Event::TurnEnd(text) => {
+                Event::TurnEnd(text, usage) => {
                     append(&tpath, "\n---\n");
-                    beat.lock().unwrap().log(&agent, "turn", "idle", &text);
+                    beat.lock().unwrap().log_turn(&agent, &text, usage);
                 }
                 Event::Tool(name) => {
                     append(&tpath, &format!("\n⚙ {name}\n"));
@@ -345,10 +345,11 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
                 (b.last_beat.clone().unwrap_or_else(|| "never".into()), b.doing_short())
             };
             let queued = agent.queued_beat.lock().unwrap().is_some();
+            let fleet_tokens = tokens_today(None).total();
             write_info_done(
                 write_side,
                 &format!(
-                    "agent {}: {} | last beat {last} | queued beat: {queued} | doing: {}",
+                    "agent {}: {} | last beat {last} | queued beat: {queued} | doing: {} | tokens today: {fleet_tokens}",
                     agent.name,
                     if busy { "working" } else { "idle" },
                     doing
@@ -420,18 +421,58 @@ fn last_activity(name: &str) -> (String, String) {
     (chain, words)
 }
 
+#[derive(Default)]
+struct TokenTotals {
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+}
+
+impl TokenTotals {
+    fn total(&self) -> u64 {
+        self.input + self.output + self.cache_read + self.cache_write
+    }
+}
+
+fn tokens_today(agent: Option<&str>) -> TokenTotals {
+    let path = semdb::config::Config::load().data_dir().join("medvitund.semdb");
+    let Ok(db) = semdb::storage::Db::open(&path) else { return TokenTotals::default(); };
+    let today = crate::beat::human_day_prefix();
+    let mut out = TokenTotals::default();
+    for entry in db.index.values() {
+        let Ok(v) = json::parse(&entry.meta) else { continue };
+        if v.get("kind").and_then(Value::as_str) != Some("turn") { continue; }
+        if let Some(a) = agent {
+            if v.get("agent").and_then(Value::as_str) != Some(a) { continue; }
+        }
+        if v.get("day").and_then(Value::as_str) != Some(today.as_str()) { continue; }
+        out.input += meta_u64(&v, "input");
+        out.output += meta_u64(&v, "output");
+        out.cache_read += meta_u64(&v, "cacheRead");
+        out.cache_write += meta_u64(&v, "cacheWrite");
+    }
+    out
+}
+
+fn meta_u64(v: &Value, key: &str) -> u64 {
+    v.get(key).and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64
+}
+
 fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
     for agent in agents.values() {
         let busy = agent.child.lock().unwrap().is_busy();
         let doing = agent.beat.lock().unwrap().doing_short();
         let state = if busy { "working" } else { "idle" };
         let (tools, words) = last_activity(&agent.name);
+        let tokens = tokens_today(Some(&agent.name));
         let line = format!(
-            "{{\"ev\":\"info\",\"data\":\"{}\\t{}\\t{}\\t{}\\t{}\\t{}\"}}\n",
+            "{{\"ev\":\"info\",\"data\":\"{}\\t{}\\t{}\\t{}\\t{}\\t{}\\t{}\"}}\n",
             json::escape(&agent.name),
             state,
             json::escape(&doing),
             role_of(&agent.name),
+            tokens.total(),
             json::escape(&tools),
             json::escape(&words)
         );

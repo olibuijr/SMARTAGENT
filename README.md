@@ -1,284 +1,290 @@
 # SMARTAGENT
 
-A frontier-level personal AI agent, built lean: [pi](https://github.com/earendil-works/pi)
-as the minimal agent spine, every capability a pi extension, and every tool a
-**pure-Rust, zero-dependency** binary.
+SMARTAGENT is a personal AI agent workspace built around
+[pi](https://github.com/earendil-works/pi). Pi stays small and focused; every
+extra capability is a thin extension that shells out to a small Rust binary.
 
-Each capability is ported from the most popular open tool in its category — the
-concept is borrowed, the implementation rewritten in `std`-only Rust. No
-`npm install`, no `pip install`, no crates.io dependency tree. One `cargo build`
-produces the whole fleet, and one launcher (`./pi`) wires it into the agent.
+The result is an agent you can run locally, inspect, and verify:
 
-```
- pi  (agent spine — 4 core tools + your extensions)
-  │
-  ├── extensions/*.ts   thin TS glue (no logic) — registers each tool, shells to a binary
-  │
-  └── crates/*          pure-Rust, std-only, zero-dep tools (one binary each)
-```
+- one launcher: `./pi`
+- one build gate: `./build.sh`
+- one storage layer: `semdb`
+- many focused tools: memory, code search, browser control, tasks, workflows,
+  sandboxing, RAG, secrets, scheduling, notifications, and more
 
-## Capabilities
+No `npm install`, no `pip install`, and no crates.io dependency tree inside the
+tool crates. The system borrows proven patterns from popular agent projects and
+ports the useful parts into `std`-only Rust.
 
-Twenty-three crates — twenty agent tools plus shared libraries — each a
-pure-Rust binary the agent calls through a pi extension:
+## Quick Start
 
-| Tool | Ported from | What it does |
-|------|-------------|--------------|
-| `semdb` | vector store | Semantic database: embed, search (HNSW/flat cosine), crash-safe append log |
-| `memory` | [mem0](https://github.com/mem0ai/mem0) | 3-tier memory (working/episodic/semantic): remember, recall, recent |
-| `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust code knowledge graph: defs/refs/callers + semantic symbol search |
-| `codeindex` | ripgrep | Fast literal/regex code search + per-repo workspace project index |
-| `vault` | Obsidian | Markdown second brain: notes, wikilinks, backlinks, search |
-| `skills` | [Agent Skills](https://github.com/anthropics/skills) | SKILL.md loader: list/show/search/match (prompt-scored routing)/validate |
-| `schedule` | [Temporal](https://github.com/temporalio/temporal) | Durable cron scheduler (a supervised daemon fires jobs) |
-| `search` | [SearXNG](https://github.com/searxng/searxng) | Web metasearch client |
-| `notify` | [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications |
-| `secrets` | [Infisical](https://github.com/Infisical/infisical) | Policy-gated, audited secret store (deny by default) |
-| `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open/click/type/back + compact snapshot |
-| `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out N parallel headless-pi subagents |
-| `mcp` | Model Context Protocol | MCP client (stdio + HTTP/HTTPS) |
-| `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution (scrubbed env + namespaces) |
-| `context` | TELOS | Principal identity/context loader |
-| `evals` | [Langfuse](https://github.com/langfuse/langfuse) | Trace, score, regression-diff |
-| `rag` | [RAGFlow](https://github.com/infiniflow/ragflow) | Document ingestion + cited retrieval |
-| `voice` | [Pipecat](https://github.com/pipecat-ai/pipecat) | STT/TTS bridge |
-| `supervise` | — | Internal process manager for the long-running services |
-| `tasks` | kanban | Task board with WIP limits + criteria-gated done, enforced in Rust |
-| `workflow` | PAI Algorithm | Markdown-defined process engine: a skill per step, evidence-gated |
-| `hooks` | Claude Code hooks | User-configurable lifecycle hooks (block/rewrite/inject), exit-2 contract |
-
-Plus `httpc` (shared HTTP/HTTPS + JSON library), `session-memory` (a hookless
-extension that gives the agent continuity across sessions), and `statusline`
-(a TUI extension that paints live tool/service health under the input — see
-**Statusline** below).
-
-## What's new (post-v0.1.0)
-
-The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
-
-### Current project status — 2026-07-02
-
-- `MULTIROLE.md` now captures the GOAGENT-style multirole model for `./pi`: board-as-handoff, Planner/Builder/Tester/Researcher/Ops/Coordinator roles, tool/skill mapping, TDD/dev-team/ops standards, and the gateway multi-agent implementation path.
-- Root runtime hygiene is explicit: `.gitignore` excludes `workspaces/`, `.pi/`, `data/`, `.scratch/`, `.refrepos/`, `.agents/`, `.claude/`, and `.codex/` so generated state and credentials stay out of GitHub.
-- Board/process hygiene is current: stale running workflows for done tasks were aborted, while another agent's active T-71/W-13 work was left alone.
-- `build.sh` now has `lint_pi_imports` and `./build.sh import-lint-test`, catching multiline and oddly formatted runtime imports from `@earendil-works/*` without flagging multiline `import type`.
-- The 20-tool registration smoke is deterministic: `build.sh` extracts `pi.registerTool` names from extensions and regression-tests the extractor with `./build.sh tools-smoke-test` instead of relying on an LLM-written tool list.
-- README launch docs now make everyday use safe and unambiguous: normal `./pi` / headless launches are offline with respect to the launcher and do not update files; only explicit `./pi --self-update` may reach upstream and replace `.pi/runtime/`.
-- `/status` and the live statusline share `extensions/lib/statusline-common.ts` for the status probe registry and `level|text` parsing.
-
-### Continuity after reset
-
-If the next prompt is “continue with all tasks”, continue kanban flow: run `skills match`, inspect the board, avoid tasks already in `doing` for another agent, pull or refine the highest-priority available task, use `workflow start task-run` for non-trivial work, verify criteria with real probes, mark tasks done only after criteria pass, and update memory/docs when project status changes.
-
-Recent intentional changed files: `.gitignore`, `MULTIROLE.md`, `build.sh`, `README.md`, `ISA.md`, `extensions/commands.ts`, `extensions/statusline.ts`, and `extensions/lib/statusline-common.ts`. Treat unrelated visible edits in `desktop-agent/*` or `crates/gateway/src/beat.rs` as possibly owned by another agent unless the board says otherwise.
-
-### Features added
-
-- **Full skill library** — every tool and operation is covered by a matching
-  skill: `platform` (SMARTAGENT expertise — instant answers about the system's
-  architecture, features, and conventions), `code-nav`, `memory-recall`,
-  `web-research`, `ops`, `orchestration`, plus `kanban` and `self-test`.
-  `skills match '<request>'` routes any prompt to the right one (operating
-  loop step 1).
-- **Slash commands** — instant TUI commands with zero model round-trip:
-  `/board`, `/tasks`, `/skills [query]`, `/status`, `/index [project]`,
-  `/projects`, `/runs`, `/audit`, `/memory <query>` (`extensions/commands.ts`
-  via pi's `registerCommand`).
-- **Workspace project layer** — every repo under `workspaces/` is a first-class
-  project: `codeindex projects/index` builds a per-repo file inventory at
-  `<repo>/.smartagent/codeindex.semdb`, and a shared `--project <name>`
-  (traversal-guarded `semdb::workspace`) scopes tasks (per-repo kanban boards —
-  tasks never mix between repos), codegraph (per-repo graphs), memory, rag,
-  and workflow run state to `<repo>/.smartagent/`.
-- **Enforced operating loop** — the agent's order of work (skills match → tasks
-  pull → workflow → investigate → execute → verify → close) lives in
-  `AGENT_TOOLS.md` and is backed by hooks: file edits are BLOCKED while nothing
-  is in `doing` (block message = the unlock commands), agent start injects live
-  board/workflow/index state, agent end audits the board snapshot.
-- **Task management + process engine** — `tasks` (kanban board: backlog→ready→
-  doing→review→done, WIP limits and criteria-gated done enforced in Rust,
-  pull-based `next`, flow metrics) and `workflow` (markdown-defined phase loops
-  where each step names the skill to use and advancing requires evidence —
-  the PAI Algorithm pattern as data). The `skills/Kanban` skill ships the
-  methodology plus runnable task-run / triage / retro workflows, and
-  `skills match` picks the right skill for a prompt.
-- **Hooks system** — Claude-Code-style lifecycle hooks in pure Rust:
-  `config/hooks.conf` declares event/matcher/command; hook scripts get the
-  payload as JSON on stdin and can block (exit 2), rewrite tool input, or
-  inject context. Bridged to pi tool_call / user_prompt / session_start / stop;
-  every firing audited to a semdb table. Seeded hooks: destructive-command
-  guard, the kanban edit gate, session state brief, stop board audit.
-
-- **TUI statusline widgets** — twelve crates gained a `statusline` verb emitting
-  a uniform `level|icon text` protocol (severity decided in Rust). The
-  `statusline` extension renders three column-aligned scope-grouped rows below
-  the input — workspace `⌂` (code graph, repos indexed + files, tasks board,
-  workflow run), data `▦` (memory tiers, rag corpus, next scheduled job, evals,
-  orchestrate runs), infra `⛭` (services, sandbox, secrets auth, Chrome,
-  SearXNG, hooks) — plus per-tool `⚙ running… → ✓ 142ms` footer activity.
-  Healthy segments collapse to `Name ✓`; detail appears on warn/err. Segments
-  re-probe after related tool runs and every 30s.
-- **Caller-token authentication for secrets** — `secrets get --as C` now
-  requires a per-caller token (admin-minted via `issue-token`, 0600 on disk,
-  constant-time verify, fail-closed, audited). The `./pi` launcher injects the
-  token; the sandbox scrubs it from the environment and masks it on disk.
-- **`supervise` process manager** — pure-Rust replacement for per-service
-  systemd: spawn/track/health-check/self-heal the scheduler daemon and headless
-  Chromium.
-- **Session memory** — session intent is captured on shutdown and recalled at
-  the next launch, giving the agent cross-session continuity.
-- **Tool expansion pass** — browser grew to 8 actions, memory gained
-  update/recent/forget/promote, search gained time-range/site filters, schedule
-  gained one-shot `--at` + pause/resume, rag gained URL ingest and doc-scoped
-  retrieval, and every CLI gained scope/limit/terse flags for token discipline.
-
-### Improvements (ranked P1 backlog, all top items closed)
-
-Batch embeddings everywhere (one POST instead of per-chunk), semdb auto-exact
-search below 10k rows + `del --prefix`, memory dedup-on-write with
-relevance-based eviction, codegraph dead-code query, vault orphans/tags/robust
-rename, orchestrate concurrency cap + retries + persisted results, schedule
-last-run exit codes + tick lock, supervise log tailing + crash-loop backoff,
-skills validate, context freshness, mcp stdio timeouts + bearer auth, notify
-click/markdown/auth, search pagination, evals latency percentiles.
-
-### Fixes (12-subagent review, all 10 P0s closed)
-
-- **Injection**: mcp JSON-RPC injection (tool name/args), notify CR/LF header
-  injection.
-- **Correctness**: codeindex case-insensitive regex never matched uppercase
-  patterns; schedule `--at` fired in UTC while documented as local (now honors
-  `utc_offset_minutes` config) and accepted impossible dates (Feb 30) that
-  leaked never-firing jobs; rag re-ingest left stale chunks behind; semdb
-  silently mis-scored mixed-dimension vectors (per-db dim now enforced).
-- **Robustness/security**: search got a 20s timeout and http(s)-only instance
-  validation (SSRF guard); sandbox got ulimit resource caps and now warns
-  loudly instead of silently downgrading isolation; browser replaced fixed
-  sleeps with `document.readyState` polling (~3× faster on fast pages, no race
-  on slow ones).
-
-## Statusline
-
-Live health under the input — three scope-grouped, column-aligned rows,
-painted green/yellow/red by severity:
-
-```
-⌂ 🕸 Code 312sym ✓          · 🗃 Index 27/27 repos, 2.5k files ✓ · ▣ Tasks 1/1 doing · 3 ready ✓ · ▶ Workflow task-run 2/5 ✓
-▦ 🧠 Memory w:12 e:340 s:88 ✓ · 📚 Docs 4d/842c ✓               · ⏰ Schedule backup in 13h ✓  · 📊 Evals 9/10 ✓ · 🤖 Agents ✓
-⛭ ⛭ Services ✓              · 🧱 Sandbox ✓                      · 🔑 Secrets ✓ · 🌐 Browser ✓ · 🔎 Search: DOWN (searx unreachable) · 🪝 Hooks ✓
-```
-
-Each segment is a Rust `<crate> statusline` verb (`ok|…`, `warn|…`, `err|…`) —
-the extension only maps level → color, collapses healthy infra segments to
-`Name ✓`, and pads columns (wcwidth-aware) so the grid aligns. Red means act
-now (service DOWN, token failing verify, SearXNG unreachable); yellow means
-attention (stale index, WIP full, blockers, memory tier near its eviction cap).
-
-## Quick start
+From the repo root:
 
 ```sh
-# Build the whole fleet (release) + run the full gate (build, test, audits, smoke).
+# Build the whole fleet and run the gate: build, tests, audits, smoke checks.
 ./build.sh
 
-# Run the agent (project-isolated: vendored pi runtime, config, sessions all under .pi/).
+# Start the interactive agent.
 ./pi
 
-# Headless (the stdin redirect is MANDATORY or pi hangs):
+# Run a one-shot headless prompt.
+# The stdin redirect is required or pi waits for more input.
 ./pi -p 'search the web for Icelandic golf courses' < /dev/null
 
-# Cockpit: 2x2 tmux grid — pi · live DA attach · board · meðvitund transcript.
-# Ctrl+Alt+q/w/e/r selects panes, Alt+Enter fullscreens; re-run to re-attach.
+# Optional cockpit: pi, live gateway attach, board, and transcript in tmux.
 ./tui
 ```
 
-The launcher auto-loads every `extensions/*.ts`, injects the tool catalog
-(`AGENT_TOOLS.md`) and recent session memory into the agent's context, and pins
-the pi runtime. Normal `./pi` and headless `./pi -p ... < /dev/null` launches
-are offline with respect to the launcher: they use the vendored runtime already
-under `.pi/` and do not update files. The mutating/networked path is explicit:
-run `./pi --self-update` when you want the launcher to check upstream, download a
-new pi runtime if available, and replace files under `.pi/runtime/` (smoke-tested,
-auto-rollback).
+Normal `./pi` and `./pi -p ... < /dev/null` launches use the vendored runtime
+under `.pi/` and do not update files. Use `./pi --self-update` only when you
+explicitly want the launcher to check upstream and replace `.pi/runtime/`.
 
-### Using a tool directly
+## What You Can Do
 
-Every tool is also a standalone binary — useful for scripting and debugging:
+- Ask the agent to work in this repo or any project under `workspaces/`.
+- Search and index code with `codeindex` and `codegraph`.
+- Store and recall project memory with `memory`.
+- Browse real pages through Chrome with `browser` or the visual `sa-browser`.
+- Pull tasks from the kanban board and run evidence-gated workflows.
+- Run commands through a sandbox that masks secrets and scrubs the environment.
+- Keep long-running services alive through the internal supervisor.
+
+Useful slash commands inside `./pi`:
+
+```text
+/status          live tool/service health
+/board           kanban board
+/tasks           current task list
+/projects        projects under workspaces/
+/skills query    match a request to the right skill
+/runs            workflow runs
+/audit           recent hook firings
+/memory query    memory recall
+/sab [url]       toggle the visual browser pane
+```
+
+## Common Commands
 
 ```sh
+# Direct tool use, useful for scripting and debugging.
 B=target/release/semdb
 $B create notes.semdb
 $B embed  notes.semdb --id note1 --text "golf swing practice"
 $B search notes.semdb --text "sports" --k 5
+
+# Long-running services used by browser/scheduler workflows.
+supervise status
+supervise up
+supervise restart chromium
+supervise watch
+
+# Release flow.
+./build.sh minor "changelog line"
 ```
 
-## Configuration
+## Repository Map
 
-All runtime endpoints live in [`config/smartagent.conf`](config/smartagent.conf)
-(embeddings, SearXNG, ntfy, browser CDP, voice). Nothing is hardcoded; every
-value resolves **flag → env var → config file** via `semdb::config`. Embeddings
-inference is external (any OpenAI-compatible `/v1/embeddings` endpoint over HTTP
-or HTTPS; `httpc` uses the system `openssl s_client` helper for TLS and
-`SMARTAGENT_HTTPC_CA_FILE` for private roots).
+```text
+crates/         pure-Rust tools, one focused binary per capability
+extensions/     thin pi extensions; TypeScript glue only
+config/         runtime endpoints and hook configuration
+hooks.d/        lifecycle hook scripts
+skills/         SKILL.md files, including Kanban methodology
+workflows/      workflow definitions for evidence-gated task runs
+ops/            supervisor boot, backup, and preflight docs
+pi              project-local launcher using the vendored runtime in .pi/
+build.sh        build, test, audit, smoke, and release entrypoint
+AGENTS.md       architecture, conventions, security posture, tool catalog
+AGENT_TOOLS.md  tool guide injected into the agent context
+ISA.md          ideal-state criteria and current project status
+```
 
-## Long-running services
+Not tracked: `.pi/`, `data/`, `workspaces/`, `.refrepos/`, `.scratch/`, and
+other local agent/runtime state. See [`.gitignore`](.gitignore).
 
-The agent depends on a couple of background services (a cron **scheduler daemon**
-and **headless Chromium** for the browser tool). These are managed by the
-internal `supervise` process manager — pure Rust, self-healing, and controllable
-by the agent itself:
+<details>
+<summary><strong>How SMARTAGENT Is Built</strong></summary>
+
+```text
+pi  (agent spine)
+ │
+ ├── extensions/*.ts   thin glue: register tool, call target/release/<tool>
+ │
+ └── crates/*          pure-Rust, std-only tools and shared libraries
+```
+
+Design rules:
+
+- Pure Rust, `std` only, zero crates.io dependencies in `crates/*` tools.
+- One capability per crate.
+- Thin `main.rs`; real logic lives in scoped modules.
+- No source file over 1000 lines.
+- All persistent data lives in semdb tables.
+- Verify by using the capability from pi, not just by compiling it.
+- Borrow proven patterns from reference projects, but do not vendor or wrap
+  license-incompatible code.
+
+Reference repos live in `.refrepos/` and are gitignored. SMARTAGENT ports the
+concepts, not the dependency stacks.
+
+</details>
+
+<details>
+<summary><strong>Tool Catalog</strong></summary>
+
+Every active tool is a standalone Rust binary exposed to pi by an extension.
+Voice is built but disabled until an external speech server is deployed.
+
+| Tool | Reference pattern | What it does |
+|------|-------------------|--------------|
+| `semdb` | vector store | Semantic database: embed, search, get, delete, stats |
+| `memory` | [mem0](https://github.com/mem0ai/mem0) | Working/episodic/semantic memory with recall and promotion |
+| `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust symbols, refs, callers, impls, paths, semantic code search |
+| `codeindex` | ripgrep-style search | Fast code search plus per-project file inventory |
+| `vault` | Obsidian-style vault | Markdown notes, links, backlinks, graph, keyword search |
+| `skills` | [Agent Skills](https://github.com/anthropics/skills) | `SKILL.md` loader, matcher, validator |
+| `schedule` | [Temporal](https://github.com/temporalio/temporal) | Durable cron and one-shot reminders |
+| `search` | [SearXNG](https://github.com/searxng/searxng) | Web metasearch client; output is fenced as untrusted data |
+| `notify` | [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications |
+| `secrets` | [Infisical](https://github.com/Infisical/infisical) | Policy-gated, audited secret store |
+| `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open, click, type, wait, scroll, snapshot |
+| `sa-browser` | browser-use + TUI pane | Visual browser pane for the pi TUI plus DOM snapshots |
+| `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out headless-pi subagents with persisted results |
+| `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers |
+| `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution with secret masking and resource caps |
+| `context` | TELOS-style context | Principal identity and context composition |
+| `evals` | [Langfuse](https://github.com/langfuse/langfuse) | Trace logs, scoring, regression diffs |
+| `rag` | [RAGFlow](https://github.com/infiniflow/ragflow) | Document ingestion and cited retrieval |
+| `tasks` | kanban | Board with WIP limits and criteria-gated done |
+| `workflow` | PAI-style process | Markdown-defined evidence-gated process engine |
+| `supervise` | process supervisor | Process manager for scheduler, gateway, and Chromium services |
+
+Shared libraries include `httpc` for HTTP/HTTPS and JSON, plus extension-only
+pieces such as session memory, hooks, commands, and the statusline.
+
+</details>
+
+<details>
+<summary><strong>Operating Loop</strong></summary>
+
+SMARTAGENT work follows the loop in [AGENT_TOOLS.md](AGENT_TOOLS.md):
+
+1. Route the request with `skills match`.
+2. Pull or create a kanban task before editing files.
+3. Use a workflow for non-trivial work.
+4. Investigate cheaply before editing.
+5. Execute with the right tool.
+6. Verify by using the real capability.
+7. Close the task, record evidence, and store durable project facts locally.
+
+The loop is partly enforced by hooks. In particular, edit/write actions are
+blocked while there is no task in `doing` on the relevant board. This keeps
+work observable and prevents accidental drive-by changes.
+
+</details>
+
+<details>
+<summary><strong>Statusline And Cockpit</strong></summary>
+
+The TUI statusline shows live health under the input in three rows:
+
+```text
+⌂ workspace: code graph, project index, tasks, workflow
+▦ data: memory, rag, schedule, evals, orchestration
+⛭ infra: services, sandbox, secrets, Chrome, search, hooks
+```
+
+Healthy segments collapse to `Name ✓`; warnings and errors expand with the
+detail that needs attention.
+
+`./tui` opens the cockpit in tmux:
+
+- top-left: interactive `./pi`
+- top-right: live gateway attach
+- bottom-left: board watch
+- bottom-right: medvitund transcript
+
+Keyboard shortcuts: `Ctrl+Alt+q/w/e/r` selects panes by position, and
+`Alt+Enter` toggles fullscreen on the active pane.
+
+</details>
+
+<details>
+<summary><strong>Configuration And Services</strong></summary>
+
+All runtime endpoints live in
+[`config/smartagent.conf`](config/smartagent.conf): embeddings, SearXNG, ntfy,
+browser CDP, voice, and related service settings. Values resolve in this order:
+
+```text
+flag -> environment variable -> config file
+```
+
+Embedding inference is external and OpenAI-compatible. `semdb` stores and
+searches vectors itself; it does not run inference in-process.
+
+Long-running services are managed by `supervise`, not ad-hoc shell sessions:
 
 ```sh
-supervise status              # state / pid / health of each service
-supervise up                  # start them
-supervise restart chromium    # restart one
-supervise watch               # self-healing loop (restarts dead services every 15s)
+supervise status
+supervise up
+supervise restart chromium
+supervise watch
 ```
 
-There is exactly one optional systemd unit, solely to launch the supervisor at
-boot. Full details — boot persistence, backups, preflight — in [`ops/README.md`](ops/README.md).
+Boot persistence, backups, and preflight checks are documented in
+[`ops/README.md`](ops/README.md).
 
-## Security
+</details>
 
-The agent can invoke every tool and may be prompt-injected via web content, so
-guards are deterministic, not prompt-level: untrusted web/search/rag content is
-fenced in an explicit envelope; `mcp` and `schedule` cannot smuggle shell
-commands; secret grants are admin-only and off the agent's tool surface; the
-sandbox scrubs the parent environment, applies ulimit resource caps, and
-tmpfs-masks the secret store so secrets can't leak into a sandboxed command;
-and secret reads are caller-token-authenticated — a bare `--as pi` claim no
-longer works. See the **Security posture** section in [AGENTS.md](AGENTS.md).
+<details>
+<summary><strong>Security Model</strong></summary>
 
-## Development
+The agent can invoke tools and may read prompt-injected content from search,
+browser, or RAG sources, so important protections are deterministic:
 
-- **Pure Rust, `std` only, zero crates.io deps** in every `crates/*` tool. Extensions are thin TS glue.
-- **No file over 1000 lines.** Split into scoped modules.
-- **All data lives in semdb tables** — no bespoke JSON/JSONL formats for new data.
-- **Verify by using** — a capability is done when driven end-to-end from `./pi`, not when it compiles.
-- **Borrow, don't invent** — reference repos are shallow-cloned into `.refrepos/` (gitignored) and ported, never wrapped.
+- Search, browser, and RAG results are fenced as untrusted data.
+- MCP calls execute argv directly; no shell string smuggling.
+- Arbitrary scheduler commands are admin-gated.
+- Secrets are deny-by-default, audited, encrypted at rest, and caller-token
+  authenticated.
+- The sandbox clears the environment, applies resource caps, and masks secret
+  paths inside the namespace when isolation is available.
+- HTTP client redirects drop unsafe POST bodies and strip cross-host auth.
 
-The gate (`./build.sh`) enforces the line-count and zero-dep rules, lints
-extensions for the silent-registration-failure trap, and smoke-tests that all 20
-active crate tools register in pi. Cut a release with `./build.sh minor "changelog line"`.
+See [AGENTS.md](AGENTS.md) for the full security posture.
 
-## Project layout
+</details>
 
-```
-crates/         pure-Rust zero-dep tools (one binary each) + httpc library
-extensions/     thin pi extensions (TS glue) — one per tool
-config/         smartagent.conf (all endpoints) + hooks.conf (lifecycle hooks)
-hooks.d/        hook scripts (stdin JSON in, exit 2 blocks)
-skills/         agent skills (SKILL.md) incl. Kanban methodology + workflows
-workflows/      standalone workflow definitions for the workflow engine
-ops/            supervisor boot unit, backup + preflight scripts, ops docs
-pi              project launcher (self-contained pi runtime under .pi/)
-build.sh        build + test + audits + smoke gate; release versioning
-AGENTS.md       architecture, crate map, conventions, security posture
-AGENT_TOOLS.md  the tool catalog injected into the agent's context
-ISA.md          Ideal State — the verifiable criteria driving the build
+<details>
+<summary><strong>Development Rules</strong></summary>
+
+The build gate is the source of truth:
+
+```sh
+./build.sh
 ```
 
-Not tracked (see [`.gitignore`](.gitignore)): `.pi/` (runtime + credentials),
-`data/` (memory, secrets, semdb tables), `workspaces/`, `.refrepos/`, `.scratch/`.
+It builds the workspace, runs tests, audits line counts, checks for crates.io
+dependencies in tool crates, lints pi extensions for silent registration traps,
+and smoke-tests active tool registration.
+
+Before landing meaningful capability work:
+
+- Drive the feature through `./pi`.
+- Test headless prompts with `< /dev/null`.
+- Use non-interactive fusion testing when required:
+
+```sh
+codex exec --sandbox workspace-write -m gpt-5.4-mini \
+  -c model_reasoning_effort=low \
+  "<test instructions, PASS/FAIL per check, one-line verdict>" < /dev/null
+```
+
+Project status and acceptance criteria live in [ISA.md](ISA.md). User-facing
+release history lives in [CHANGELOG.md](CHANGELOG.md).
+
+</details>
 
 ## License
 

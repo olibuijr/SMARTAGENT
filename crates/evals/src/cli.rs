@@ -8,7 +8,7 @@ use crate::score::{self, Matcher};
 use crate::store::{self, Trace};
 
 fn db(args: &[String]) -> PathBuf {
-    flag(args, "--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/evals.jsonl"))
+    flag(args, "--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/evals.semdb"))
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {
@@ -117,8 +117,11 @@ const HELP: &str = r#"
 evals — trace, score, and regression-diff (Langfuse concept)
 
 USAGE:
-  evals log   --db F --run R --case ID --input '..' --output '..' [--expected '..'] [--latency-ms N]
-  evals score --db F --run R [--matcher exact|contains|regex-lite]
-  evals diff  --db F --run-a A --run-b B [--matcher ...]
-  evals runs  --db F
+  evals log   [--db data/evals.semdb] --run R --case ID --input '..' --output '..' [--expected '..'] [--latency-ms N]
+  evals score [--db data/evals.semdb] --run R [--matcher exact|contains|regex-lite]
+  evals diff  [--db data/evals.semdb] --run-a A --run-b B [--matcher ...]
+  evals runs  [--db data/evals.semdb]
+
+Storage: eval traces live in a semdb table. Legacy --db paths ending in
+*.jsonl are accepted for compatibility and transparently map to *.semdb.
 "#;

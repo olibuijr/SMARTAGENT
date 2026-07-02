@@ -23,6 +23,13 @@ fn valid_col(c: &str) -> Result<(), String> {
     if COLUMNS.contains(&c) { Ok(()) } else { Err(format!("unknown column '{c}' ({})", COLUMNS.join("|"))) }
 }
 
+fn current_owner() -> String {
+    std::env::var("SMARTAGENT_TASK_OWNER")
+        .or_else(|_| std::env::var("SMARTAGENT_GATEWAY_AGENT"))
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "agent".into())
+}
+
 pub fn run(args: &[String]) -> Result<String, String> {
     let store = Store::open(&db_path(args)?)?;
     match args.first().map(String::as_str) {
@@ -56,14 +63,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let mut ts = store.all()?;
             if let Some(c) = flag(args, "--col") { valid_col(&c)?; ts.retain(|t| t.col == c); }
             if let Some(tag) = flag(args, "--tag") { ts.retain(|t| t.tags.iter().any(|x| x == &tag)); }
+            if let Some(owner) = flag(args, "--owner") { ts.retain(|t| t.owner == owner); }
+            if has(args, "--mine") { let me = current_owner(); ts.retain(|t| t.owner == me); }
+            if has(args, "--others") { let me = current_owner(); ts.retain(|t| t.owner != me && !t.owner.is_empty()); }
             if has(args, "--blocked") { ts.retain(|t| !t.blocked.is_empty()); }
             if ts.is_empty() { return Ok("no tasks".into()); }
-            Ok(ts.iter().map(|t| format!("{}\t{}\t{}\t{}", t.id, t.col, t.prio, t.title)).collect::<Vec<_>>().join("\n"))
+            Ok(ts.iter().map(|t| {
+                let owner = if t.owner.is_empty() { String::new() } else { format!(" @{}", t.owner) };
+                format!("{}\t{}\t{}\t{}{}", t.id, t.col, t.prio, t.title, owner)
+            }).collect::<Vec<_>>().join("\n"))
         }
         Some("show") => {
             let t = store.get(args.get(1).ok_or("usage: tasks show T-1")?)?;
             let mut out = vec![format!("{} [{}] {} — {}", t.id, t.prio, t.col, t.title)];
             if !t.tags.is_empty() { out.push(format!("tags: {}", t.tags.join(","))); }
+            if !t.owner.is_empty() { out.push(format!("owner: {}", t.owner)); }
             if !t.blocked.is_empty() { out.push(format!("BLOCKED: {}", t.blocked)); }
             for (i, (c, done)) in t.criteria.iter().enumerate() {
                 out.push(format!("  [{}] {}. {}", if *done { "x" } else { " " }, i + 1, c));
@@ -95,6 +109,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 ));
             }
             t.col = col.to_string();
+            if col == "doing" { t.owner = current_owner(); }
+            else if t.col != "review" { t.owner.clear(); }
             t.trans.push((col.to_string(), now()));
             if col == "done" { t.done_ts = now(); t.blocked.clear(); }
             store.put(&t)?;
@@ -190,8 +206,8 @@ USAGE:
   tasks add '<title>' [--prio p1|p2|p3] [--col backlog|ready] [--tags a,b] [--criteria 'a;b;c']
   tasks todo '<title>'                quick capture → backlog p3
   tasks board                         render columns + WIP state
-  tasks list [--col C] [--tag T] [--blocked]
-  tasks show T-1                      card: criteria checklist + history
+  tasks list [--col C] [--tag T] [--owner O|--mine|--others] [--blocked]
+  tasks show T-1                      card: owner + criteria checklist + history
   tasks move T-1 <column>             WIP-limited; done requires criteria ✓ (--force overrides)
   tasks done T-1                      = move done
   tasks next                          pull highest-prio ready task IF doing has capacity

@@ -100,12 +100,17 @@ const HELP: &str = r#"
 browser — Browser Use port (pure-Rust CDP client)
 
 USAGE:
-  browser open  <url>            [--devtools http://127.0.0.1:9222]
-  browser click <css-selector>   click an element, return the new snapshot
-  browser type  <css-selector> <text>   fill an input, return the new snapshot
-  browser back                   history back, return the new snapshot
-  browser probe                  check the DevTools connection
+  browser open  <url>                         [--devtools http://127.0.0.1:9222]
+  browser click <css-selector>                [--quiet] [--max-text N] [--max-links N]
+  browser type  <css-selector> <text>         [--enter] [--quiet] [--max-text N] [--max-links N]
+  browser wait  <css-selector>                [--timeout-ms N] [--quiet]
+  browser scroll [--by PX] [--to <selector>]  [--max-text N] [--max-links N]
+  browser attr  <css-selector> <name|text|value>
+  browser back                                [--max-text N] [--max-links N]
+  browser probe
+  browser statusline
 
 Requires Chrome/Chromium launched with --remote-debugging-port=9222.
-open/click/type/back return a compact snapshot (title, visible text, links).
+Navigation actions return a compact snapshot (title, visible text, links);
+--quiet returns only the status line for intermediate click/type/wait steps.
 "#;

@@ -20,6 +20,7 @@ pub struct Task {
     pub prio: String, // p1 (highest) | p2 | p3
     pub tags: Vec<String>,
     pub blocked: String, // reason, empty = not blocked
+    pub owner: String, // agent/user that pulled it to doing; empty = unowned
     pub criteria: Vec<(String, bool)>,
     pub created: i64,
     pub done_ts: i64,
@@ -151,12 +152,13 @@ fn encode(t: &Task) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"title":"{}","col":"{}","prio":"{}","tags":[{}],"blocked":"{}","criteria":[{}],"created":{},"done_ts":{},"trans":[{}]}}"#,
+        r#"{{"title":"{}","col":"{}","prio":"{}","tags":[{}],"blocked":"{}","owner":"{}","criteria":[{}],"created":{},"done_ts":{},"trans":[{}]}}"#,
         json::escape(&t.title),
         json::escape(&t.col),
         json::escape(&t.prio),
         tags,
         json::escape(&t.blocked),
+        json::escape(&t.owner),
         crit,
         t.created,
         t.done_ts,
@@ -178,6 +180,7 @@ fn decode(id: &str, meta: &str) -> Task {
         col: s("col"),
         prio: s("prio"),
         blocked: s("blocked"),
+        owner: s("owner"),
         created: n("created"),
         done_ts: n("done_ts"),
         tags: arr("tags").iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
@@ -221,6 +224,7 @@ mod tests {
             prio: "p1".into(),
             tags: vec!["golf".into()],
             blocked: String::new(),
+            owner: "builder".into(),
             criteria: vec![("compiles".into(), true), ("tested".into(), false)],
             created: 100,
             done_ts: 0,
@@ -230,6 +234,7 @@ mod tests {
         assert_eq!(s.next_id().unwrap(), "T-2");
         let got = s.get("T-1").unwrap();
         assert_eq!(got.title, t.title);
+        assert_eq!(got.owner, "builder");
         assert_eq!(got.criteria.len(), 2);
         assert_eq!(got.criteria_done(), 1);
         assert_eq!(got.trans.len(), 2);

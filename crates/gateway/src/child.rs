@@ -19,12 +19,20 @@ pub enum Event {
     State(bool),
     /// Streamed assistant text fragment.
     Text(String),
-    /// A turn finished; payload is the full assistant text of that turn.
-    TurnEnd(String),
+    /// A turn finished; payload is full assistant text plus token usage.
+    TurnEnd(String, Usage),
     /// A tool call started (payload: tool name) — visibility while "quiet".
     Tool(String),
     /// Child exited.
     Exited(i32),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
 }
 
 pub struct PiChild {
@@ -99,6 +107,7 @@ fn reader_loop(
     busy: Arc<Mutex<bool>>,
 ) {
     let mut turn_text = String::new();
+    let mut usage = Usage::default();
     for line in BufReader::new(stdout).lines() {
         let Ok(line) = line else { break };
         let Ok(v) = json::parse(&line) else { continue };
@@ -111,7 +120,13 @@ fn reader_loop(
             "agent_end" => {
                 *busy.lock().unwrap() = false;
                 let _ = tx.send(Event::State(false));
-                let _ = tx.send(Event::TurnEnd(std::mem::take(&mut turn_text)));
+                let _ = tx.send(Event::TurnEnd(std::mem::take(&mut turn_text), usage));
+                usage = Usage::default();
+            }
+            "message_end" | "turn_end" => {
+                if let Some(u) = usage_from_event(&v) {
+                    usage = u;
+                }
             }
             "tool_execution_start" => {
                 let name = v
@@ -135,4 +150,34 @@ fn reader_loop(
         }
     }
     let _ = tx.send(Event::Exited(-1));
+}
+
+fn usage_from_event(v: &Value) -> Option<Usage> {
+    let msg = v.get("message")?;
+    let u = msg.get("usage")?;
+    Some(Usage {
+        input: num(u, "input"),
+        output: num(u, "output"),
+        cache_read: num(u, "cacheRead"),
+        cache_write: num(u, "cacheWrite"),
+    })
+}
+
+fn num(v: &Value, key: &str) -> u64 {
+    v.get(key).and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_from_message_end() {
+        let v = json::parse(r#"{"type":"message_end","message":{"role":"assistant","usage":{"input":10,"output":4,"cacheRead":20,"cacheWrite":2}}}"#).unwrap();
+        let u = usage_from_event(&v).unwrap();
+        assert_eq!(u.input, 10);
+        assert_eq!(u.output, 4);
+        assert_eq!(u.cache_read, 20);
+        assert_eq!(u.cache_write, 2);
+    }
 }

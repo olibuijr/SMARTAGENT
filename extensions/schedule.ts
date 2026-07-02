@@ -24,9 +24,9 @@ export default function (pi: ExtensionAPI) {
 		name: "schedule",
 		label: "Scheduler",
 		description:
-			"Durable cron scheduler (journaled, replay-safe). Actions: 'add' registers a job " +
-			"(cron 5-field expression + shell cmd), 'list' shows jobs with last run, 'next' shows " +
-			"next fire times, 'rm' removes by id, 'tick' fires anything due right now.",
+			"Durable cron scheduler (semdb-journaled, replay-safe). Actions: 'add' registers an agent-safe " +
+			"notification reminder (cron recurring or at one-shot), 'list' shows jobs with last run, 'next' shows " +
+			"next fire times, 'rm' removes by id, pause/resume toggle jobs, and 'tick' fires anything due right now.",
 		parameters: {
 			type: "object",
 			properties: {

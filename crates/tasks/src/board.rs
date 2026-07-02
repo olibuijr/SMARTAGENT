@@ -32,7 +32,8 @@ pub fn render(tasks: &[Task], wip: Wip) -> String {
             if title.chars().count() > 60 {
                 title = title.chars().take(59).collect::<String>() + "…";
             }
-            out.push(format!("  {} {} {}{}{}", t.id, t.prio, title, crit, blocked));
+            let owner = if t.owner.is_empty() { String::new() } else { format!(" @{}", t.owner) };
+            out.push(format!("  {} {} {}{}{}{}", t.id, t.prio, title, owner, crit, blocked));
         }
     }
     out.join("\n")

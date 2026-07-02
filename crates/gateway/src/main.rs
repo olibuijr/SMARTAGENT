@@ -151,6 +151,7 @@ fn statusline() -> Result<(), String> {
             let mut state = "?".to_string();
             let mut beat = "—".to_string();
             let mut doing = String::new();
+            let mut tokens = String::new();
             for part in t.split(" | ") {
                 if let Some(rest) = part.strip_prefix("agent ") {
                     state = rest.replace(": ", " ");
@@ -160,12 +161,15 @@ fn statusline() -> Result<(), String> {
                     }
                 } else if let Some(rest) = part.strip_prefix("doing: ") {
                     doing = rest.split(' ').next().unwrap_or("").to_string();
+                } else if let Some(rest) = part.strip_prefix("tokens today: ") {
+                    tokens = rest.to_string();
                 }
             }
+            let tok = if tokens.is_empty() { String::new() } else { format!(" · {tokens}tok") };
             if doing.is_empty() || doing == "nothing" {
-                println!("ok|⏲ {state} · {beat}");
+                println!("ok|⏲ {state} · {beat}{tok}");
             } else {
-                println!("ok|⏲ {state} · {beat} · {doing}");
+                println!("ok|⏲ {state} · {beat} · {doing}{tok}");
             }
             return Ok(());
         }

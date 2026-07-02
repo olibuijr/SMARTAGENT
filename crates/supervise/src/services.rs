@@ -36,7 +36,13 @@ pub fn registry(chromium_bin: &str, chrome_profile: &str) -> Vec<Service> {
         },
         Service {
             name: "gateway",
-            argv: s(&["target/release/gateway", "serve", "--autonomous"]),
+            argv: s(&[
+                "target/release/gateway",
+                "serve",
+                "--agents",
+                "main,builder,qa,ops",
+                "--autonomous",
+            ]),
             needle: "gateway serve",
             probe: None,
             enabled: true,

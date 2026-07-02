@@ -13,6 +13,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use httpc::json;
 use semdb::storage::Db;
 
+use crate::child::Usage;
+
 const PLACEHOLDER_VEC: [f32; 1] = [0.0];
 
 pub struct Beat {
@@ -44,7 +46,7 @@ impl Beat {
             .unwrap_or_default();
         let state = if busy { "working" } else { "idle" };
         let beat = format!(
-            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill; use the `triage` skill for ready-empty/backlog ordering. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol. (6) Other agents work this board too: never take a task in doing/review that you did not pull yourself — pull only unclaimed ready/backlog items."
+            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill; use the `triage` skill for ready-empty/backlog ordering. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol. (6) Other agents work this board too: continue only doing tasks owned by you (@owner in the board); never take doing/review tasks owned by someone else; pull only unclaimed ready/backlog items."
         );
         self.last_beat = Some(now);
         beat
@@ -85,13 +87,25 @@ impl Beat {
 
     /// Append a row to the medvitund table. Row without meaning-vector (v1).
     pub fn log(&self, agent: &str, kind: &str, state: &str, text: &str) {
+        self.log_with_usage(agent, kind, state, text, None);
+    }
+
+    pub fn log_turn(&self, agent: &str, text: &str, usage: Usage) {
+        self.log_with_usage(agent, "turn", "idle", text, Some(usage));
+    }
+
+    fn log_with_usage(&self, agent: &str, kind: &str, state: &str, text: &str, usage: Option<Usage>) {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let excerpt: String = text.chars().take(400).collect();
+        let tokens = usage
+            .map(|u| format!(",\"input\":{},\"output\":{},\"cacheRead\":{},\"cacheWrite\":{}", u.input, u.output, u.cache_read, u.cache_write))
+            .unwrap_or_default();
+        let day = human_day_prefix();
         let meta = format!(
-            "{{\"ts\":{ts},\"agent\":\"{}\",\"kind\":\"{}\",\"state\":\"{}\",\"text\":\"{}\"}}",
+            "{{\"ts\":{ts},\"day\":\"{day}\",\"agent\":\"{}\",\"kind\":\"{}\",\"state\":\"{}\",\"text\":\"{}\"{tokens}}}",
             json::escape(agent),
             json::escape(kind),
             json::escape(state),
@@ -174,6 +188,10 @@ fn board_has_autonomous_work(board: &str) -> bool {
         (l.starts_with("DOING") || l.starts_with("READY") || l.starts_with("BACKLOG"))
             && !(l.contains("(0)") || l.contains("(0/"))
     })
+}
+
+pub fn human_day_prefix() -> String {
+    human_now().chars().take(10).collect()
 }
 
 fn human_now() -> String {

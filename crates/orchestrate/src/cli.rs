@@ -33,6 +33,19 @@ fn workspaces_root() -> PathBuf {
     semdb::config::Config::load().workspaces_dir()
 }
 
+fn store_path() -> PathBuf {
+    semdb::config::Config::load().data_dir().join("orchestrate.semdb")
+}
+
+fn persisted_run_ids() -> Vec<String> {
+    let path = store_path();
+    let Ok(db) = semdb::storage::Db::open(&path) else { return Vec::new(); };
+    let mut ids: Vec<String> = db.index.keys().filter_map(|k| k.split_once(':').map(|(run, _)| run.to_string())).collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 pub fn run(args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("run") => {
@@ -51,28 +64,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
             fan_out(args, prompts)
         }
         Some("statusline") => {
-            // `level|text` for UI statuslines: fan-out workspace count.
-            let root = workspaces_root();
-            let n = std::fs::read_dir(&root).map(|es| es.flatten().filter(|e| e.path().is_dir()).count()).unwrap_or(0);
+            // `level|text` for UI statuslines: persisted fan-out run count.
+            let n = persisted_run_ids().len();
             Ok(if n == 0 { "ok|🤖 idle".to_string() } else { format!("ok|🤖 {n} runs") })
         }
         Some("list") => {
-            let root = workspaces_root();
-            let mut runs = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(&root) {
-                for e in entries.flatten() {
-                    if e.path().is_dir() {
-                        runs.push(e.file_name().to_string_lossy().to_string());
-                    }
-                }
-            }
-            runs.sort();
+            let runs = persisted_run_ids();
             Ok(if runs.is_empty() { "no runs".into() } else { runs.join("\n") })
         }
         Some("out") => {
             // Collect each subagent's captured output for a run — otherwise the
             // agent must read N workspace files by hand.
             let id = args.get(1).ok_or("usage: orchestrate out <run-id> [--tail N]")?;
+            if !persisted_run_ids().iter().any(|r| r == id) {
+                return Err(format!("no persisted run '{id}'"));
+            }
             let tail = flag(args, "--tail").and_then(|s| s.parse().ok()).unwrap_or(2000usize);
             let run_dir = workspaces_root().join(id);
             let mut agents: Vec<PathBuf> = std::fs::read_dir(&run_dir)
@@ -132,9 +138,9 @@ fn fan_out(args: &[String], prompts: Vec<String>) -> Result<String, String> {
 
 /// Best-effort run persistence in data/orchestrate.semdb (one row per agent).
 fn persist_run(id: &str, results: &[crate::spawn::AgentResult]) {
-    let path = std::path::Path::new("data/orchestrate.semdb");
-    let _ = std::fs::create_dir_all("data");
-    let db = if path.exists() { semdb::storage::Db::open(path) } else { semdb::storage::Db::create(path) };
+    let path = store_path();
+    if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+    let db = if path.exists() { semdb::storage::Db::open(&path) } else { semdb::storage::Db::create(&path) };
     if let Ok(mut db) = db {
         for r in results {
             let meta = format!(

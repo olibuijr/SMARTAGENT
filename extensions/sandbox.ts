@@ -1,15 +1,20 @@
 /** sandbox — pi extension over the pure-Rust isolated-exec binary. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "sandbox");
 
-function run(args: string[]): string {
-	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 120_000, cwd: ROOT }).trim(); }
-	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
+function run(args: string[], signal?: AbortSignal): Promise<string> {
+	return new Promise((resolve) => {
+		const child = execFile(BIN, args, { encoding: "utf8", timeout: 120_000, cwd: ROOT, signal }, (e, stdout, stderr) => {
+			if (e) resolve(`error: ${String(stderr || "").trim() || e.message}`);
+			else resolve(String(stdout).trim());
+		});
+		signal?.addEventListener("abort", () => child.kill(), { once: true });
+	});
 }
 
 export default function (pi: ExtensionAPI) {
@@ -30,7 +35,7 @@ export default function (pi: ExtensionAPI) {
 			},
 			required: ["command"],
 		} as any,
-		async execute(_id: string, p: any) {
+		async execute(_id: string, p: any, signal?: AbortSignal) {
 			const flags: string[] = ["run", "--timeout", String(p.timeout ?? 30)];
 			if (p.isolate === false) flags.push("--no-isolate");
 			if (p.net) flags.push("--net");
@@ -38,7 +43,7 @@ export default function (pi: ExtensionAPI) {
 			if (p.maxOutput) flags.push("--max-output", String(p.maxOutput));
 			if (p.stdin) flags.push("--stdin", p.stdin);
 			flags.push("--", "sh", "-c", p.command ?? "");
-			return { content: [{ type: "text", text: run(flags) }] };
+			return { content: [{ type: "text", text: await run(flags, signal) }] };
 		},
 	});
 }

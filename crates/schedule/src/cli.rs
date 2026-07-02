@@ -231,15 +231,22 @@ mod tests {
 }
 
 const HELP: &str = r#"
-schedule — durable cron scheduler (journal + replay)
+schedule — durable cron scheduler (semdb journal + replay)
 
 USAGE:
+  schedule add  --cron '*/5 * * * *' --notify '<message>' [--id X] [--journal FILE]
+  schedule add  --at 'YYYY-MM-DDTHH:MM' --notify '<message>' [--id X] [--journal FILE]
   schedule add  --cron '*/5 * * * *' --cmd '<shell>' [--id X] [--journal FILE]
-  schedule add  --at 'YYYY-MM-DDTHH:MM' ...   one-shot; local = UTC + utc_offset_minutes (config, default 0)
+                arbitrary --cmd requires SMARTAGENT_SCHEDULE_ADMIN=1
+  schedule pause --id X [--journal FILE]
+  schedule resume --id X [--journal FILE]
   schedule list [--journal FILE]
   schedule next [--journal FILE]
   schedule rm   --id X [--journal FILE]
   schedule run [--once] [--journal FILE]
+  schedule statusline [--journal FILE]
 
-Journal default: data/schedule.jsonl (append-only JSONL, replayed on start).
+One-shot --at is local time = UTC + utc_offset_minutes (config, default 0).
+Journal default: data/schedule.jsonl, transparently stored as a semdb table
+(data/schedule.semdb); the jsonl path is accepted for legacy callers.
 "#;

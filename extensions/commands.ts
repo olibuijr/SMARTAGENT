@@ -16,18 +16,14 @@
  *   /audit             hooks audit --n 10
  *   /memory <query>    memory recall
  *
- * Type-only pi imports + node builtins only (runtime imports fail silently).
+ * Type-only pi imports; shared local statusline metadata lives in extensions/lib/.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { BIN, ROOT, STATUS_SEGMENTS, TASKS_DB, WORKFLOW_DB, parseLevel, statusTag } from "./lib/statusline-common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = (name: string) => join(ROOT, "target", "release", name);
-const TASKS_DB = join(ROOT, "data", "tasks.semdb");
-const WORKFLOW_DB = join(ROOT, "data", "workflow.semdb");
 const MEMORY_DIR = join(ROOT, "data", "memory");
 const SKILLS_ROOT = join(ROOT, "skills");
 
@@ -77,22 +73,11 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("status", {
-		description: "One-shot status of services, index, board, and workflow",
+		description: "One-shot status using the same probes as the live statusline",
 		handler: async () => {
-			// Same probes the statusline widget uses; level| prefix → tag.
-			const probes: { label: string; bin: string; args: string[] }[] = [
-				{ label: "services", bin: "supervise", args: ["statusline"] },
-				{ label: "codeindex", bin: "codeindex", args: ["statusline"] },
-				{ label: "tasks", bin: "tasks", args: ["statusline", "--db", TASKS_DB] },
-				{ label: "workflow", bin: "workflow", args: ["statusline", "--root", ROOT, "--db", WORKFLOW_DB] },
-			];
-			const lines = probes.map(({ label, bin, args }) => {
-				const raw = run(bin, args, 10_000);
-				const cut = raw.indexOf("|");
-				const level = cut > 0 ? raw.slice(0, cut) : "err";
-				const text = cut > 0 ? raw.slice(cut + 1) : raw;
-				const tag = level === "ok" ? "✓" : level === "warn" ? "⚠" : "✗";
-				return `${tag} ${label.padEnd(10)} ${text}`;
+			const lines = STATUS_SEGMENTS.map(({ key, args }) => {
+				const { level, text } = parseLevel(run(key, args, 10_000));
+				return `${statusTag(level)} ${key.padEnd(10)} ${text}`;
 			});
 			show("status", lines.join("\n"));
 		},

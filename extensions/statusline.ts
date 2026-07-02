@@ -17,41 +17,22 @@
  * Every segment comes from a Rust `statusline` verb emitting `level|icon text`;
  * severity classification lives in Rust, this file only maps level → ANSI color
  * (ok=green tick text stays default, warn=yellow, err=red) and places lines.
- * Type-only pi imports + node builtins only (runtime imports fail silently).
+ * Type-only pi imports; shared local statusline metadata lives in extensions/lib/.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, watch } from "node:fs";
+import { join } from "node:path";
+import { BIN, ROOT, STATUS_SEGMENTS, parseLevel } from "./lib/statusline-common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = (name: string) => join(ROOT, "target", "release", name);
+const SEGMENTS = STATUS_SEGMENTS;
 
 // ── Segment registry: tool → binary args + which widget line it lives on ──
 // Lines are scope-grouped: workspace (per-repo work state) → data (agent
 // stores) → infra (host services). Workspace first: most task-relevant.
-type Line = "workspace" | "data" | "infra";
-const SEGMENTS: { key: string; args: string[]; line: Line }[] = [
-	{ key: "codegraph", args: ["statusline", join(ROOT, "data", "codegraph.json")], line: "workspace" },
-	{ key: "codeindex", args: ["statusline"], line: "workspace" },
-	{ key: "tasks", args: ["statusline", "--db", join(ROOT, "data", "tasks.semdb")], line: "workspace" },
-	{ key: "workflow", args: ["statusline", "--root", ROOT, "--db", join(ROOT, "data", "workflow.semdb")], line: "workspace" },
-	{ key: "memory", args: ["statusline", "--dir", join(ROOT, "data", "memory")], line: "data" },
-	{ key: "rag", args: ["statusline", join(ROOT, "data", "rag.semdb")], line: "data" },
-	{ key: "schedule", args: ["statusline"], line: "data" },
-	{ key: "evals", args: ["statusline", "--db", join(ROOT, "data", "evals.jsonl")], line: "data" },
-	{ key: "orchestrate", args: ["statusline"], line: "data" },
-	{ key: "gateway", args: ["statusline"], line: "workspace" },
-	{ key: "supervise", args: ["statusline"], line: "infra" },
-	{ key: "sandbox", args: ["statusline"], line: "infra" },
-	{ key: "secrets", args: ["statusline", "--store", join(ROOT, "data", "secrets")], line: "infra" },
-	{ key: "browser", args: ["statusline"], line: "infra" },
-	{ key: "search", args: ["statusline"], line: "infra" },
-	{ key: "hooks", args: ["statusline", "--root", ROOT], line: "infra" },
-];
 // Line prefix icons, in display order.
-const LINES: { line: Line; icon: string }[] = [
+const LINES: { line: "workspace" | "data" | "infra"; icon: string }[] = [
 	{ line: "workspace", icon: "⌂" },
 	{ line: "data", icon: "▦" },
 	{ line: "infra", icon: "⛭" },
@@ -80,10 +61,7 @@ const label = (key: string) => LABEL[key] ?? key[0].toUpperCase() + key.slice(1)
 // memory tiers) and keep their detail: bold Name, plain text, no color wash.
 const COMPACT = new Set(SEGMENTS.filter((s) => s.line === "infra").map((s) => s.key));
 const paint = (key: string, raw: string): string => {
-	const cut = raw.indexOf("|");
-	if (cut < 0) return raw;
-	const level = raw.slice(0, cut);
-	const text = raw.slice(cut + 1);
+	const { level, text } = parseLevel(raw);
 	const sp = text.indexOf(" ");
 	const first = sp > 0 ? text.slice(0, sp) : "";
 	const iconLike = first.length > 0 && /[^\x00-\x7f]/.test(first);
@@ -123,6 +101,9 @@ const REFRESH_AFTER: Record<string, string[]> = {
 
 const CLEAR_AFTER_MS = 5000;
 const REFRESH_MS = 30_000;
+const FS_DEBOUNCE_MS = 400;
+const INDEX_DEBOUNCE_MS = 2500;
+const WATCH_DIRS = ["data", "workspaces", "crates", "extensions", "hooks.d", "config"].map((d) => join(ROOT, d));
 
 export default function (pi: ExtensionAPI) {
 	const started = new Map<string, number>(); // toolCallId → start ms
@@ -130,6 +111,9 @@ export default function (pi: ExtensionAPI) {
 	const painted = new Map<string, string>(); // segment key → colored text
 	let ui: any; // latest ctx.ui, captured from events (only used when hasUI)
 	let timer: ReturnType<typeof setInterval> | undefined;
+	let fsTimer: ReturnType<typeof setTimeout> | undefined;
+	let indexTimer: ReturnType<typeof setTimeout> | undefined;
+	let watchers: { close: () => void }[] = [];
 
 	// Visible width of a cell: ANSI codes count 0, wide glyphs 2. Wide follows
 	// wcwidth/kitty: East-Asian-Wide + DEFAULT-EMOJI-PRESENTATION ranges only.
@@ -177,21 +161,26 @@ export default function (pi: ExtensionAPI) {
 		return w;
 	}
 
-	function render() {
-		if (!ui) return;
-		// Segments per line, in registry order.
-		const cells = LINES.map(({ line }) =>
-			SEGMENTS.filter((s) => s.line === line)
-				.map((s) => painted.get(s.key))
-				.filter(Boolean) as string[],
-		);
-		// Column i is padded to the widest cell i across all lines, so the
-		// separators line up vertically in a grid.
+	function compactOkCell(cell: string): string {
+		if (!cell.includes(COLOR.ok("✓"))) return cell;
+		const plain = stripAnsi(cell);
+		const icon = plain.match(/^\S+ /)?.[0] ?? "";
+		const name = plain.slice(icon.length).split(/\s+/)[0] ?? "";
+		return `${icon}\x1b[1m${name}\x1b[22m ${COLOR.ok("✓")}`;
+	}
+
+	function iconOnlyCell(cell: string): string {
+		const plain = stripAnsi(cell);
+		const icon = plain.match(/^\S+/)?.[0] ?? "•";
+		return cell.includes(COLOR.ok("✓")) ? `${icon} ${COLOR.ok("✓")}` : icon;
+	}
+
+	function rowsFor(cells: string[][]): string[] {
 		const cols = Math.max(0, ...cells.map((r) => r.length));
 		const widths = Array.from({ length: cols }, (_, i) =>
 			Math.max(0, ...cells.map((r) => (r[i] ? vwidth(r[i]) : 0))),
 		);
-		const rows = cells.map(
+		return cells.map(
 			(r, li) =>
 				`${LINES[li].icon} ` +
 				r
@@ -199,7 +188,31 @@ export default function (pi: ExtensionAPI) {
 					.join(" \x1b[2m·\x1b[0m ")
 					.trimEnd(),
 		);
-		ui.setWidget("smartagent-statusline", rows, {
+	}
+
+	function fitRows(cells: string[][], width: number): string[] {
+		// Degrade deterministically: full detail → compact ok details → icons only → fewer columns.
+		for (const variant of [cells, cells.map((r) => r.map(compactOkCell)), cells.map((r) => r.map(iconOnlyCell))]) {
+			const rows = rowsFor(variant);
+			if (rows.every((r) => vwidth(r) <= width)) return rows;
+		}
+		let trimmed = cells.map((r) => r.map(iconOnlyCell));
+		while (trimmed.some((r) => vwidth(rowsFor([r])[0] ?? "") > width) || rowsFor(trimmed).some((r) => vwidth(r) > width)) {
+			const longest = trimmed.reduce((best, r, i) => (r.length > trimmed[best].length ? i : best), 0);
+			if (trimmed[longest].length === 0) break;
+			trimmed[longest] = trimmed[longest].slice(0, -1);
+		}
+		return rowsFor(trimmed);
+	}
+
+	function render() {
+		if (!ui) return;
+		const cells = LINES.map(({ line }) =>
+			SEGMENTS.filter((s) => s.line === line)
+				.map((s) => painted.get(s.key))
+				.filter(Boolean) as string[],
+		);
+		ui.setWidget("smartagent-statusline", fitRows(cells, process.stdout.columns || 120), {
 			placement: "belowEditor",
 		});
 	}
@@ -217,15 +230,70 @@ export default function (pi: ExtensionAPI) {
 
 	const probeAll = () => probe(SEGMENTS.map((s) => s.key));
 
+	function jsonEscape(s: string): string {
+		return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+	}
+
+	function updateStatusEmbedding(path: string) {
+		const db = join(ROOT, "data", "smartagent.semdb");
+		const text = `statusline filesystem resync: ${path}`;
+		execFile(BIN("semdb"), ["embed", db, "--id", "statusline-latest", "--text", text], { encoding: "utf8", timeout: 5000, cwd: ROOT }, (err) => {
+			if (!err) return;
+			execFile(BIN("semdb"), ["put", db, "--id", "statusline-latest", "--vector", "0", "--meta", `{"text":"${jsonEscape(text)}"}`], { encoding: "utf8", timeout: 5000, cwd: ROOT }, () => {});
+		});
+	}
+
+	function scheduleFsResync(path = "") {
+		if (fsTimer) clearTimeout(fsTimer);
+		fsTimer = setTimeout(() => { probeAll(); updateStatusEmbedding(path); }, FS_DEBOUNCE_MS);
+		// Source/workspace changes can stale the code index; refresh it once,
+		// then re-probe the index segment. This is deliberately coarse: the Rust
+		// indexer already decides what changed.
+		if (/\.(rs|ts|js|md|toml|json)$/.test(path) || path.includes("workspaces")) {
+			if (indexTimer) clearTimeout(indexTimer);
+			indexTimer = setTimeout(() => {
+				execFile(BIN("codeindex"), ["index"], { encoding: "utf8", timeout: 600_000, cwd: ROOT }, () => probe(["codeindex"]));
+			}, INDEX_DEBOUNCE_MS);
+		}
+	}
+
+	function startFsWatchers() {
+		if (watchers.length) return;
+		for (const dir of WATCH_DIRS) {
+			if (!existsSync(dir)) continue;
+			try {
+				watchers.push(watch(dir, { persistent: false }, (_ev, file) => scheduleFsResync(join(dir, String(file ?? "")))));
+			} catch {
+				// Some platforms/filesystems reject watching a directory; periodic
+				// refresh remains the fallback.
+			}
+		}
+	}
+
+	function stopFsWatchers() {
+		for (const w of watchers) w.close();
+		watchers = [];
+		if (fsTimer) clearTimeout(fsTimer);
+		if (indexTimer) clearTimeout(indexTimer);
+		fsTimer = undefined;
+		indexTimer = undefined;
+	}
+
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		ui = ctx.ui;
+		process.stdout.on("resize", render);
+		process.on("SIGWINCH", render);
 		probeAll();
+		startFsWatchers();
 		if (!timer) timer = setInterval(probeAll, REFRESH_MS);
 	});
 
 	pi.on("session_shutdown", async () => {
 		if (timer) clearInterval(timer);
+		process.stdout.off("resize", render);
+		process.off("SIGWINCH", render);
+		stopFsWatchers();
 		timer = undefined;
 		ui = undefined;
 	});
