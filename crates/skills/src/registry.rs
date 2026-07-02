@@ -84,8 +84,15 @@ mod tests {
         std::fs::create_dir_all(root.join("b/c")).unwrap();
         std::fs::write(root.join("a/SKILL.md"), "---\nname: alpha\ndescription: first\n---\nbody a").unwrap();
         std::fs::write(root.join("b/c/SKILL.md"), "---\nname: beta\ndescription: second\n---\nbody b").unwrap();
+        // Infra + reference dirs must NEVER surface as our skills — a root of
+        // `.` used to leak .refrepos/ reference SKILL.md files into matching.
+        for skip in [".refrepos/mem0", "target/pkg", "node_modules/x", "workspaces/proj", ".hidden"] {
+            std::fs::create_dir_all(root.join(skip)).unwrap();
+            std::fs::write(root.join(skip).join("SKILL.md"), "---\nname: leaked\ndescription: nope\n---\n").unwrap();
+        }
         let skills = discover(&root).unwrap();
         assert_eq!(skills.len(), 2);
+        assert!(skills.iter().all(|s| s.name != "leaked"));
         assert_eq!(skills[0].name, "alpha");
         assert_eq!(skills[1].description, "second");
     }
