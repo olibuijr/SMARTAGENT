@@ -1,12 +1,15 @@
-//! Secret store backed by a semdb table. Values are obfuscated at rest by
-//! XOR against a keystream derived (hash-chain) from a random per-store key
-//! file. NOTE: this is OBFUSCATION, not strong cryptography — it stops casual
-//! disk inspection, not a determined attacker. Strong crypto (a vetted AEAD)
-//! is a later addition once we allow a reviewed dependency.
+//! Secret store backed by a semdb table. Values are encrypted at rest with
+//! ChaCha20-Poly1305 AEAD (see aead.rs, verified against RFC 8439 vectors):
+//! a per-secret random 96-bit nonce, the 256-bit key from `secrets.key`
+//! (0600, /dev/urandom), and the secret NAME as associated data so a value
+//! can't be moved to another name. Tampering fails the tag on read.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use semdb::storage::Db;
+
+use crate::aead;
 
 const PLACEHOLDER_VEC: [f32; 1] = [0.0]; // non-semantic table → zero vector
 
@@ -32,12 +35,15 @@ impl Store {
     }
 
     pub fn set(&self, name: &str, value: &str) -> Result<(), String> {
-        let obf = hex(&xor_stream(value.as_bytes(), &self.key, name));
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&self.key[..32]);
+        let nonce = random_nonce()?;
+        let sealed = aead::seal(&key, &nonce, name.as_bytes(), value.as_bytes());
         let mut db = self.db()?;
-        db.put(name, &obf, PLACEHOLDER_VEC.to_vec())?;
+        db.put(name, &hex(&sealed), PLACEHOLDER_VEC.to_vec())?;
         // The log is append-only, so an overwritten secret's previous
-        // obfuscated value would linger on disk. Compact after every write
-        // (the table is tiny) so rotated/removed values don't persist.
+        // ciphertext would linger on disk. Compact after every write (the
+        // table is tiny) so rotated/removed values don't persist.
         db.compact()
     }
 
@@ -49,8 +55,11 @@ impl Store {
         let db = Db::open(&p)?;
         match db.get(name) {
             Some(e) => {
-                let bytes = unhex(&e.meta)?;
-                let plain = xor_stream(&bytes, &self.key, name);
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&self.key[..32]);
+                let sealed = unhex(&e.meta)?;
+                let plain = aead::open(&key, name.as_bytes(), &sealed)
+                    .ok_or("secret failed authentication (tampered, wrong key, or corrupt)")?;
                 Ok(Some(String::from_utf8(plain).map_err(|_| "corrupt value")?))
             }
             None => Ok(None),
@@ -98,34 +107,14 @@ fn load_or_make_key(dir: &Path) -> Result<Vec<u8>, String> {
     Ok(key)
 }
 
-/// Keystream = repeated hash-chain of key ++ salt; XOR into the data.
-fn xor_stream(data: &[u8], key: &[u8], salt: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len());
-    let mut state = fnv_seed(key, salt);
-    for (i, b) in data.iter().enumerate() {
-        if i % 8 == 0 {
-            state = fnv_step(state);
-        }
-        let ks = (state >> ((i % 8) * 8)) as u8;
-        out.push(b ^ ks);
-    }
-    out
-}
-
-fn fnv_seed(key: &[u8], salt: &str) -> u64 {
-    let mut h = 0xcbf2_9ce4_8422_2325u64;
-    for b in key.iter().chain(salt.as_bytes()) {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100_0000_01b3);
-    }
-    h
-}
-
-fn fnv_step(mut h: u64) -> u64 {
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
-    h ^= h >> 33;
-    h
+/// 96-bit AEAD nonce from the OS CSPRNG. A fresh nonce per `set` is required —
+/// reusing a (key, nonce) pair breaks ChaCha20-Poly1305.
+fn random_nonce() -> Result<[u8; 12], String> {
+    let mut n = [0u8; 12];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut n))
+        .map_err(|e| format!("read /dev/urandom: {e}"))?;
+    Ok(n)
 }
 
 fn hex(bytes: &[u8]) -> String {
