@@ -176,7 +176,20 @@ impl Graph {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        std::fs::write(path, self.to_json()).map_err(|e| e.to_string())
+        std::fs::write(path, self.to_json()).map_err(|e| e.to_string())?;
+        // Stats sidecar: consumers that only need counts (statusline) must
+        // never pay the full-graph parse (11s+ on a 10MB graph).
+        self.save_stats_sidecar(path)
+    }
+
+    /// `<graph>.stats` — tiny sidecar written on save, read by statusline.
+    pub fn stats_sidecar(path: &Path) -> Option<String> {
+        std::fs::read_to_string(stats_path(path)).ok()
+    }
+
+    pub fn save_stats_sidecar(&self, path: &Path) -> Result<(), String> {
+        let stats = format!("symbols={} edges={}", self.symbols.len(), self.edges.len());
+        std::fs::write(stats_path(path), stats).map_err(|e| e.to_string())
     }
 
     pub fn load(path: &Path) -> Result<Graph, String> {
@@ -206,6 +219,13 @@ impl Default for Graph {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Sidecar path for a graph file: `data/codegraph.json` → `data/codegraph.json.stats`.
+fn stats_path(graph: &Path) -> std::path::PathBuf {
+    let mut s = graph.as_os_str().to_os_string();
+    s.push(".stats");
+    std::path::PathBuf::from(s)
 }
 
 fn str_field(v: &Value, key: &str) -> String {

@@ -69,23 +69,32 @@ fn run(args: &[String]) -> Result<String, String> {
             Ok(out.join("\n"))
         }
         Some("stats") => {
-            let graph = Graph::load(&graph_arg(args)?)?;
+            let path = graph_arg(args)?;
+            let graph = Graph::load(&path)?;
+            // heals pre-sidecar graphs: full parse already paid, refresh counts
+            let _ = graph.save_stats_sidecar(&path);
             Ok(graph.stats())
         }
         Some("statusline") => {
             // `level|text` for UI statuslines: symbol count + index age.
+            // MUST stay O(1): never Graph::load here — parsing a 10MB graph
+            // takes 11s+ and made the TUI segment show "unavailable" (T-41).
             let path = graph_arg(args)?;
             if !path.exists() {
                 return Ok("warn|🕸 no index".into());
             }
-            let graph = Graph::load(&path)?;
             let age_days = std::fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
                 .map(|d| d.as_secs() / 86_400)
                 .unwrap_or(0);
-            let n = graph.symbols.len();
+            let n = Graph::stats_sidecar(&path)
+                .and_then(|s| {
+                    s.split_whitespace()
+                        .find_map(|kv| kv.strip_prefix("symbols=").map(str::to_string))
+                })
+                .unwrap_or_else(|| "?".into());
             if age_days >= 7 {
                 Ok(format!("warn|🕸 {n}sym (stale {age_days}d)"))
             } else {
