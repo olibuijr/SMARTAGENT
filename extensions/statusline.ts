@@ -24,7 +24,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync, watch } from "node:fs";
 import { join } from "node:path";
-import { BIN, ROOT, STATUS_SEGMENTS, parseLevel, availableColumns } from "./lib/statusline-common.ts";
+import { BIN, ROOT, STATUS_SEGMENTS, parseLevel, layout } from "./lib/statusline-common.ts";
 
 const SEGMENTS = STATUS_SEGMENTS;
 
@@ -212,9 +212,19 @@ export default function (pi: ExtensionAPI) {
 				.map((s) => painted.get(s.key))
 				.filter(Boolean) as string[],
 		);
-		ui.setWidget("smartagent-statusline", fitRows(cells, availableColumns()), {
-			placement: "belowEditor",
-		});
+		// Component form: pi-tui passes the LIVE terminal width at render time
+		// (process.stdout.columns went stale on resize / high-res fullscreen —
+		// the widget collapsed to icons at 2K). Subtract the sidebar when open.
+		ui.setWidget(
+			"smartagent-statusline",
+			(_tui: any, _theme: any) => ({
+				render(width: number): string[] {
+					return fitRows(cells, Math.max(40, width - layout.sidebarCols));
+				},
+				invalidate() {},
+			}),
+			{ placement: "belowEditor" },
+		);
 	}
 
 	function probe(keys: string[]) {
