@@ -190,6 +190,22 @@ impl Cdp {
         Ok(r)
     }
 
+    /// Emulate a device viewport (Emulation.setDeviceMetricsOverride).
+    /// Persists on the target until cleared — callers own the lifecycle.
+    pub fn emulate_device(&mut self, width: u32, height: u32, scale: f32, mobile: bool) -> Result<(), String> {
+        self.call(
+            "Emulation.setDeviceMetricsOverride",
+            &format!(r#"{{"width":{width},"height":{height},"deviceScaleFactor":{scale},"mobile":{mobile}}}"#),
+        )?;
+        Ok(())
+    }
+
+    /// Clear any device emulation back to the real window size.
+    pub fn clear_device_emulation(&mut self) -> Result<(), String> {
+        self.call("Emulation.clearDeviceMetricsOverride", "{}")?;
+        Ok(())
+    }
+
     /// Capture the visible viewport as PNG bytes (Page.captureScreenshot).
     pub fn screenshot_png(&mut self) -> Result<Vec<u8>, String> {
         let result = self.call("Page.captureScreenshot", r#"{"format":"png"}"#)?;

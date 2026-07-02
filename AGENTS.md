@@ -138,7 +138,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `notify` | `notify` | Push notifications (ntfy): send |
 | `secrets` | `secrets` | Policy-gated secret store: set/get(as 'pi')/list/audit. Deny-by-default; policy-allow is admin-only, OFF the agent surface |
 | `browser` | `browser` | Real Chrome CDP: open/click/type(`--enter`)/back/wait/scroll/attr (`--quiet`/`--max-text`/`--max-links`), probe. Wrapped UNTRUSTED |
-| `sa-browser` | `sa-browser` | Visual browser: right-side 50% TUI overlay pane (address bar + loading status + half-block truecolor page art, std-only zlib/PNG/renderer in Rust); activate/deactivate/open/snapshot/status/probe + `/sab` toggle. Successor-in-waiting to `browser` (both compose browser::cdp — port verbs, retire, rename) |
+| `sa-browser` | `sa-browser` | Visual browser: right-side 50% TUI overlay pane, bottom-filled (address bar + loading status + truecolor page art — sextant 2×3 px/cell default, quad/half fallbacks; tablet viewport emulation default; std-only zlib/PNG/renderer in Rust); activate/deactivate/open/snapshot/status/probe, bare-host URLs, `/sab` toggle. Successor-in-waiting to `browser` (both compose browser::cdp — port verbs, retire, rename) |
 | `orchestrate` | `orchestrate` | Fan out N headless-pi subagents: run, list, out (collect output). Fork-bomb depth guard |
 | `mcp` | `mcp` | MCP client (stdio+HTTP/HTTPS): tools (`--names-only`/`--filter`), call (`--head`). argv exec, no sh -c |
 | `sandbox` | `sandbox` | Isolated exec: run (`--tail`, 16KB cap, `--stdin`, `--no-isolate`), clean. Env scrubbed + secrets tmpfs-masked, isolation ON |

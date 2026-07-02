@@ -3,7 +3,7 @@ project: SMARTAGENT
 task: Rebuild best-of-breed agent stack as pi extensions + pure-Rust 0-dep tools
 effort: E5
 phase: build
-progress: 107/112
+progress: 111/116
 mode: build
 started: 2026-07-02T01:10:00Z
 updated: 2026-07-02T19:30:00Z
@@ -191,6 +191,10 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - [x] ISC-110: Chrome-down shows an in-pane error status with supervise hint instead of a dead/crashed pane
 - [x] ISC-111: every art line ends with SGR reset — no color bleed into surrounding TUI
 - [x] ISC-112: aspect ratio preserved under 1:2 cell geometry; art fits pane width and respects the height cap
+- [x] ISC-113: tablet viewport emulation is the pane default (768 CSS px, dsf 2, mobile) with `--device none` escape hatch
+- [x] ISC-114: emulated height derives from the pane cell grid so the art fills the pane to the bottom row (rows requested = art rows rendered)
+- [x] ISC-115: sextant mode (2×3 px/cell, 2-means fg/bg clustering, correct U+1FB00 mapping incl. ▌▐█ exclusions) is the default; quad and half selectable
+- [x] ISC-116: bare-host URLs normalize to https (`visir.is` → `https://visir.is`); explicit schemes and about:/data: untouched
 
 ## Test Strategy
 
@@ -284,3 +288,6 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - ISC-105: Read — migration seam documented in AGENTS.md catalog row, extension header comment, ISA Decision
 - ISC-107/109: Read — untrusted() fence + plain() ANSI-strip wrap every model-facing output in extensions/sa-browser.ts
 - ISC-110: tmux — `BROWSER_DEVTOOLS=:19999 ./pi` + `/sab`: pane shows `✖ https://example.com` + unreachable error in-body; supervise hint added to async path
+- ISC-113/114: Bash — `pane --cols 100 --rows 40 --url visir.is` renders exactly 40 art rows (grid-derived emulated height); sextant tests + unit fit tests green. Known quirk: `--device none` on headless=new Chrome keeps the last override despite clearDeviceMetricsOverride + settle (headless has no real window to fall back to) — tablet default unaffected
+- ISC-115: cargo test — sextant_codepoints_known (U+1FB00/02/3B, ▌▐█ exclusions), sextant_cell_splits, quad_cell_left_column_lit, geometry_identical_across_modes; live render shows U+1FB3x glyphs on 39/40 lines
+- ISC-116: cargo test — normalize_url tests; live probe `pane --url visir.is` → header `https://www.visir.is/ Forsíða - Vísir`

@@ -69,6 +69,8 @@ let addressTitle = "";
 let loadState = "idle"; // idle | loading | complete | interactive | error:<msg>
 let inFlight = false;
 let paneCols = 78;
+let deviceMode = "tablet"; // tablet (default) | none — passed to the binary
+let pixelMode = "sextant"; // sextant (2x3 px/cell, default) | quad | half
 
 function headerLines(width: number): string[] {
 	const inner = Math.max(10, width - 2);
@@ -93,8 +95,9 @@ async function repaint(navigateUrl?: string) {
 		loadState = "loading";
 	}
 	tuiRef?.requestRender();
-	const rows = Math.max(8, (process.stdout.rows ?? 40) - 10);
-	const args = ["pane", "--cols", String(paneCols), "--rows", String(rows)];
+	// Fill the pane to the bottom: header is 4 rows, leave 1 row slack.
+	const rows = Math.max(8, (process.stdout.rows ?? 40) - 5);
+	const args = ["pane", "--cols", String(paneCols), "--rows", String(rows), "--device", deviceMode, "--pixels", pixelMode];
 	if (navigateUrl) args.push("--url", navigateUrl);
 	const out = await runAsync(args);
 	if (out.startsWith("error")) {
@@ -182,6 +185,8 @@ export default function (pi: ExtensionAPI) {
 			properties: {
 				action: { type: "string", enum: ["activate", "deactivate", "open", "snapshot", "status", "probe"] },
 				url: { type: "string", description: "URL to load (activate/open)" },
+				device: { type: "string", enum: ["tablet", "none"], description: "pane viewport emulation (default tablet: 768px responsive layout)" },
+				pixels: { type: "string", enum: ["sextant", "quad", "half"], description: "pane pixel density (default sextant: 2x3 px/cell; half = color-true 1x2)" },
 				maxText: { type: "number", description: "snapshot body char cap (default 4000)" },
 				maxLinks: { type: "number", description: "snapshot link cap (default 40)" },
 			},
@@ -191,6 +196,8 @@ export default function (pi: ExtensionAPI) {
 			const tail: string[] = [];
 			if (p.maxText != null) tail.push("--max-text", String(p.maxText));
 			if (p.maxLinks != null) tail.push("--max-links", String(p.maxLinks));
+			if (p.device === "tablet" || p.device === "none") deviceMode = p.device;
+			if (p.pixels === "sextant" || p.pixels === "quad" || p.pixels === "half") pixelMode = p.pixels;
 			switch (p.action) {
 				case "activate":
 					return { content: [{ type: "text", text: activate(ctx, p.url) }] };
