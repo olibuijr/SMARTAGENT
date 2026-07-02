@@ -72,8 +72,9 @@ update_status() {
     CRATES=$(ls crates | wc -l | tr -d ' ')
     TS=$(date -u +%Y-%m-%dT%H:%MZ)
     TEXT="SMARTAGENT status $TS: v$VER, $CRATES crates, gate PASS (build+test+audits+$GOT/20 tools). Latest changelog: $(sed -n '4p' CHANGELOG.md | head -c 200)"
-    if ./target/release/semdb embed "$SDB" --id "status-latest" --text "$TEXT" >/dev/null 2>&1; then
-        ./target/release/semdb embed "$SDB" --id "status-$TS" --text "$TEXT" >/dev/null 2>&1 || true
+    EMBED_TIMEOUT="${SMARTAGENT_STATUS_EMBED_TIMEOUT:-15s}"
+    if timeout "$EMBED_TIMEOUT" ./target/release/semdb embed "$SDB" --id "status-latest" --text "$TEXT" >/dev/null 2>&1; then
+        timeout "$EMBED_TIMEOUT" ./target/release/semdb embed "$SDB" --id "status-$TS" --text "$TEXT" >/dev/null 2>&1 || true
         echo "ok (embedded status row → $SDB)"
     else
         ./target/release/semdb put "$SDB" --id "status-latest" --vector 0 --meta "{\"text\":\"$TEXT\"}" >/dev/null 2>&1 || true
