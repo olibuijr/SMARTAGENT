@@ -6,7 +6,7 @@
 
 **Run the agent:** `./pi` from repo root (project-isolated: vendored runtime in `.pi/runtime/`, config in `.pi/agent/`, models via `extensions/akurai-router.ts`; default/test model `codex/gpt-5.4-mini --thinking low`). The launcher auto-loads `extensions/*.ts` and injects `AGENT_TOOLS.md` into the agent's initial context (keep it current with the extensions catalog). Headless: `./pi -p '<prompt>' < /dev/null` (redirect MANDATORY).
 
-**Config:** all endpoints in `config/smartagent.conf` (embeddings `100.88.0.2:8081` embeddinggemma, ntfy, searx, browser CDP `:9222`, voice). Resolve via `semdb::config::Config` (flag → env → file). `workspaces_dir`/`data_dir` resolve to repo root. Nothing hardcoded.
+**Config:** all endpoints in `config/smartagent.conf` (embeddings `192.168.1.119:8081` embeddinggemma, ntfy, searx, browser CDP `:9222`, voice). Resolve via `semdb::config::Config` (flag → env → file). `workspaces_dir`/`data_dir` resolve to repo root. Nothing hardcoded.
 
 **Fusion workflow (always):** you implement → codex CLI tests (`codex exec --sandbox workspace-write -m gpt-5.4-mini -c model_reasoning_effort=low`) → codex reports PASS/FAIL → you verify the report with a direct spot-check before marking done.
 

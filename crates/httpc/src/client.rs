@@ -110,9 +110,14 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
         .set_write_timeout(Some(Duration::from_secs(req.timeout_secs.min(30))))
         .map_err(|e| e.to_string())?;
 
+    let host_hdr = if u.port == 80 {
+        u.host.clone()
+    } else {
+        format!("{}:{}", u.host, u.port)
+    };
     let mut head = format!(
         "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
-        req.method, u.path, u.host
+        req.method, u.path, host_hdr
     );
     let mut has_len = false;
     for (k, v) in &req.headers {
@@ -135,11 +140,42 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
             .map_err(|e| format!("send body: {e}"))?;
     }
 
-    let mut raw = Vec::new();
-    stream
-        .read_to_end(&mut raw)
-        .map_err(|e| format!("recv: {e}"))?;
+    let raw = read_response_bytes(&mut stream)?;
     parse_response(&raw)
+}
+
+/// Read a response without relying on the server closing the socket
+/// (Chrome's DevTools HTTP endpoint ignores `Connection: close`): stop as
+/// soon as Content-Length is satisfied or the chunked body terminates.
+fn read_response_bytes(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
+    let mut raw = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = stream.read(&mut buf).map_err(|e| format!("recv: {e}"))?;
+        if n == 0 {
+            return Ok(raw); // EOF — server closed
+        }
+        raw.extend_from_slice(&buf[..n]);
+        let Some(header_end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+            continue;
+        };
+        let head = String::from_utf8_lossy(&raw[..header_end]).to_ascii_lowercase();
+        let body = &raw[header_end + 4..];
+        if head.contains("transfer-encoding") && head.contains("chunked") {
+            if dechunk(body).is_ok() {
+                return Ok(raw);
+            }
+        } else if let Some(len) = head
+            .lines()
+            .find_map(|l| l.strip_prefix("content-length:"))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+        {
+            if body.len() >= len {
+                return Ok(raw);
+            }
+        }
+        // No length info: fall through and read until EOF.
+    }
 }
 
 fn parse_response(raw: &[u8]) -> Result<Response, String> {

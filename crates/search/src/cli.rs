@@ -5,8 +5,8 @@ use crate::searx::{self, Query};
 pub fn run(args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("query") => {
-            let terms = args.get(1).ok_or("usage: search query '<terms>' --instance URL")?;
-            let instance = flag(args, "--instance").ok_or("--instance required")?;
+            let terms = args.get(1).ok_or("usage: search query '<terms>' [--instance URL]")?;
+            let instance = resolve_instance(args)?;
             let limit = flag(args, "--k").and_then(|s| s.parse().ok()).unwrap_or(10);
             let engines = flag(args, "--engines");
             let category = flag(args, "--category");
@@ -29,12 +29,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 .join("\n"))
         }
         Some("health") => {
-            let instance = flag(args, "--instance").ok_or("--instance required")?;
+            let instance = resolve_instance(args)?;
             let status = searx::health(&instance)?;
             Ok(format!("instance {instance} → HTTP {status}"))
         }
         _ => Ok(HELP.trim().into()),
     }
+}
+
+/// Instance resolution: --instance flag → $SEARX_INSTANCE → config searx_instance.
+fn resolve_instance(args: &[String]) -> Result<String, String> {
+    if let Some(i) = flag(args, "--instance") {
+        return Ok(i);
+    }
+    semdb::config::Config::load()
+        .resolve("searx_instance", "SEARX_INSTANCE", None)
+        .ok_or_else(|| "--instance required (or set searx_instance in config)".into())
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -45,7 +55,9 @@ const HELP: &str = r#"
 search — SearXNG metasearch client
 
 USAGE:
-  search query '<terms>' --instance http://host:port [--k 10]
+  search query '<terms>' [--instance http://host:port] [--k 10]
                           [--engines e1,e2] [--category general|news|it]
-  search health --instance http://host:port
+  search health [--instance http://host:port]
+
+Instance resolution: --instance → $SEARX_INSTANCE → config searx_instance.
 "#;

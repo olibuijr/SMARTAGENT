@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "search");
-const DEFAULT_INSTANCE = process.env.SEARX_INSTANCE ?? "http://100.88.0.2:8888";
 
 function run(args: string[]): string {
 	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 60_000, cwd: ROOT }).trim(); }
@@ -31,12 +30,13 @@ export default function (pi: ExtensionAPI) {
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
-			const instance = p.instance ?? DEFAULT_INSTANCE;
+			// Instance resolution (flag → env → config) happens in the binary.
+			const inst = p.instance ? ["--instance", p.instance] : [];
 			let out: string;
 			if (p.action === "health") {
-				out = run(["health", "--instance", instance]);
+				out = run(["health", ...inst]);
 			} else {
-				const args = ["query", p.terms ?? "", "--instance", instance, "--k", String(p.k ?? 10)];
+				const args = ["query", p.terms ?? "", ...inst, "--k", String(p.k ?? 10)];
 				if (p.engines) args.push("--engines", p.engines);
 				if (p.category) args.push("--category", p.category);
 				out = run(args);

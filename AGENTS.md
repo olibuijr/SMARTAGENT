@@ -52,7 +52,7 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    notify/       notifications (ntfy-style push)
 ```
 
-Embeddings inference is **external**: titan embeddinggemma at `http://100.88.0.2:8081` (akurai mesh; OpenAI-compatible, verified 2026-07-02); semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
+Embeddings inference is **external**: titan embeddinggemma at `http://192.168.1.119:8081` (titan LAN; OpenAI-compatible, verified 2026-07-02); semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
 
 ## Reference repos (do not invent — mimic)
 
