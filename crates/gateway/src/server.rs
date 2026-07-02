@@ -209,14 +209,11 @@ fn handle_client(
                 match sent {
                     Ok(mode) => {
                         beat.lock().unwrap().log(&agent, "user", mode, msg);
-                        // one-shot senders become listeners until turn end
+                        // One-shot send/steer callers only need delivery confirmation.
+                        // Attach clients are the long-lived listeners for streamed replies.
                         let _ = write_side.write_all(
-                            format!("{{\"ev\":\"info\",\"data\":\"delivered as {mode}\"}}\n").as_bytes(),
+                            format!("{{\"ev\":\"info\",\"data\":\"delivered as {mode}\"}}\n{{\"ev\":\"done\"}}\n").as_bytes(),
                         );
-                        clients.lock().unwrap().push(match write_side.try_clone() {
-                            Ok(s) => s,
-                            Err(_) => return,
-                        });
                     }
                     Err(e) => {
                         let _ = write_side.write_all(
