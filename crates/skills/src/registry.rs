@@ -15,7 +15,8 @@ pub fn discover(root: &Path) -> Result<Vec<Skill>, String> {
     walk(root, &mut paths)?;
     let mut skills = Vec::new();
     for p in paths {
-        let content = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
+        // One unreadable SKILL.md must not hide every other skill.
+        let Ok(content) = std::fs::read_to_string(&p) else { continue };
         let fm = frontmatter::parse(&content);
         // Fall back to the directory name when frontmatter lacks a name.
         let name = fm.get("name").map(str::to_string).unwrap_or_else(|| {

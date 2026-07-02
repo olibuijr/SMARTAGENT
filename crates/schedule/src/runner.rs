@@ -34,8 +34,46 @@ fn due_fire(job: &Job, cron: &Cron, now: i64) -> Option<i64> {
     }
 }
 
+/// Cooperative tick lock: two tickers (daemon + manual `tick`) firing the
+/// same minute would double-run jobs. Lock file beside the journal; a stale
+/// lock (>120s, crashed ticker) is broken.
+struct TickLock(std::path::PathBuf);
+impl TickLock {
+    fn acquire(journal: &Journal) -> Result<TickLock, String> {
+        let path = journal.path().with_extension("tick-lock");
+        for _ in 0..2 {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let _ = write!(f, "{}", now_unix());
+                    return Ok(TickLock(path));
+                }
+                Err(_) => {
+                    let stale = std::fs::read_to_string(&path)
+                        .ok()
+                        .and_then(|t| t.trim().parse::<i64>().ok())
+                        .map(|t| now_unix() - t > 120)
+                        .unwrap_or(true);
+                    if stale {
+                        let _ = std::fs::remove_file(&path);
+                        continue;
+                    }
+                    return Err("another ticker holds the tick lock".into());
+                }
+            }
+        }
+        Err("could not acquire tick lock".into())
+    }
+}
+impl Drop for TickLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Fire everything currently due. Returns (job id, exit code) pairs.
 pub fn tick(journal: &Journal) -> Result<Vec<(String, i32)>, String> {
+    let _lock = TickLock::acquire(journal)?;
     let jobs = journal.replay()?;
     let now = now_unix();
     let mut results = Vec::new();

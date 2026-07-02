@@ -155,11 +155,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 .values()
                 .map(|j| {
                     format!(
-                        "{}\t{}\t{}\tlast: {}",
+                        "{}\t{}\t{}\tlast: {}{}",
                         j.id,
                         j.cron,
                         j.cmd,
-                        j.last_fire.map_or("never".into(), fmt_time)
+                        j.last_fire.map_or("never".into(), fmt_time),
+                        j.last_exit.map_or(String::new(), |e| format!(" (exit {e})"))
                     )
                 })
                 .collect();

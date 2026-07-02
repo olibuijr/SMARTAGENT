@@ -12,6 +12,8 @@ pub struct Result {
 
 pub struct Query<'a> {
     pub instance: &'a str,
+    /// SearXNG results page (1-based); default 1.
+    pub pageno: usize,
     pub terms: &'a str,
     pub engines: Option<&'a str>,
     pub category: Option<&'a str>,
@@ -34,6 +36,9 @@ pub fn build_url(q: &Query) -> String {
     }
     if let Some(t) = q.time_range {
         url.push_str(&format!("&time_range={}", percent_encode(t)));
+    }
+    if q.pageno > 1 {
+        url.push_str(&format!("&pageno={}", q.pageno));
     }
     url
 }
@@ -100,7 +105,7 @@ mod tests {
 
     #[test]
     fn builds_url() {
-        let q = Query { instance: "http://searx:8888/", terms: "rust lang", engines: Some("google,bing"), category: None, time_range: None, limit: 10 };
+        let q = Query { instance: "http://searx:8888/", pageno: 1, terms: "rust lang", engines: Some("google,bing"), category: None, time_range: None, limit: 10 };
         let u = build_url(&q);
         assert_eq!(u, "http://searx:8888/search?q=rust%20lang&format=json&engines=google%2Cbing");
     }

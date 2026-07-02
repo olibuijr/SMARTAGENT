@@ -113,7 +113,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             Ok(format!("{}: restarted (pid {})", svc.name, r.pid))
         }
         "status" => {
-            let mut out = vec!["service    state     pid      health".to_string()];
+            let mut out = vec!["service    state     pid      restarts health".to_string()];
             for svc in ctx.registry.iter() {
                 let rec = ctx.store.get(svc.name);
                 let alive = ctx.alive(svc, &rec);
@@ -123,9 +123,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
                     None => "—", // no HTTP probe for this service; liveness shown in state
                 };
                 let state = if alive { "running" } else if rec.desired_up { "DOWN(want up)" } else { "stopped" };
-                out.push(format!("{:<10} {:<9} {:<8} {}", svc.name, state, if alive { rec.pid } else { 0 }, health));
+                out.push(format!("{:<10} {:<9} {:<8} {:<8} {}", svc.name, state, if alive { rec.pid } else { 0 }, rec.restarts, health));
             }
             Ok(out.join("\n"))
+        }
+        "logs" => {
+            // Tail a service's captured output — was write-only before.
+            let name = target.ok_or("usage: supervise logs <service> [--tail N]")?;
+            let n: usize = httpc::args::flag(args, "--tail").and_then(|s| s.parse().ok()).unwrap_or(40);
+            let path = ctx.logs.join(format!("{name}.log"));
+            let text = std::fs::read_to_string(&path).map_err(|_| format!("no log at {}", path.display()))?;
+            let lines: Vec<&str> = text.lines().collect();
+            let start = lines.len().saturating_sub(n);
+            Ok(lines[start..].join("\n"))
         }
         "statusline" => {
             // Compact `level|text` for UI statuslines: worst service state wins
@@ -162,19 +172,37 @@ pub fn run(args: &[String]) -> Result<String, String> {
                     let _ = ctx.start(svc);
                 }
             }
+            // Crash-loop backoff: a service that dies within 60s of starting
+            // doubles its restart delay (15s → … → 480s cap) instead of being
+            // hammered forever; a service that stays up resets the backoff.
+            let mut delay: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+            let mut next_try: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(15));
                 for svc in ctx.registry.iter().filter(|s| s.enabled) {
                     let rec = ctx.store.get(svc.name);
-                    if (rec.desired_up || !ctx.store.names().contains(&svc.name.to_string()))
-                        && !ctx.alive(svc, &rec) {
-                            if let Ok(r) = ctx.start(svc) {
-                                let mut bumped = r;
-                                bumped.restarts += 1;
-                                let _ = ctx.store.put(svc.name, &bumped);
-                                eprintln!("[supervise] restarted {} (pid {})", svc.name, bumped.pid);
-                            }
+                    if ctx.alive(svc, &rec) {
+                        if now_unix() - rec.started_at > 60 {
+                            delay.insert(svc.name, 15);
                         }
+                        continue;
+                    }
+                    if !(rec.desired_up || !ctx.store.names().contains(&svc.name.to_string())) {
+                        continue;
+                    }
+                    if now_unix() < *next_try.get(svc.name).unwrap_or(&0) {
+                        continue; // backing off
+                    }
+                    let quick_death = rec.started_at > 0 && now_unix() - rec.started_at < 60;
+                    if let Ok(r) = ctx.start(svc) {
+                        let mut bumped = r;
+                        bumped.restarts += 1;
+                        let _ = ctx.store.put(svc.name, &bumped);
+                        let d = if quick_death { (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480) } else { 15 };
+                        delay.insert(svc.name, d);
+                        next_try.insert(svc.name, now_unix() + d as i64);
+                        eprintln!("[supervise] restarted {} (pid {}, next retry window {d}s)", svc.name, bumped.pid);
+                    }
                 }
             }
         }
@@ -209,6 +237,7 @@ USAGE:
   supervise up   [service]         start all enabled services (or one)
   supervise down [service]         stop all (or one); clears desired-up
   supervise restart <service>      stop then start one service
+  supervise logs <service> [--tail N]   tail a service's captured output
   supervise watch                  foreground self-healing loop (restarts dead
                                     services every 15s) — run at boot via a
                                     single `@reboot` crontab line

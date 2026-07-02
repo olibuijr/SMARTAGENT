@@ -1,8 +1,9 @@
 //! stdio transport: spawn an MCP server process and speak line-delimited
 //! JSON-RPC over its stdin/stdout.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, Sender};
 
 use httpc::json::Value;
 
@@ -11,8 +12,12 @@ use crate::jsonrpc;
 pub struct StdioClient {
     child: Child,
     stdin: ChildStdin,
-    reader: BufReader<std::process::ChildStdout>,
+    /// Lines from a reader thread — lets read_line time out instead of
+    /// hanging forever on a silent server.
+    lines: Receiver<String>,
+    stderr_buf: std::sync::Arc<std::sync::Mutex<String>>,
     next_id: u64,
+    pub read_timeout_secs: u64,
 }
 
 impl StdioClient {
@@ -27,13 +32,40 @@ impl StdioClient {
             .args(rest)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("spawn '{cmd}': {e}"))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
-        let reader = BufReader::new(stdout);
-        let mut c = StdioClient { child, stdin, reader, next_id: 1 };
+        // Reader thread → channel, so calls can time out. Stderr captured to a
+        // buffer (was /dev/null — silent failures were undiagnosable).
+        let (tx, lines): (Sender<String>, Receiver<String>) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if tx.send(line).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        if let Some(mut se) = child.stderr.take() {
+            let buf = stderr_buf.clone();
+            std::thread::spawn(move || {
+                let mut s = String::new();
+                let _ = se.read_to_string(&mut s);
+                if let Ok(mut b) = buf.lock() {
+                    b.push_str(&s);
+                }
+            });
+        }
+        let mut c = StdioClient { child, stdin, lines, stderr_buf, next_id: 1, read_timeout_secs: 30 };
         c.call("initialize", jsonrpc::INIT_PARAMS)?;
         c.notify("notifications/initialized", "{}")?;
         Ok(c)
@@ -67,12 +99,20 @@ impl StdioClient {
     }
 
     fn read_line(&mut self) -> Result<String, String> {
-        let mut line = String::new();
-        let n = self.reader.read_line(&mut line).map_err(|e| e.to_string())?;
-        if n == 0 {
-            return Err("server closed stdout".into());
+        match self.lines.recv_timeout(std::time::Duration::from_secs(self.read_timeout_secs)) {
+            Ok(line) => Ok(line),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                Err(format!("server silent for {}s{}", self.read_timeout_secs, self.stderr_tail()))
+            }
+            Err(_) => Err(format!("server closed stdout{}", self.stderr_tail())),
         }
-        Ok(line)
+    }
+
+    /// Last captured stderr (diagnostics for silent/dead servers).
+    fn stderr_tail(&self) -> String {
+        let b = self.stderr_buf.lock().map(|b| b.clone()).unwrap_or_default();
+        let t = b.trim();
+        if t.is_empty() { String::new() } else { format!("; server stderr: {}", &t[t.len().saturating_sub(400)..]) }
     }
 }
 

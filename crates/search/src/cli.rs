@@ -19,6 +19,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             };
             let q = Query {
                 instance: &instance,
+                pageno: flag(args, "--pageno").and_then(|s| s.parse().ok()).unwrap_or(1),
                 terms: &scoped_terms,
                 engines: engines.as_deref(),
                 category: category.as_deref(),

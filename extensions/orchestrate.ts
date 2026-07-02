@@ -20,6 +20,8 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
+				max_parallel: { type: "number", description: "concurrent agent cap per wave (default 4)" },
+				retries: { type: "number", description: "re-run failed/timed-out agents up to N times" },
 				action: { type: "string", enum: ["run", "list", "out"] },
 				agents: { type: "number", description: "number of parallel agents (run)" },
 				prompt: { type: "string", description: "prompt template, {i} substituted per agent (run)" },
@@ -30,7 +32,8 @@ export default function (pi: ExtensionAPI) {
 		} as any,
 		async execute(_id: string, p: any) {
 			const out = p.action === "run"
-				? run(["run", "--agents", String(p.agents ?? 1), "--prompt", p.prompt ?? "", "--timeout", String(p.timeout ?? 300)])
+				? run(["run", "--agents", String(p.agents ?? 1), "--prompt", p.prompt ?? "", "--timeout", String(p.timeout ?? 300),
+					"--max-parallel", String(p.max_parallel ?? 4), ...(p.retries != null ? ["--retries", String(p.retries)] : [])])
 				: p.action === "out"
 					? run(["out", p.runId ?? ""])
 					: run(["list"]);

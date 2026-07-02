@@ -46,7 +46,7 @@ export default function (pi: ExtensionAPI) {
 				idsOnly: { type: "boolean", description: "search: score+id only (skip meta text)" },
 				metaChars: { type: "number", description: "search: truncate meta blob in results" },
 				filter: { type: "string", description: "search: keep only rows whose meta has key=value" },
-				prefix: { type: "string", description: "count/ids: id prefix filter" },
+				prefix: { type: "string", description: "count/ids: id prefix filter; del: delete all ids with prefix" },
 				db: { type: "string", description: "Database file (default data/smartagent.semdb)" },
 			},
 			required: ["action"],
@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI) {
 					out = run(["get", db, "--id", p.id ?? ""]);
 					break;
 				case "del":
-					out = run(["del", db, "--id", p.id ?? ""]);
+					out = run(["del", db, ...(p.prefix ? ["--prefix", p.prefix] : ["--id", p.id ?? ""])]);
 					break;
 				default:
 					out = run(["stats", db]);

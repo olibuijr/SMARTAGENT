@@ -33,14 +33,16 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["status", "up", "down", "restart"] },
+				action: { type: "string", enum: ["status", "up", "down", "restart", "logs"] },
 				service: { type: "string", description: "service name (scheduler|chromium); omit to target all" },
+				tail: { type: "number", description: "logs: last N lines (default 40)" },
 			},
 			required: ["action"],
 		} as any,
 
 		async execute(_id: string, p: any) {
 			const args = [p.action, ...(p.service ? [p.service] : [])];
+			if (p.action === "logs" && p.tail != null) args.push("--tail", String(p.tail));
 			return { content: [{ type: "text", text: run(args) }] };
 		},
 	});

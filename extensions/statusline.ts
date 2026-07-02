@@ -50,11 +50,23 @@ const COLOR: Record<string, (s: string) => string> = {
 	warn: (s) => `\x1b[33m${s}${RESET}`, // yellow
 	err: (s) => `\x1b[1;31m${s}${RESET}`, // bold red
 };
-const paint = (raw: string): string => {
+// Display label per segment (uppercase tool name, a couple of friendlier names).
+const LABEL: Record<string, string> = {
+	supervise: "SERVICES",
+	codegraph: "CODE",
+	orchestrate: "AGENTS",
+};
+const paint = (key: string, raw: string): string => {
 	const cut = raw.indexOf("|");
-	if (cut < 0) return raw; // e.g. supervise's plain `name:state` output
+	if (cut < 0) return raw;
 	const level = raw.slice(0, cut);
-	const text = raw.slice(cut + 1);
+	let text = raw.slice(cut + 1);
+	// Insert the label after the icon: `🧠 w:0 …` → `🧠 MEMORY: w:0 …`.
+	const label = LABEL[key] ?? key.toUpperCase();
+	const sp = text.indexOf(" ");
+	const first = sp > 0 ? text.slice(0, sp) : "";
+	const iconLike = first.length > 0 && /[^\x00-\x7f]/.test(first);
+	text = iconLike ? `${first} \x1b[1m${label}:\x1b[22m${text.slice(sp)}` : `\x1b[1m${label}:\x1b[22m ${text}`;
 	return (COLOR[level] ?? ((s: string) => s))(text);
 };
 
@@ -109,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 			const seg = SEGMENTS.find((s) => s.key === key);
 			if (!seg) continue;
 			execFile(BIN(seg.key), seg.args, { encoding: "utf8", timeout: 10_000, cwd: ROOT }, (err, stdout) => {
-				painted.set(seg.key, err ? COLOR.err(`${seg.key}?`) : paint(stdout.trim()));
+				painted.set(seg.key, err ? COLOR.err(`${seg.key.toUpperCase()}: unavailable`) : paint(seg.key, stdout.trim()));
 				render();
 			});
 		}

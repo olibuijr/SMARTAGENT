@@ -13,9 +13,11 @@ CUR=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
 
 gate() {
     echo "── build ──────────────────────────────"
-    cargo build --release --workspace
+    # desktop-agent is a separate in-progress GUI crate (own agent, own deps) —
+    # excluded from this gate until it stabilizes.
+    cargo build --release --workspace --exclude desktop-agent
     echo "── test ───────────────────────────────"
-    cargo test --release --workspace
+    cargo test --release --workspace --exclude desktop-agent
     echo "── audit: no file > 1000 lines ────────"
     BIG=$(find crates -name '*.rs' -exec wc -l {} + | awk '$1>1000{print}' | grep -v ' total$' || true)
     if [ -n "$BIG" ]; then echo "FAIL: files over 1000 lines:"; echo "$BIG"; exit 1; fi

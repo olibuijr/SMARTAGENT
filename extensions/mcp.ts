@@ -22,6 +22,7 @@ export default function (pi: ExtensionAPI) {
 			properties: {
 				action: { type: "string", enum: ["tools", "call"] },
 				cmd: { type: "string", description: "stdio server command" },
+				auth_env: { type: "string", description: "env var holding a bearer token for HTTP servers" },
 				url: { type: "string", description: "streamable-HTTP server URL" },
 				tool: { type: "string", description: "tool name (call action)" },
 				args: { type: "string", description: "JSON arguments object (call action)" },
@@ -32,7 +33,7 @@ export default function (pi: ExtensionAPI) {
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
-			const conn = p.cmd ? ["--cmd", p.cmd] : p.url ? ["--url", p.url] : [];
+			const conn = p.cmd ? ["--cmd", p.cmd] : p.url ? ["--url", p.url, ...(p.auth_env ? ["--auth-env", p.auth_env] : [])] : [];
 			let out: string;
 			if (p.action === "tools") {
 				const a = ["tools", ...conn];

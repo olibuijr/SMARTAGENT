@@ -30,7 +30,7 @@ pub fn registry(chromium_bin: &str, chrome_profile: &str) -> Vec<Service> {
                 "--journal",
                 "data/schedule.semdb",
             ]),
-            needle: "schedule",
+            needle: "schedule run",
             probe: None,
             enabled: true,
         },

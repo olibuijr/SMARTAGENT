@@ -20,7 +20,10 @@ impl Transport {
         if let Some(cmd) = flag(args, "--cmd") {
             Ok(Transport::Stdio(StdioClient::start(&cmd)?))
         } else if let Some(url) = flag(args, "--url") {
-            Ok(Transport::Http(HttpClient::start(&url)?))
+            // --auth-env NAME: bearer token read from an env var (never argv —
+            // argv is world-visible in /proc).
+            let auth = flag(args, "--auth-env").and_then(|n| std::env::var(n).ok());
+            Ok(Transport::Http(HttpClient::start_with_auth(&url, auth)?))
         } else {
             Err("need --cmd '<server>' (stdio) or --url URL (http)".into())
         }

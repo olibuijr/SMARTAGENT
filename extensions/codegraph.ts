@@ -21,7 +21,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["index", "defs", "callers", "refs", "impls", "path", "search", "stats"] },
+				action: { type: "string", enum: ["index", "defs", "callers", "refs", "impls", "path", "search", "stats", "unused"] },
 				repo: { type: "string", description: "repo dir to index (index action)" },
 				embed: { type: "boolean", description: "build semantic index too (index action)" },
 				name: { type: "string", description: "symbol name (defs/callers/refs/impls); the FROM symbol for path" },

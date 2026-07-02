@@ -106,7 +106,9 @@ fn fan_out(args: &[String], prompts: Vec<String>) -> Result<String, String> {
     let agent_bin = flag(args, "--agent-bin").unwrap_or_else(|| "./pi".into());
     let sh_mode = agent_bin.ends_with("sh") || flag(args, "--agent-bin").map(|b| b == "/bin/echo").unwrap_or(false);
     let timeout = Duration::from_secs(flag(args, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(300));
-    let runner = Runner { agent_bin, timeout, sh_mode, child_depth };
+    let max_parallel = flag(args, "--max-parallel").and_then(|s| s.parse().ok()).unwrap_or(4);
+    let retries = flag(args, "--retries").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let runner = Runner { agent_bin, timeout, sh_mode, child_depth, max_parallel, retries };
 
     let specs: Vec<AgentSpec> = prompts
         .into_iter()
@@ -115,15 +117,34 @@ fn fan_out(args: &[String], prompts: Vec<String>) -> Result<String, String> {
         .collect();
     let results = runner.run_all(specs);
 
+    // Persist run + agent results to a semdb table — results were previously
+    // stdout-only (convention violation); this unblocks later status queries.
+    persist_run(&id, &results);
     let mut out = vec![format!("run {id}: {} agents", results.len())];
-    out.push("agent\texit\tsecs\tstatus\tworkspace".into());
+    out.push("agent\texit\tsecs\tstatus\tattempts\tworkspace".into());
     for r in &results {
         let status = if r.timed_out { "TIMEOUT" } else if r.exit == 0 { "ok" } else { "fail" };
-        out.push(format!("{}\t{}\t{:.1}\t{}\t{}", r.n, r.exit, r.secs, status, r.workspace.display()));
+        out.push(format!("{}\t{}\t{:.1}\t{}\t{}\t{}", r.n, r.exit, r.secs, status, r.attempts, r.workspace.display()));
     }
     Ok(out.join("\n"))
 }
 
+
+/// Best-effort run persistence in data/orchestrate.semdb (one row per agent).
+fn persist_run(id: &str, results: &[crate::spawn::AgentResult]) {
+    let path = std::path::Path::new("data/orchestrate.semdb");
+    let _ = std::fs::create_dir_all("data");
+    let db = if path.exists() { semdb::storage::Db::open(path) } else { semdb::storage::Db::create(path) };
+    if let Ok(mut db) = db {
+        for r in results {
+            let meta = format!(
+                r#"{{"run":"{id}","agent":{},"exit":{},"secs":{:.1},"timed_out":{},"attempts":{}}}"#,
+                r.n, r.exit, r.secs, r.timed_out, r.attempts
+            );
+            let _ = db.put(&format!("{id}:{}", r.n), &meta, vec![0.0]);
+        }
+    }
+}
 
 const HELP: &str = r#"
 orchestrate — subagent fan-out (LangGraph send/supervisor concept)

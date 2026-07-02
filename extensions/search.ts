@@ -29,6 +29,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
+				pageno: { type: "number", description: "results page (1-based)" },
 				action: { type: "string", enum: ["query", "health"], description: "Operation to perform" },
 				terms: { type: "string", description: "search terms (query action)" },
 				k: { type: "number", description: "max results (default 5)" },
@@ -56,6 +57,7 @@ export default function (pi: ExtensionAPI) {
 					if (p.urlsOnly) args.push("--urls-only");
 					if (p.snippetChars != null) args.push("--snippet-chars", String(p.snippetChars));
 				if (p.category) args.push("--category", p.category);
+				if (p.pageno != null && p.pageno > 1) args.push("--pageno", String(p.pageno));
 				out = untrusted("WEB SEARCH RESULTS", run(args));
 			}
 			return { content: [{ type: "text", text: out }] };

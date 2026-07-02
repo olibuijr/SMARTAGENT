@@ -8,6 +8,12 @@ pub struct Message {
     pub title: Option<String>,
     pub priority: Option<String>,
     pub tags: Option<String>,
+    /// URL opened when the notification is tapped (ntfy `Click` header).
+    pub click: Option<String>,
+    /// Render the body as markdown (ntfy `Markdown` header).
+    pub markdown: bool,
+    /// Bearer token for protected topics (from env, not argv).
+    pub auth: Option<String>,
 }
 
 /// Reject CR/LF in header values — a `\r\n` in title/tags/topic would let the
@@ -40,6 +46,20 @@ pub fn send(m: &Message) -> Result<String, String> {
     if let Some(t) = &m.tags {
         req = req.header("Tags", t);
     }
+    if let Some(c) = &m.click {
+        clean("click", c)?;
+        if !(c.starts_with("http://") || c.starts_with("https://")) {
+            return Err("click must be an http(s) URL".into());
+        }
+        req = req.header("Click", c);
+    }
+    if m.markdown {
+        req = req.header("Markdown", "yes");
+    }
+    if let Some(a) = &m.auth {
+        clean("auth", a)?;
+        req = req.header("Authorization", &format!("Bearer {a}"));
+    }
     let resp = req.send()?;
     if resp.ok() {
         Ok(format!("sent to {url}"))
@@ -64,6 +84,9 @@ mod tests {
                 title,
                 priority: None,
                 tags,
+                click: None,
+                markdown: false,
+                auth: None,
             })
             .unwrap_err();
             assert!(err.contains("newlines"), "{err}");
@@ -102,6 +125,9 @@ mod tests {
             title: Some("Test".into()),
             priority: Some("4".into()),
             tags: Some("tada".into()),
+            click: None,
+            markdown: false,
+            auth: None,
         };
         let out = send(&m).unwrap();
         assert!(out.contains("/alerts"));
@@ -121,6 +147,9 @@ mod tests {
             title: None,
             priority: None,
             tags: None,
+            click: None,
+            markdown: false,
+            auth: None,
         };
         assert!(send(&m).is_err());
     }

@@ -17,7 +17,11 @@ One read-only reviewer per tool (or pair). Full reports in session transcript; t
 | browser | `wait_for_load` missing — fixed sleeps race on slow pages | ~20 lines |
 | sandbox | Isolation silently degrades when `unshare` absent; no rlimits (fork-bomb/mem/disk unbounded) | ~15 lines |
 
-## P1 — highest-value missing features (per tool)
+## P1 — highest-value missing features (per tool) — **TOP-RANKED ITEMS DONE 2026-07-02** (see CHANGELOG)
+
+Done: semdb auto-exact/batch-embed/del-prefix · memory dedup+ts+relevance-eviction · codegraph unused · vault orphans/tags/robust-rename · search pageno+timeout · notify click/markdown/auth · browser readyState (P0) · orchestrate semdb-results/max-parallel/retries · schedule last-exit/tick-lock · supervise logs/backoff/restarts · skills match/validate/tolerant-discovery · context freshness · mcp stdio-timeout+stderr/bearer-auth · evals latency-aggregates/single-score-diff · **hooks system (new crate)**.
+
+Remaining (explicitly big-ticket/later): rag FlateDecode PDF + hybrid BM25, sandbox default-deny FS, secrets TTL/rotation + Vaultwarden sync + tamper-evident audit, codegraph incremental reindex + graph→semdb migration, mcp named-server registry + SSE, evals LLM-judge + auto trace capture, semdb persisted HNSW (needed only >10k rows now), httpc connection reuse.
 
 - **semdb**: HNSW rebuilt from scratch on EVERY search then discarded — currently slower than brute force, dead weight. Persist the graph (or skip rebuild for small N). Batch put/embed (amortize full-log open). Delete-by-prefix.
 - **memory**: dedup-on-write (1-NN check before insert — kills contradiction accumulation); hits/ts metadata + relevance-based eviction instead of FIFO; explicit `ts` field (custom ids break time ordering today).

@@ -32,6 +32,8 @@ pub struct Job {
     pub cmd: String,
     /// Last fire time recorded as completed (any exit).
     pub last_fire: Option<i64>,
+    /// Exit code of the most recent run (None = never ran).
+    pub last_exit: Option<i64>,
     /// One-shot: removed by the runner after it fires once.
     pub once: bool,
     /// Paused jobs are skipped by the runner (resume to re-enable).
@@ -43,6 +45,11 @@ pub struct Journal {
 }
 
 impl Journal {
+    /// The normalized table path (used by the runner's tick lock).
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// `path` may be given as the legacy `*.jsonl` name; it is normalized to a
     /// `*.semdb` table so old CLI invocations keep working.
     pub fn new(path: &Path) -> Journal {
@@ -59,10 +66,11 @@ impl Journal {
 
     fn row(job: &Job) -> String {
         format!(
-            r#"{{"cron":"{}","cmd":"{}","last_fire":{},"once":{},"enabled":{}}}"#,
+            r#"{{"cron":"{}","cmd":"{}","last_fire":{},"last_exit":{},"once":{},"enabled":{}}}"#,
             json::escape(&job.cron),
             json::escape(&job.cmd),
             job.last_fire.unwrap_or(-1),
+            job.last_exit.map_or("null".to_string(), |e| e.to_string()),
             job.once,
             job.enabled
         )
@@ -76,7 +84,8 @@ impl Journal {
         let once = matches!(v.get("once"), Some(json::Value::Bool(true)));
         // Default enabled=true for rows written before this field existed.
         let enabled = !matches!(v.get("enabled"), Some(json::Value::Bool(false)));
-        Some(Job { id: id.to_string(), cron, cmd, last_fire: if lf < 0 { None } else { Some(lf) }, once, enabled })
+        let last_exit = v.get("last_exit").and_then(|x| x.as_f64()).map(|e| e as i64);
+        Some(Job { id: id.to_string(), cron, cmd, last_fire: if lf < 0 { None } else { Some(lf) }, last_exit, once, enabled })
     }
 
     pub fn append(&self, ev: &Event) -> Result<(), String> {
@@ -90,6 +99,7 @@ impl Journal {
                     cron: cron.clone(),
                     cmd: cmd.clone(),
                     last_fire: prev.as_ref().and_then(|j| j.last_fire),
+                    last_exit: prev.as_ref().and_then(|j| j.last_exit),
                     once: *once,
                     enabled: prev.map(|j| j.enabled).unwrap_or(true),
                 };
@@ -99,9 +109,12 @@ impl Journal {
                 db.delete(id)?;
                 db.compact()?; // keep the table from growing with tombstones
             }
-            Event::Ran { id, fire, .. } => {
+            Event::Ran { id, fire, exit, .. } => {
+                // Persist the result — exit codes used to flow in and be
+                // discarded, leaving no way to see whether the last run worked.
                 if let Some(mut job) = db.get(id).and_then(|e| Self::parse_row(id, &e.meta)) {
                     job.last_fire = Some(job.last_fire.map_or(*fire, |p| p.max(*fire)));
+                    job.last_exit = Some(*exit as i64);
                     db.put(id, &Self::row(&job), PLACEHOLDER_VEC.to_vec())?;
                 }
             }

@@ -25,7 +25,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["list", "match", "search", "show"], description: "Operation to perform" },
+				action: { type: "string", enum: ["list", "match", "search", "show", "validate"], description: "Operation to perform" },
 				name: { type: "string", description: "skill name (show action)" },
 				query: { type: "string", description: "search term (search) or full prompt/task text (match)" },
 				head: { type: "number", description: "show: first N lines only (progressive disclosure)" },
@@ -39,6 +39,7 @@ export default function (pi: ExtensionAPI) {
 			if (p.action === "show") out = run(["show", root, p.name ?? "", ...(p.head != null ? ["--head", String(p.head)] : [])]);
 			else if (p.action === "search") out = run(["search", root, p.query ?? ""]);
 			else if (p.action === "match") out = run(["match", root, p.query ?? ""]);
+			else if (p.action === "validate") out = run(["validate", root]);
 			else out = run(["list", root]);
 			return { content: [{ type: "text", text: out }] };
 		},

@@ -42,6 +42,14 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 .map(|s| format!("{}\t{}", if s.pass { "PASS" } else { "FAIL" }, s.case))
                 .collect();
             lines.push(format!("accuracy: {passed}/{} = {:.1}%", scores.len(), acc * 100.0));
+            // Latency aggregates from the stored-but-previously-dead latency_ms.
+            let mut lats: Vec<i64> = traces.iter().filter(|t| t.run == run).filter_map(|t| t.latency_ms).collect();
+            if !lats.is_empty() {
+                lats.sort_unstable();
+                let mean = lats.iter().sum::<i64>() / lats.len() as i64;
+                let p = |q: f64| lats[((lats.len() as f64 - 1.0) * q) as usize];
+                lines.push(format!("latency: n={} mean={}ms p50={}ms p95={}ms", lats.len(), mean, p(0.5), p(0.95)));
+            }
             let report = lines.join("\n");
             // --min-pass N: nonzero exit (Err) if accuracy is below the threshold,
             // so a scheduler/CI gate can act without parsing the number.
@@ -57,8 +65,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let b = flag(args, "--run-b").or_else(|| flag(args, "--b")).ok_or("--run-b required")?;
             let matcher = Matcher::parse(&flag(args, "--matcher").unwrap_or_else(|| "exact".into()))?;
             let traces = store::load(&db(args));
-            let sa: BTreeMap<String, bool> = score::score_run(&traces, &a, matcher).into_iter().map(|s| (s.case, s.pass)).collect();
-            let sb: BTreeMap<String, bool> = score::score_run(&traces, &b, matcher).into_iter().map(|s| (s.case, s.pass)).collect();
+            // Score each run ONCE (was recomputed 4× for accuracy + maps).
+            let scored_a = score::score_run(&traces, &a, matcher);
+            let scored_b = score::score_run(&traces, &b, matcher);
+            let sa: BTreeMap<String, bool> = scored_a.iter().map(|s| (s.case.clone(), s.pass)).collect();
+            let sb: BTreeMap<String, bool> = scored_b.iter().map(|s| (s.case.clone(), s.pass)).collect();
             let mut regressions = Vec::new();
             let mut fixes = Vec::new();
             for (case, &pa) in &sa {
@@ -67,8 +78,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
                     if !pa && pb { fixes.push(case.clone()); }
                 }
             }
-            let acc_a = score::accuracy(&score::score_run(&traces, &a, matcher));
-            let acc_b = score::accuracy(&score::score_run(&traces, &b, matcher));
+            let acc_a = score::accuracy(&scored_a);
+            let acc_b = score::accuracy(&scored_b);
             let mut out = vec![format!("accuracy {a}: {:.1}%  →  {b}: {:.1}%  (Δ {:+.1}%)", acc_a*100.0, acc_b*100.0, (acc_b-acc_a)*100.0)];
             out.push(format!("regressions ({}): {}", regressions.len(), if regressions.is_empty() { "none".into() } else { regressions.join(", ") }));
             out.push(format!("new passes ({}): {}", fixes.len(), if fixes.is_empty() { "none".into() } else { fixes.join(", ") }));

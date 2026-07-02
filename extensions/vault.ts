@@ -21,10 +21,11 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["new", "read", "append", "rm", "mv", "list", "links", "graph", "search"], description: "Operation to perform" },
+				action: { type: "string", enum: ["new", "read", "append", "rm", "mv", "list", "links", "graph", "search", "orphans", "tags"], description: "Operation to perform" },
 				note: { type: "string", description: "note title/name (new/read/append/rm/links); the OLD name for mv" },
 				newName: { type: "string", description: "new title for mv (rewrites [[old]] links)" },
 				text: { type: "string", description: "text to append (append action)" },
+				tag: { type: "string", description: "search: filter by tag instead of keyword" },
 				query: { type: "string", description: "search query (search action)" },
 				head: { type: "number", description: "read: first N lines only (notes grow via append)" },
 				graphNote: { type: "string", description: "graph: scope to this note's neighborhood" },
@@ -44,7 +45,9 @@ export default function (pi: ExtensionAPI) {
 				case "mv": out = run(["mv", v, p.note ?? "", p.newName ?? ""]); break;
 				case "links": out = run(["links", v, p.note ?? ""]); break;
 				case "graph": out = run(["graph", v, ...(p.graphNote ? ["--note", p.graphNote, "--depth", String(p.depth ?? 1)] : [])]); break;
-				case "search": out = run(["search", v, p.query ?? ""]); break;
+				case "search": out = p.tag ? run(["search", v, "--tag", p.tag]) : run(["search", v, p.query ?? ""]); break;
+				case "orphans": out = run(["orphans", v]); break;
+				case "tags": out = run(["tags", v]); break;
 				default: out = run(["list", v]);
 			}
 			return { content: [{ type: "text", text: out }] };

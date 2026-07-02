@@ -54,6 +54,25 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             Ok(ranked.iter().map(|(_, s)| format!("{}\t{}", s.name, s.description)).collect::<Vec<_>>().join("\n"))
         }
+        "validate" => {
+            // Spec compliance: every SKILL.md needs non-empty name + description.
+            let root = root.ok_or("usage: skills validate <root>")?;
+            let skills = registry::discover(root)?;
+            if skills.is_empty() { return Ok("no skills found".into()); }
+            let mut problems = Vec::new();
+            let mut names = std::collections::BTreeSet::new();
+            for s in &skills {
+                if s.name.is_empty() { problems.push(format!("{}: missing name", s.path.display())); }
+                if s.description.trim().is_empty() { problems.push(format!("{}: missing/empty description", s.path.display())); }
+                if s.description.chars().count() > 4096 { problems.push(format!("{}: description over 4096 chars", s.name)); }
+                if !names.insert(s.name.clone()) { problems.push(format!("duplicate skill name '{}'", s.name)); }
+            }
+            if problems.is_empty() {
+                Ok(format!("ok: {} skills valid", skills.len()))
+            } else {
+                Err(problems.join("\n"))
+            }
+        }
         "match" => {
             // Auto-trigger: score skills against a whole prompt/task sentence
             // (word-boundary token overlap, name hits weighted 3×) — unlike
@@ -114,5 +133,6 @@ USAGE:
   skills list   <root>
   skills show   <root> <name>
   skills search <root> <query>      substring rank (single term)
+  skills validate <root>            frontmatter compliance check
   skills match  <root> '<prompt>'   auto-trigger: score skills against a whole sentence
 "#;

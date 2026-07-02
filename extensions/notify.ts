@@ -33,6 +33,8 @@ export default function (pi: ExtensionAPI) {
 				topic: { type: "string", description: "ntfy topic to publish to" },
 				message: { type: "string", description: "notification body" },
 				title: { type: "string", description: "optional title" },
+				click: { type: "string", description: "http(s) URL opened on tap" },
+				markdown: { type: "boolean", description: "render body as markdown" },
 				priority: { type: "string", description: "1 (min) to 5 (urgent)" },
 				tags: { type: "string", description: "comma-separated tags/emoji shortcodes" },
 			},
@@ -44,6 +46,8 @@ export default function (pi: ExtensionAPI) {
 			if (p.title) args.push("--title", p.title);
 			if (p.priority) args.push("--priority", p.priority);
 			if (p.tags) args.push("--tags", p.tags);
+			if (p.click) args.push("--click", p.click);
+			if (p.markdown) args.push("--markdown");
 			return { content: [{ type: "text", text: run(args) }] };
 		},
 	});

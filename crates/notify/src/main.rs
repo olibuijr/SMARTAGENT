@@ -34,6 +34,9 @@ fn run(args: &[String]) -> Result<String, String> {
                 title: flag(args, "--title"),
                 priority: flag(args, "--priority"),
                 tags: flag(args, "--tags"),
+                click: flag(args, "--click"),
+                markdown: args.iter().any(|a| a == "--markdown"),
+                auth: std::env::var("NTFY_TOKEN").ok(),
             };
             ntfy::send(&msg)
         }
@@ -47,5 +50,6 @@ notify — push notifications (ntfy protocol, plain HTTP)
 
 USAGE:
   notify send --topic T --message M [--title X] [--priority 1-5]
-              [--tags tag1,tag2] [--server http://host:port]
+              [--tags tag1,tag2] [--click URL] [--markdown]
+              [--server http://host:port]   (bearer auth via $NTFY_TOKEN)
 "#;

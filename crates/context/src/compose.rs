@@ -79,10 +79,20 @@ pub fn stat(dir: &Path) -> Result<String, String> {
     let files = ordered_files(dir)?;
     let mut out = Vec::new();
     let mut total = 0;
+    let now = std::time::SystemTime::now();
     for name in &files {
-        let n = std::fs::read_to_string(dir.join(name)).map(|s| s.chars().count()).unwrap_or(0);
+        let path = dir.join(name);
+        let n = std::fs::read_to_string(&path).map(|s| s.chars().count()).unwrap_or(0);
         total += n;
-        out.push(format!("{n}\t{name}"));
+        // Freshness: stale principal context is silently wrong context.
+        let age_days = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .map(|d| d.as_secs() / 86_400)
+            .unwrap_or(0);
+        let stale = if age_days >= 90 { " STALE" } else { "" };
+        out.push(format!("{n}\t{name}\t{age_days}d{stale}"));
     }
     out.push(format!("{total}\tTOTAL"));
     Ok(out.join("\n"))
