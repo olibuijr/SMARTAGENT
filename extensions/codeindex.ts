@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "codeindex");
 
-function run(args: string[]): string {
-	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 60_000, cwd: ROOT }).trim(); }
+function run(args: string[], timeout = 60_000): string {
+	try { return execFileSync(BIN, args, { encoding: "utf8", timeout, cwd: ROOT }).trim(); }
 	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
 }
 
@@ -16,11 +16,12 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codeindex",
 		label: "Code Search",
-		description: "Fast literal/regex code search (ripgrep concept), respecting .gitignore. Actions: 'search' finds a pattern across a dir with optional case-insensitivity, regex, context lines, and extension filter; 'files' lists indexable files. Use to grep the codebase for text, symbols, or patterns.",
+		description: "Fast literal/regex code search (ripgrep concept), respecting .gitignore, plus per-project workspace indexing. Actions: 'search' finds a pattern across a dir with optional case-insensitivity, regex, context lines, and extension filter; 'files' lists indexable files; 'projects' lists the repos under workspaces/ with index status; 'index' builds the per-project file index (one project, or all workspace repos when no project is given). Use 'project' to scope search/files to a workspace repo.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["search", "files"], description: "Operation to perform" },
+				action: { type: "string", enum: ["search", "files", "projects", "index"], description: "Operation to perform" },
+				project: { type: "string", description: "workspace project name (scopes search/files; selects the repo for index)" },
 					mode: { type: "string", enum: ["lines", "files", "count"], description: "search output: lines (default), files (names), count (totals only) — use count/files to gauge breadth cheaply" },
 					max: { type: "number", description: "cap matched lines (default 50)" },
 				pattern: { type: "string", description: "text or regex pattern (search action)" },
@@ -36,13 +37,19 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id: string, p: any) {
 			const dir = p.dir ?? ".";
 			let out: string;
-			if (p.action === "files") {
+			if (p.action === "projects") {
+				out = run(["projects"]);
+			} else if (p.action === "index") {
+				out = run(p.project ? ["index", p.project] : ["index", "--all"], 600_000);
+			} else if (p.action === "files") {
 				const args = ["files", dir];
+				if (p.project) args.push("--project", p.project);
 				if (p.ext) args.push("-t", p.ext);
 				if (p.max) args.push("--limit", String(p.max));
 				out = run(args);
 			} else {
 				const args = ["search", p.pattern ?? "", dir];
+				if (p.project) args.push("--project", p.project);
 				if (p.ignore_case) args.push("-i");
 				if (p.regex) args.push("-e");
 				if (p.mode === "count") args.push("-c");

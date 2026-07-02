@@ -87,6 +87,17 @@ Integration:
 - [ ] ISC-35: README.md documents install + one-command demo
 - [ ] ISC-36: Initial release tagged v0.1.0 with CHANGELOG.md
 
+Workspace project indexing (2026-07-02):
+- [x] ISC-37: codeindex `projects` lists direct children of workspaces_dir with repo marker + index status
+- [x] ISC-38: codeindex `index <project>` walks the repo (own .gitignore) → rows in `<repo>/.smartagent/codeindex.semdb`
+- [x] ISC-39: codeindex `index --all` indexes every repo project, reports per-repo OK/FAIL + summary counts
+- [x] ISC-40: codeindex search/files accept `--project <name>` scoped to workspaces_dir/<name>
+- [x] ISC-41: `.smartagent` in ALWAYS-skip — re-index never ingests its own index db
+- [x] ISC-42: Anti: repo-root search behavior unchanged — root walks still skip workspaces/
+- [x] ISC-43: extensions/codeindex.ts exposes projects/index actions + project param; AGENTS.md + AGENT_TOOLS.md catalog rows updated
+- [x] ISC-44: cargo test green for codeindex (incl. project roundtrip + traversal-guard tests) and semdb (put_many)
+- [x] ISC-45: live `./pi` run indexes workspace repos with per-repo success/fail monitored
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |
@@ -133,3 +144,4 @@ Integration:
 - 2026-07-02: E5 ISC floor (≥256) deferred — project ISA starts at 36 spine ISCs; per-crate ISCs grow during waves (refined: will expand as crates land).
 - 2026-07-02: TUI statusline shipped — pi natively supports `ctx.ui.setStatus` + `setWidget(placement: belowEditor)`; added `supervise statusline` Rust verb + `extensions/statusline.ts` (per-tool footer statuses from tool_execution events, services widget below input). No new tool registered; logic stays in Rust per constraint.
 - 2026-07-02: ISC-26 landed and certified — `crates/rag` ports the RAGFlow ingestion/retrieval slice into std-only Rust, stores chunks as semdb rows, returns `[ID:...]` cited chunks, has `extensions/rag.ts`, passes codex fusion tester, and was driven through `./pi -p`.
+- 2026-07-02: codeindex gained workspace-project support (ISC-37..45) — projects moved into workspaces/ were invisible (`workspaces` in ALWAYS-skip, no project concept). Design: per-repo structural file inventory in `<repo>/.smartagent/codeindex.semdb` (semdb table per memory policy; no vectors — no meaning-based lookup needed), `--project` scoping for live search, `index --all` restricted to git repos (numeric orchestrate run-dirs and infra dirs excluded). semdb gained `put_many` (single-fsync bulk insert) because per-put `sync_data` would cost one fsync per file row. Fixed latent `positional_dir` bug: flag values (e.g. `-t rs`) could be mistaken for the search dir.

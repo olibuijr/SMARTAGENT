@@ -174,6 +174,33 @@ impl Db {
         Ok(())
     }
 
+    /// Bulk insert: appends every row, then fsyncs ONCE. `put` syncs per record,
+    /// which costs one fsync per row — minutes for a many-thousand-row code
+    /// index. Same length/dimension guards as `put`.
+    pub fn put_many(&mut self, rows: &[(String, String, Vec<f32>)]) -> Result<usize, String> {
+        for (id, meta, vector) in rows {
+            if id.len() > u16::MAX as usize {
+                return Err(format!("id too long: {} bytes (max {})", id.len(), u16::MAX));
+            }
+            if meta.len() > u32::MAX as usize {
+                return Err("meta too long (max u32)".into());
+            }
+            if vector.len() > 1 {
+                if let Some(d) = self.dim() {
+                    if vector.len() != d {
+                        return Err(format!("vector dim {} does not match db dim {d}", vector.len()));
+                    }
+                }
+            }
+            let body = encode_put(id, meta, vector);
+            write_framed(&mut self.file, &body)?;
+            self.records += 1;
+            self.index.insert(id.clone(), Entry { meta: meta.clone(), vector: vector.clone() });
+        }
+        self.file.sync_data().map_err(|e| e.to_string())?;
+        Ok(rows.len())
+    }
+
     pub fn delete(&mut self, id: &str) -> Result<bool, String> {
         if id.len() > u16::MAX as usize {
             return Err(format!("id too long: {} bytes (max {})", id.len(), u16::MAX));

@@ -634,6 +634,7 @@ name = "codeindex"
 version = "0.2.0"
 dependencies = [
  "httpc",
+ "semdb",
 ]
 
 [[package]]

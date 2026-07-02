@@ -129,7 +129,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `semdb` | `semdb` | Semantic DB: embed, search (`--ids-only`/`--meta-chars`/`--filter key=value`), get, del, count/ids (`--prefix`), stats |
 | `memory` | `memory` | 3-tier memory: remember, update, recall (`scope` tier), recent, forget, promote, stats. Session intents auto-recalled at launch |
 | `codegraph` | `codegraph` | Rust code graph: index, defs/refs/callers/impls (`--limit`), path (BFS call-path), semantic search, stats |
-| `codeindex` | `codeindex` | Fast code search: search (mode lines/files/count, `-m` cap 50), files (`--limit`) |
+| `codeindex` | `codeindex` | Fast code search + workspace project index: search/files (`--project` scopes to a workspaces/ repo), projects (list repos + index status), index (per-repo file inventory → `<repo>/.smartagent/codeindex.semdb`, one project or all) |
 | `vault` | `vault` | Markdown brain: new, read (`--head`), append, rm, mv (link-rewrite), list, links, graph (`--note`/`--depth`), search |
 | `skills` | `skills` | Agent Skills loader: list, show (`--head`), search, match (prompt-scored auto-trigger) |
 | `schedule` | `schedule` | Durable scheduler: add (`--notify`; `--cron` recurring OR `--at` one-shot), pause/resume, list/next/rm/tick. Supervised daemon fires jobs |

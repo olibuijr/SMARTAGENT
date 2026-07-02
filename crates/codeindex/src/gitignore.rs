@@ -9,7 +9,7 @@ pub struct Rules {
     patterns: Vec<(String, bool, bool)>,
 }
 
-const ALWAYS: &[&str] = &[".git", "target", "node_modules", ".refrepos", ".pi", ".scratch", "workspaces"];
+const ALWAYS: &[&str] = &[".git", "target", "node_modules", ".refrepos", ".pi", ".scratch", ".smartagent", "workspaces"];
 
 impl Rules {
     pub fn load(root: &Path) -> Rules {
