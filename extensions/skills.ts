@@ -17,13 +17,17 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "skills",
 		label: "Skills",
-		description: "Agent Skills (SKILL.md) registry. Actions: 'list' shows all discovered skills with descriptions; 'search' ranks skills matching a query; 'show' loads a named skill's full body. Use to find and load a domain skill before doing specialized work.",
+		description:
+			"Agent Skills (SKILL.md) registry. Actions: 'list' shows all discovered skills with " +
+			"descriptions; 'match' scores skills against a whole prompt/task sentence (BEST way to " +
+			"pick a skill for incoming work or a workflow step); 'search' ranks by a single term; " +
+			"'show' loads a named skill's full body. Load a matching skill before specialized work.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["list", "search", "show"], description: "Operation to perform" },
+				action: { type: "string", enum: ["list", "match", "search", "show"], description: "Operation to perform" },
 				name: { type: "string", description: "skill name (show action)" },
-				query: { type: "string", description: "search query (search action)" },
+				query: { type: "string", description: "search term (search) or full prompt/task text (match)" },
 				head: { type: "number", description: "show: first N lines only (progressive disclosure)" },
 				root: { type: "string", description: "skills root dir (default ./skills)" },
 			},
@@ -34,6 +38,7 @@ export default function (pi: ExtensionAPI) {
 			let out: string;
 			if (p.action === "show") out = run(["show", root, p.name ?? "", ...(p.head != null ? ["--head", String(p.head)] : [])]);
 			else if (p.action === "search") out = run(["search", root, p.query ?? ""]);
+			else if (p.action === "match") out = run(["match", root, p.query ?? ""]);
 			else out = run(["list", root]);
 			return { content: [{ type: "text", text: out }] };
 		},
