@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use httpc::args::flag;
 use crate::{graph, note, search};
 
 fn today() -> String {
@@ -37,7 +38,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
         "read" => {
             let vault = vault.ok_or("usage: vault read <vault> <note>")?;
             let name = args.get(2).ok_or("note required")?;
-            note::read(&note::note_path(vault, name))
+            let body = note::read(&note::note_path(vault, name))?;
+            // --head N: first N lines only (notes grow via append; don't dump all).
+            match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
+                Some(n) => {
+                    let lines: Vec<&str> = body.lines().collect();
+                    let mut out = lines.iter().take(n).cloned().collect::<Vec<_>>().join("\n");
+                    if lines.len() > n {
+                        out.push_str(&format!("\n…[{n} of {} lines; omit --head for all]", lines.len()));
+                    }
+                    Ok(out)
+                }
+                None => Ok(body),
+            }
         }
         "append" => {
             let vault = vault.ok_or("usage: vault append <vault> <note> <text>")?;

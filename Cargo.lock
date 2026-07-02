@@ -125,6 +125,9 @@ dependencies = [
 [[package]]
 name = "skills"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+]
 
 [[package]]
 name = "supervise"
@@ -137,6 +140,9 @@ dependencies = [
 [[package]]
 name = "vault"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+]
 
 [[package]]
 name = "voice"

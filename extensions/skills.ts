@@ -24,6 +24,7 @@ export default function (pi: ExtensionAPI) {
 				action: { type: "string", enum: ["list", "search", "show"], description: "Operation to perform" },
 				name: { type: "string", description: "skill name (show action)" },
 				query: { type: "string", description: "search query (search action)" },
+				head: { type: "number", description: "show: first N lines only (progressive disclosure)" },
 				root: { type: "string", description: "skills root dir (default ./skills)" },
 			},
 			required: ["action"],
@@ -31,7 +32,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id: string, p: any) {
 			const root = p.root ?? DEFAULT_ROOT;
 			let out: string;
-			if (p.action === "show") out = run(["show", root, p.name ?? ""]);
+			if (p.action === "show") out = run(["show", root, p.name ?? "", ...(p.head != null ? ["--head", String(p.head)] : [])]);
 			else if (p.action === "search") out = run(["search", root, p.query ?? ""]);
 			else out = run(["list", root]);
 			return { content: [{ type: "text", text: out }] };

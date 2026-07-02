@@ -1,4 +1,5 @@
 //! CLI: list / show / search
+use httpc::args::flag;
 
 use std::path::Path;
 
@@ -21,7 +22,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let name = args.get(2).ok_or("name required")?;
             let skills = registry::discover(root)?;
             let s = skills.iter().find(|s| &s.name == name).ok_or_else(|| format!("no skill '{name}'"))?;
-            registry::load_body(&s.path)
+            let body = registry::load_body(&s.path)?;
+            // --head N: first N lines (progressive disclosure of a long SKILL.md).
+            match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
+                Some(n) => {
+                    let lines: Vec<&str> = body.lines().collect();
+                    let mut out = lines.iter().take(n).cloned().collect::<Vec<_>>().join("\n");
+                    if lines.len() > n {
+                        out.push_str(&format!("\n…[{n} of {} lines]", lines.len()));
+                    }
+                    Ok(out)
+                }
+                None => Ok(body),
+            }
         }
         "search" => {
             let root = root.ok_or("usage: skills search <root> <query>")?;

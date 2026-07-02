@@ -26,6 +26,7 @@ export default function (pi: ExtensionAPI) {
 				newName: { type: "string", description: "new title for mv (rewrites [[old]] links)" },
 				text: { type: "string", description: "text to append (append action)" },
 				query: { type: "string", description: "search query (search action)" },
+				head: { type: "number", description: "read: first N lines only (notes grow via append)" },
 				vault: { type: "string", description: "vault dir (default data/vault)" },
 			},
 			required: ["action"],
@@ -35,7 +36,7 @@ export default function (pi: ExtensionAPI) {
 			let out: string;
 			switch (p.action) {
 				case "new": out = run(["new", v, p.note ?? ""]); break;
-				case "read": out = run(["read", v, p.note ?? ""]); break;
+				case "read": out = run(["read", v, p.note ?? "", ...(p.head != null ? ["--head", String(p.head)] : [])]); break;
 				case "append": out = run(["append", v, p.note ?? "", p.text ?? ""]); break;
 				case "rm": out = run(["rm", v, p.note ?? ""]); break;
 				case "mv": out = run(["mv", v, p.note ?? "", p.newName ?? ""]); break;
