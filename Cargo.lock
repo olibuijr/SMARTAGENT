@@ -55,6 +55,9 @@ dependencies = [
 [[package]]
 name = "orchestrate"
 version = "0.1.0"
+dependencies = [
+ "semdb",
+]
 
 [[package]]
 name = "rag"
