@@ -44,7 +44,7 @@ impl Beat {
             .unwrap_or_default();
         let state = if busy { "working" } else { "idle" };
         let beat = format!(
-            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task; keep working the plan above. If the current step is done, close it on the board and pull the next."
+            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULE: one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task. If doing holds more than one, park the extras back to ready and keep exactly one."
         );
         self.last_beat = Some(now);
         beat
