@@ -56,6 +56,22 @@ extension that gives the agent continuity across sessions), and `statusline`
 
 The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
 
+### Current project status — 2026-07-02
+
+- `MULTIROLE.md` now captures the GOAGENT-style multirole model for `./pi`: board-as-handoff, Planner/Builder/Tester/Researcher/Ops/Coordinator roles, tool/skill mapping, TDD/dev-team/ops standards, and the gateway multi-agent implementation path.
+- Root runtime hygiene is explicit: `.gitignore` excludes `workspaces/`, `.pi/`, `data/`, `.scratch/`, `.refrepos/`, `.agents/`, `.claude/`, and `.codex/` so generated state and credentials stay out of GitHub.
+- Board/process hygiene is current: stale running workflows for done tasks were aborted, while another agent's active T-71/W-13 work was left alone.
+- `build.sh` now has `lint_pi_imports` and `./build.sh import-lint-test`, catching multiline and oddly formatted runtime imports from `@earendil-works/*` without flagging multiline `import type`.
+- The 20-tool registration smoke is deterministic: `build.sh` extracts `pi.registerTool` names from extensions and regression-tests the extractor with `./build.sh tools-smoke-test` instead of relying on an LLM-written tool list.
+- README launch docs now make everyday use safe and unambiguous: normal `./pi` / headless launches are offline with respect to the launcher and do not update files; only explicit `./pi --self-update` may reach upstream and replace `.pi/runtime/`.
+- `/status` and the live statusline share `extensions/lib/statusline-common.ts` for the status probe registry and `level|text` parsing.
+
+### Continuity after reset
+
+If the next prompt is “continue with all tasks”, continue kanban flow: run `skills match`, inspect the board, avoid tasks already in `doing` for another agent, pull or refine the highest-priority available task, use `workflow start task-run` for non-trivial work, verify criteria with real probes, mark tasks done only after criteria pass, and update memory/docs when project status changes.
+
+Recent intentional changed files: `.gitignore`, `MULTIROLE.md`, `build.sh`, `README.md`, `ISA.md`, `extensions/commands.ts`, `extensions/statusline.ts`, and `extensions/lib/statusline-common.ts`. Treat unrelated visible edits in `desktop-agent/*` or `crates/gateway/src/beat.rs` as possibly owned by another agent unless the board says otherwise.
+
 ### Features added
 
 - **Full skill library** — every tool and operation is covered by a matching
@@ -169,12 +185,20 @@ attention (stale index, WIP full, blockers, memory tier near its eviction cap).
 
 # Headless (the stdin redirect is MANDATORY or pi hangs):
 ./pi -p 'search the web for Icelandic golf courses' < /dev/null
+
+# Cockpit: 2x2 tmux grid — pi · live DA attach · board · meðvitund transcript.
+# Ctrl+Alt+q/w/e/r selects panes, Alt+Enter fullscreens; re-run to re-attach.
+./tui
 ```
 
 The launcher auto-loads every `extensions/*.ts`, injects the tool catalog
 (`AGENT_TOOLS.md`) and recent session memory into the agent's context, and pins
-the pi runtime. It never touches the network on a normal launch; update
-explicitly with `./pi --self-update` (smoke-tested, auto-rollback).
+the pi runtime. Normal `./pi` and headless `./pi -p ... < /dev/null` launches
+are offline with respect to the launcher: they use the vendored runtime already
+under `.pi/` and do not update files. The mutating/networked path is explicit:
+run `./pi --self-update` when you want the launcher to check upstream, download a
+new pi runtime if available, and replace files under `.pi/runtime/` (smoke-tested,
+auto-rollback).
 
 ### Using a tool directly
 

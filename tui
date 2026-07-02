@@ -23,14 +23,15 @@ fi
 command -v tmux >/dev/null || { echo "error: tmux not installed" >&2; exit 1; }
 
 # 2x2 grid: pi / gateway attach / live board / meðvitund transcript.
-T new-session -d -s "$SES" -c "$ROOT" -x 220 -y 60 "$ROOT/pi"
-T split-window -h -t "$SES:0" -c "$ROOT" \
-    "$ROOT/target/release/gateway attach || { echo 'gateway down — retry: ./target/release/gateway attach'; exec sh; }"
-T split-window -v -t "$SES:0.0" -c "$ROOT" \
+# Deterministic placement: split by immutable pane IDs (%N), no layout re-flow
+# — `select-layout tiled` reorders panes by index and scrambled the grid.
+TL=$(T new-session -d -s "$SES" -c "$ROOT" -x 220 -y 60 -P -F '#{pane_id}' "$ROOT/pi")
+TR=$(T split-window -h -t "$TL" -c "$ROOT" -P -F '#{pane_id}' \
+    "$ROOT/target/release/gateway attach || { echo 'gateway down — retry: ./target/release/gateway attach'; exec sh; }")
+T split-window -v -t "$TL" -c "$ROOT" \
     "watch -c -n 5 $ROOT/target/release/tasks board --dir $ROOT"
-T split-window -v -t "$SES:0.1" -c "$ROOT" \
+T split-window -v -t "$TR" -c "$ROOT" \
     "tail -F $ROOT/data/gateway/main.log"
-T select-layout -t "$SES:0" tiled
 
 # Pane hotkeys — root table (no prefix), Ctrl+Alt + q/w/e/r by position.
 T bind-key -n C-M-q select-pane -t '{top-left}'
@@ -40,5 +41,5 @@ T bind-key -n C-M-r select-pane -t '{bottom-right}'
 # Alt+Enter: zoom toggle — fullscreen the active pane / restore the 2x2 grid.
 T bind-key -n M-Enter resize-pane -Z
 
-T select-pane -t "$SES:0.0"
+T select-pane -t "$TL"
 exec tmux -L "$SOCK" attach -t "$SES"
