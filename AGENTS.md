@@ -134,7 +134,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
 | `evals` | `evals` | Trace + score + regression diff (Langfuse concept): log/score/diff/runs |
 | `rag` | `rag` | Document ingestion + cited retrieval (RAGFlow concept): ingest, retrieve, stats |
-| `voice` | `voice` | STT/TTS bridge (Pipecat concept): stt, tts, probe |
+| `voice` | `voice` | STT/TTS bridge (Pipecat concept). BUILT+TESTED but DELISTED (extensions/disabled/) — no titan speech server deployed |
 | `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
 | _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |
 

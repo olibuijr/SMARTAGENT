@@ -22,7 +22,8 @@ instead of guessing or shelling out manually.
 - **context** — principal identity/context loader: compose, validate, stat.
 - **evals** — trace, score, and regression-diff runs: log, score, diff, runs.
 - **rag** — document ingestion + cited retrieval: ingest, retrieve, stats.
-- **voice** — speech bridge: stt (WAV→text), tts (text→audio), probe.
+
+_(voice — speech STT/TTS — is built but currently disabled: no titan speech server deployed. See extensions/disabled/.)_
 
 Prefer these tools for their domains. Endpoints/config come from
 config/smartagent.conf; all persistent data lives in semdb tables.

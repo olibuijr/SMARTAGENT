@@ -39,11 +39,13 @@ gate() {
     echo "── smoke: pi loads and every extension tool registers ──"
     EXP=$(ls extensions/*.ts | grep -v akurai-router | wc -l | tr -d ' ')
     GOT=$(./pi -p 'List every tool you can call, names only, comma-separated. No prose.' </dev/null 2>/dev/null \
-        | grep -oE '\b(semdb|memory|codegraph|codeindex|vault|skills|schedule|search|notify|secrets|browser|orchestrate|mcp|sandbox|context|evals|rag|voice|supervise)\b' \
+        | grep -oE '\b(semdb|memory|codegraph|codeindex|vault|skills|schedule|search|notify|secrets|browser|orchestrate|mcp|sandbox|context|evals|rag|supervise)\b' \
         | sort -u | wc -l | tr -d ' ')
-    echo "expected crate tools: 19  |  tools the agent listed: $GOT"
-    if [ "$GOT" -lt 19 ]; then echo "FAIL: only $GOT/19 crate tools registered in pi"; exit 1; fi
-    echo "ok ($GOT/19 crate tools live)"
+    # 18 active tools; `voice` is built but delisted (extensions/disabled/) until
+    # a titan STT/TTS server exists.
+    echo "expected crate tools: 18  |  tools the agent listed: $GOT"
+    if [ "$GOT" -lt 18 ]; then echo "FAIL: only $GOT/18 crate tools registered in pi"; exit 1; fi
+    echo "ok ($GOT/18 crate tools live)"
 }
 
 case "${1:-}" in
