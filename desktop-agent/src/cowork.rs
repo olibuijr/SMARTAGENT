@@ -8,6 +8,7 @@ use eframe::egui::{self, Color32, Vec2};
 use crate::composer;
 use crate::conn::AgentConn;
 use crate::emit::Emit;
+use crate::icons;
 use crate::theme;
 use crate::transcript;
 
@@ -69,7 +70,11 @@ fn header(ui: &mut egui::Ui, plan_first: bool, folder_input: &mut String, emits:
         ui.colored_label(theme::TEXT(), egui::RichText::new("Tasks").size(16.0).strong());
 
         // Plan-before-act toggle (real Cowork's defining safety flow).
-        let plan_label = if plan_first { "☑ Plan first" } else { "☐ Plan first" };
+        let plan_label = if plan_first {
+            format!("{} Plan first", icons::CHECK_BOX)
+        } else {
+            format!("{} Plan first", icons::EMPTY_BOX)
+        };
         if ui
             .add(egui::Button::new(egui::RichText::new(plan_label).size(12.5).color(if plan_first { theme::ACCENT() } else { theme::TEXT_MUTED() })).fill(Color32::TRANSPARENT))
             .on_hover_text("Ask for a plan and approval before the agent acts")

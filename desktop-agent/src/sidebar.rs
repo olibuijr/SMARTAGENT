@@ -95,7 +95,7 @@ fn session_list(ui: &mut egui::Ui, app: &App, w: f32, emits: &mut Vec<Emit>) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(10.0);
             if ui
-                .add(egui::Button::new(egui::RichText::new("⟳").size(12.5).color(theme::TEXT_FAINT())).fill(Color32::TRANSPARENT))
+                .add(egui::Button::new(egui::RichText::new(icons::REFRESH).size(12.5).color(theme::TEXT_FAINT())).fill(Color32::TRANSPARENT))
                 .on_hover_text("Refresh sessions")
                 .clicked()
             {
