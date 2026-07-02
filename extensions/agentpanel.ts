@@ -1,12 +1,19 @@
 // agentpanel — GOAGENT-style AGENT TEAM sidebar for the pi TUI.
 //
-// A true right-side sidebar (like ../GOAGENT's 30-col lipgloss pane): a
-// nonCapturing pi-tui overlay anchored top-right — chat keeps the left side
-// and keyboard focus (same mechanism sa-browser proved). One block per
-// gateway agent: ◉/○ state icon, accent-coloured name, faint role, its task,
-// and a live last-activity snippet from the agent's own transcript.
-// Data: `gateway agents` TSV (name, state, task, role, activity). Display
-// only — no logic. Auto-activates in the TUI; `/team` toggles.
+// A true right-side sidebar: nonCapturing pi-tui overlay anchored top-right —
+// chat keeps the left side and keyboard focus (same mechanism as sa-browser).
+// Visibility comes from a SOLID background fill + accent left edge: without
+// them the panel is floating text and the chat bleeds straight through it.
+//
+// Sections: header (working count) → shared board task → working agents
+// (dot+spinner, ⚙ tool ticker, last words) → idle agents (one dim line each)
+// → RUNNING workflows (from `workflow runs` — visible even when the gateway
+// is down) → /team hint.
+//
+// Data: `gateway agents` TSV — name, state, doing, role, tokens, tools, words
+// (see crates/gateway/src/server.rs write_agents — keep in sync!) and
+// `workflow runs` TSV. Display only — no logic.
+// Auto-activates in the TUI; `/team` toggles.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
@@ -14,76 +21,153 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const GATEWAY = join(ROOT, "target", "release", "gateway");
+const BIN = (name: string) => join(ROOT, "target", "release", name);
 const REFRESH_MS = 5000;
 const PANE_WIDTH = 36;
 
 const RESET = "\x1b[0m";
-const dim = (s: string) => `\x1b[2m${s}${RESET}`;
-const bold = (s: string) => `\x1b[1m${s}${RESET}`;
-const color = (c: string, s: string) => `\x1b[38;5;${c}m${s}${RESET}`;
+const BG = "\x1b[48;5;235m"; // solid panel background — the visibility fix
+const EDGE = "\x1b[38;5;60m▌";
+const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
+const fg = (c: string, s: string) => `\x1b[38;5;${c}m${s}\x1b[39m`;
 const ACCENTS = ["212", "80", "150", "215", "141", "117"];
 
-type Agent = { name: string; state: string; task: string; role: string; tools: string; words: string };
+type Agent = { name: string; state: string; task: string; role: string; tokens: string; tools: string; words: string };
+type Run = { id: string; def: string; step: string; task: string };
 
-// Data cache: refreshed every REFRESH_MS by a timer; render() must stay cheap
-// because the spinner timer re-renders several times a second.
-let cache: Agent[] = [];
+let agents: Agent[] = [];
+let runs: Run[] = [];
+let gatewayUp = false;
 let frame = 0;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-function refreshAgents(): void {
+function humanTokens(raw: string): string {
+	const n = Number(raw);
+	if (!Number.isFinite(n) || n <= 0) return "";
+	if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "m";
+	if (n >= 1_000) return Math.round(n / 1_000) + "k";
+	return String(n);
+}
+
+function refresh(): void {
 	try {
-		const out = execFileSync(GATEWAY, ["agents"], { timeout: 3000, encoding: "utf8" });
-		cache = out
+		const out = execFileSync(BIN("gateway"), ["agents"], { timeout: 3000, encoding: "utf8" });
+		agents = out
 			.split("\n")
 			.filter((l) => l.includes("\t"))
 			.map((l) => {
-				const [name, state, task, role, tools, words] = l.split("\t");
+				const [name, state, task, role, tokens, tools, words] = l.split("\t");
 				return {
 					name: name ?? "?",
 					state: state ?? "idle",
-					task: task ?? "",
+					task: (task ?? "").trim(),
 					role: role ?? "Agent",
+					tokens: (tokens ?? "").trim(),
 					tools: (tools ?? "").trim(),
 					words: (words ?? "").trim(),
 				};
 			})
-			.sort((a, b) => a.name.localeCompare(b.name));
+			// working first, then by name — the active agents get the eye
+			.sort((a, b) => Number(b.state === "working") - Number(a.state === "working") || a.name.localeCompare(b.name));
+		gatewayUp = true;
 	} catch {
-		cache = [];
+		agents = [];
+		gatewayUp = false;
+	}
+	try {
+		const out = execFileSync(BIN("workflow"), ["runs", "--db", join(ROOT, "data", "workflow.semdb")], { timeout: 3000, encoding: "utf8" });
+		runs = out
+			.split("\n")
+			.filter((l) => l.includes("\t") && !/\t(done|aborted)\t/.test(l))
+			.map((l) => {
+				const [id, def, _state, step, task] = l.split("\t");
+				return { id: id ?? "?", def: def ?? "", step: (step ?? "").replace("step ", ""), task: (task ?? "").trim() };
+			})
+			.slice(0, 4);
+	} catch {
+		runs = [];
 	}
 }
 
+const vlen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
 const clip = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w - 1)) + "…" : s);
 
+/** One padded panel row: accent edge + content on the solid background. */
+function row(content: string, width: number): string {
+	const inner = width - 2; // edge + one space of padding
+	const pad = Math.max(0, inner - vlen(content));
+	return `${BG}${EDGE} ${content}${" ".repeat(pad)}${RESET}`;
+}
+
+function rule(width: number): string {
+	return row(dim("─".repeat(Math.max(4, width - 4))), width);
+}
+
 function render(width: number): string[] {
-	const w = Math.max(20, width - 2);
-	const lines: string[] = ["", " " + bold("AGENT TEAM"), ""];
-	if (cache.length === 0) {
-		lines.push(" " + dim("no agents — gateway offline"));
-		return lines;
+	const w = Math.max(24, width);
+	const inner = w - 4;
+	const lines: string[] = [];
+	const working = agents.filter((a) => a.state === "working");
+
+	// Header: name + live working count (green when active).
+	const count = `${working.length}/${agents.length} working`;
+	const gap = " ".repeat(Math.max(1, inner - vlen("AGENT TEAM") - count.length));
+	lines.push(row(bold("AGENT TEAM") + gap + (working.length ? fg("46", count) : dim(count)), w));
+	lines.push(rule(w));
+
+	if (!gatewayUp) {
+		lines.push(row(fg("203", "✖ gateway offline"), w));
+		lines.push(row(dim("supervise status → up"), w));
+	} else {
+		// The board `doing` slot is shared fleet-wide — show it ONCE, not
+		// duplicated under every agent (that duplication was pure noise).
+		const board = agents.find((a) => a.task && a.task !== "nothing")?.task ?? "";
+		if (board) {
+			lines.push(row(dim("board ") + fg("252", clip(board, inner - 6)), w));
+		}
+		lines.push(row("", w));
+
+		working.forEach((a, i) => {
+			const accent = ACCENTS[i % ACCENTS.length];
+			const spin = fg(accent, SPIN[(frame + i) % SPIN.length]);
+			const head = `${fg("46", "●")} ${spin} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
+			const tok = humanTokens(a.tokens);
+			const gapw = Math.max(1, inner - vlen(head) - tok.length);
+			lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
+			if (a.tools) {
+				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
+				lines.push(row("  " + dim("⚙ ") + fg("252", clip(a.tools, inner - 8)) + " " + tick, w));
+			}
+			if (a.words) {
+				lines.push(row("  " + dim("“" + clip(a.words, inner - 6) + "”"), w));
+			}
+		});
+
+		// Idle agents: one dim line each — presence, not prominence.
+		agents
+			.filter((a) => a.state !== "working")
+			.forEach((a) => {
+				const tok = humanTokens(a.tokens);
+				const head = `${fg("242", "○")} ${fg("248", a.name)} ${dim("· " + a.role)}`;
+				const gapw = Math.max(1, inner - vlen(head) - tok.length);
+				lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
+			});
 	}
-	cache.forEach((a, i) => {
-		const accent = ACCENTS[i % ACCENTS.length];
-		const working = a.state === "working";
-		// green working / orange idle; working agents get a live spinner
-		const dot = working ? color("46", "●") : color("208", "●");
-		const spin = working ? " " + color(accent, SPIN[(frame + i) % SPIN.length]) : "  ";
-		const name = working ? bold(color(accent, a.name)) : color("252", a.name);
-		lines.push(` ${dot}${spin}${name} ${dim("· " + a.role)}`);
-		const task = a.task && a.task !== "nothing" ? clip(a.task, w - 5) : "idle";
-		lines.push("     " + (working ? color(accent, task) : dim(task)));
-		if (a.tools) {
-			// tool ticker: marching dots while working, static when idle
-			const tick = working ? color(accent, ["·  ", "·· ", "···"][frame % 3]) : dim("···");
-			lines.push("     " + dim("⚙ ") + clip(a.tools, w - 10) + " " + tick);
+
+	// RUNNING: in-flight workflows — answers "is anything running?" at a glance.
+	lines.push(row("", w));
+	lines.push(rule(w));
+	if (runs.length === 0) {
+		lines.push(row(dim("no workflows running"), w));
+	} else {
+		lines.push(row(bold(fg("117", "RUNNING")), w));
+		for (const r of runs) {
+			lines.push(row(`${fg("117", r.id)} ${clip(r.def, 10)} ${dim("step")} ${fg("252", r.step)}${r.task ? dim(" → " + r.task) : ""}`, w));
 		}
-		if (a.words) {
-			lines.push("     " + dim("“" + clip(a.words, w - 8) + "”"));
-		}
-		lines.push("");
-	});
+	}
+	lines.push(rule(w));
+	lines.push(row(dim("/team hide"), w));
 	return lines;
 }
 
@@ -125,13 +209,16 @@ export default function (pi: ExtensionAPI) {
 				active = false;
 				tuiRef = undefined;
 			});
-		refreshAgents();
-		if (!timer) timer = setInterval(refreshAgents, REFRESH_MS);
+		refresh();
+		if (!timer) timer = setInterval(() => {
+			refresh();
+			tuiRef?.requestRender();
+		}, REFRESH_MS);
 		// spinner/ticker frames: cheap (cache-only render), no process spawns
 		if (!spinTimer)
 			spinTimer = setInterval(() => {
 				frame++;
-				if (cache.some((a) => a.state === "working")) tuiRef?.requestRender();
+				if (agents.some((a) => a.state === "working")) tuiRef?.requestRender();
 			}, 350);
 		return "agent team sidebar on (right) — /team toggles";
 	}
