@@ -16,11 +16,15 @@ pub struct StdioClient {
 }
 
 impl StdioClient {
-    /// Spawn `cmd` (a shell command string) and run the initialize handshake.
+    /// Spawn the MCP server and run the initialize handshake. `cmd` is tokenized
+    /// into argv and exec'd directly — NO shell — so a server command string can
+    /// never smuggle `;`, `|`, `$(...)` or other shell metacharacters into
+    /// arbitrary command execution.
     pub fn start(cmd: &str) -> Result<StdioClient, String> {
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
+        let argv = tokenize(cmd)?;
+        let (program, rest) = argv.split_first().ok_or("empty server command")?;
+        let mut child = Command::new(program)
+            .args(rest)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -70,6 +74,46 @@ impl StdioClient {
         }
         Ok(line)
     }
+}
+
+/// Split a command string into argv, honoring single/double quotes so paths
+/// with spaces work. Deliberately does NOT interpret shell metacharacters —
+/// `;`, `|`, `$`, backticks are literal text, not operators.
+fn tokenize(cmd: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut in_token = false;
+    for c in cmd.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => cur.push(c),
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                in_token = true;
+            }
+            None if c.is_whitespace() => {
+                if in_token {
+                    out.push(std::mem::take(&mut cur));
+                    in_token = false;
+                }
+            }
+            None => {
+                cur.push(c);
+                in_token = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err("unterminated quote in server command".into());
+    }
+    if in_token {
+        out.push(cur);
+    }
+    if out.is_empty() {
+        return Err("empty server command".into());
+    }
+    Ok(out)
 }
 
 impl Drop for StdioClient {

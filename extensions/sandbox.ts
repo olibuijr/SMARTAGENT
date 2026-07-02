@@ -16,20 +16,20 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "sandbox",
 		label: "Sandbox",
-		description: "Run a shell command in an isolated scratch workspace (Daytona concept). Writes are confined to the workspace; supports a wall-clock timeout and namespace isolation (isolate=true). Use to run untrusted or destructive commands safely.",
+		description: "Run a shell command in an isolated scratch workspace (Daytona concept). Writes are confined to the workspace, the parent environment (secrets/keys) is scrubbed, and namespace isolation is ON by default. Set isolate=false only if a command needs the real namespace (drops to filesystem-only). Use for untrusted or destructive commands.",
 		parameters: {
 			type: "object",
 			properties: {
 				command: { type: "string", description: "shell command to run" },
 				timeout: { type: "number", description: "wall-clock timeout seconds (default 30)" },
-				isolate: { type: "boolean", description: "use namespace isolation if available" },
+				isolate: { type: "boolean", description: "namespace isolation (default true); set false to opt out" },
 				net: { type: "boolean", description: "allow network (default false when isolated)" },
 			},
 			required: ["command"],
 		} as any,
 		async execute(_id: string, p: any) {
 			const flags: string[] = ["run", "--timeout", String(p.timeout ?? 30)];
-			if (p.isolate) flags.push("--isolate");
+			if (p.isolate === false) flags.push("--no-isolate");
 			if (p.net) flags.push("--net");
 			flags.push("--", "sh", "-c", p.command ?? "");
 			return { content: [{ type: "text", text: run(flags) }] };

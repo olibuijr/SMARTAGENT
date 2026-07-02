@@ -97,7 +97,7 @@ pub fn run(spec: &SandboxSpec) -> Result<SandboxResult, String> {
 }
 
 fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
-    if use_ns {
+    let mut c = if use_ns {
         let mut c = Command::new("unshare");
         c.arg("--user").arg("--map-root-user").arg("--pid").arg("--fork");
         if !spec.net {
@@ -109,6 +109,21 @@ fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
         let mut c = Command::new(&spec.cmd[0]);
         c.args(&spec.cmd[1..]);
         c
+    };
+    scrub_env(&mut c);
+    c
+}
+
+/// Drop the parent environment before running an untrusted command. pi's
+/// process env may hold router/API keys and other secrets; without this a
+/// sandboxed (or injected) command could read them straight out of `environ`.
+/// Re-inject only the minimal vars a normal program needs to function.
+fn scrub_env(c: &mut Command) {
+    c.env_clear();
+    for key in ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TERM"] {
+        if let Ok(v) = std::env::var(key) {
+            c.env(key, v);
+        }
     }
 }
 

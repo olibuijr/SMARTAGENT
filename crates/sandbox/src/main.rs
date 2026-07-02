@@ -41,7 +41,10 @@ fn run(args: &[String]) -> Result<String, String> {
                 cmd,
                 inputs,
                 net: has(args, "--net"),
-                isolate: has(args, "--isolate"),
+                // Isolation (namespaces + scrubbed env) is ON by default; a
+                // caller must explicitly pass --no-isolate to drop to
+                // filesystem-only confinement. Safe default for untrusted cmds.
+                isolate: !has(args, "--no-isolate"),
                 timeout: Duration::from_secs(flag(args, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(30)),
                 max_output: flag(args, "--max-output").and_then(|s| s.parse().ok()).unwrap_or(1_000_000),
             };
@@ -73,9 +76,10 @@ const HELP: &str = r#"
 sandbox — isolated command execution (Daytona concept, Linux)
 
 USAGE:
-  sandbox run [--timeout 30] [--net] [--isolate] [--input FILE]... [--max-output N] -- <cmd...>
+  sandbox run [--timeout 30] [--net] [--no-isolate] [--input FILE]... [--max-output N] -- <cmd...>
   sandbox clean [--older-than-hours H]
 
-Runs the command in a fresh workspaces/sandbox/<id>/ dir. Uses unshare
-namespaces when available, else filesystem confinement only (warns).
+Runs the command in a fresh workspaces/sandbox/<id>/ dir with a scrubbed
+environment (parent secrets removed). Namespace isolation is on by default
+when `unshare` works; --no-isolate drops to filesystem-only confinement.
 "#;
