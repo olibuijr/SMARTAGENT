@@ -21,8 +21,9 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["new", "read", "append", "list", "links", "graph", "search"], description: "Operation to perform" },
-				note: { type: "string", description: "note title/name (new/read/append/links)" },
+				action: { type: "string", enum: ["new", "read", "append", "rm", "mv", "list", "links", "graph", "search"], description: "Operation to perform" },
+				note: { type: "string", description: "note title/name (new/read/append/rm/links); the OLD name for mv" },
+				newName: { type: "string", description: "new title for mv (rewrites [[old]] links)" },
 				text: { type: "string", description: "text to append (append action)" },
 				query: { type: "string", description: "search query (search action)" },
 				vault: { type: "string", description: "vault dir (default data/vault)" },
@@ -36,6 +37,8 @@ export default function (pi: ExtensionAPI) {
 				case "new": out = run(["new", v, p.note ?? ""]); break;
 				case "read": out = run(["read", v, p.note ?? ""]); break;
 				case "append": out = run(["append", v, p.note ?? "", p.text ?? ""]); break;
+				case "rm": out = run(["rm", v, p.note ?? ""]); break;
+				case "mv": out = run(["mv", v, p.note ?? "", p.newName ?? ""]); break;
 				case "links": out = run(["links", v, p.note ?? ""]); break;
 				case "graph": out = run(["graph", v]); break;
 				case "search": out = run(["search", v, p.query ?? ""]); break;

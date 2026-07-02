@@ -25,10 +25,15 @@ export default function (pi: ExtensionAPI) {
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["open", "click", "type", "back", "probe"] },
+				action: { type: "string", enum: ["open", "click", "type", "back", "wait", "scroll", "attr", "probe"] },
 				url: { type: "string", description: "URL to open (open action)" },
 				selector: { type: "string", description: "CSS selector (click/type actions)" },
 				text: { type: "string", description: "text to type (type action)" },
+				enter: { type: "boolean", description: "press Enter after typing (submit forms)" },
+				name: { type: "string", description: "attribute name (or text|value) for attr" },
+				timeoutMs: { type: "number", description: "wait timeout ms (default 10000)" },
+				by: { type: "number", description: "scroll by px (scroll; omit to scroll to bottom)" },
+				to: { type: "string", description: "scroll to this selector (scroll)" },
 				quiet: { type: "boolean", description: "click/type: return only status, no page snapshot (cheap for intermediate steps)" },
 				maxText: { type: "number", description: "snapshot body char cap (default 4000)" },
 				maxLinks: { type: "number", description: "snapshot link cap (default 40)" },
@@ -44,8 +49,11 @@ export default function (pi: ExtensionAPI) {
 			switch (p.action) {
 				case "open": out = run(["open", p.url ?? "", ...tail]); break;
 				case "click": out = run(["click", p.selector ?? "", ...tail]); break;
-				case "type": out = run(["type", p.selector ?? "", p.text ?? "", ...tail]); break;
+				case "type": out = run(["type", p.selector ?? "", p.text ?? "", ...(p.enter ? ["--enter"] : []), ...tail]); break;
 				case "back": out = run(["back", ...tail]); break;
+				case "wait": out = run(["wait", p.selector ?? "", "--timeout-ms", String(p.timeoutMs ?? 10000), ...tail]); break;
+				case "scroll": out = run(["scroll", ...(p.to ? ["--to", p.to] : []), ...(p.by != null ? ["--by", String(p.by)] : []), ...tail]); break;
+				case "attr": return { content: [{ type: "text", text: run(["attr", p.selector ?? "", p.name ?? "text"]) }] };
 				default: return { content: [{ type: "text", text: run(["probe"]) }] };
 			}
 			return { content: [{ type: "text", text: untrusted("WEB PAGE", out) }] };

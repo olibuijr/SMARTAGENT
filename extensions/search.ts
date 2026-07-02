@@ -28,6 +28,8 @@ export default function (pi: ExtensionAPI) {
 				action: { type: "string", enum: ["query", "health"], description: "Operation to perform" },
 				terms: { type: "string", description: "search terms (query action)" },
 				k: { type: "number", description: "max results (default 5)" },
+				timeRange: { type: "string", enum: ["day","week","month","year"], description: "restrict to a recency window" },
+				site: { type: "string", description: "restrict to one domain (site:)" },
 				engines: { type: "string", description: "comma-separated engines to restrict to" },
 				category: { type: "string", description: "category filter: general|news|it" },
 				instance: { type: "string", description: "SearXNG instance URL (default from SEARX_INSTANCE env)" },
@@ -43,6 +45,8 @@ export default function (pi: ExtensionAPI) {
 			} else {
 				const args = ["query", p.terms ?? "", ...inst, "--k", String(p.k ?? 5)];
 				if (p.engines) args.push("--engines", p.engines);
+					if (p.timeRange) args.push("--time-range", p.timeRange);
+					if (p.site) args.push("--site", p.site);
 				if (p.category) args.push("--category", p.category);
 				out = untrusted("WEB SEARCH RESULTS", run(args));
 			}

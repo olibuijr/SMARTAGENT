@@ -11,11 +11,18 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let limit = flag(args, "--k").and_then(|s| s.parse().ok()).unwrap_or(10);
             let engines = flag(args, "--engines");
             let category = flag(args, "--category");
+            let time_range = flag(args, "--time-range");
+            // --site restricts to one domain (SearXNG honors `site:` in the query).
+            let scoped_terms = match flag(args, "--site") {
+                Some(d) => format!("site:{d} {terms}"),
+                None => terms.to_string(),
+            };
             let q = Query {
                 instance: &instance,
-                terms,
+                terms: &scoped_terms,
                 engines: engines.as_deref(),
                 category: category.as_deref(),
+                time_range: time_range.as_deref(),
                 limit,
             };
             let results = searx::search(&q)?;

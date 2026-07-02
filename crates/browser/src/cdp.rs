@@ -110,6 +110,62 @@ impl Cdp {
         self.eval(&js)
     }
 
+    /// Poll until a selector appears (or timeout). Returns "ready" or errors.
+    pub fn wait_for(&mut self, selector: &str, timeout_ms: u64) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let js = format!("(function(){{return document.querySelector(\"{}\")?\"1\":\"\";}})()", json::escape(selector));
+        loop {
+            if self.eval(&js)? == "1" {
+                return Ok("ready".into());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!("timeout: '{selector}' did not appear in {timeout_ms}ms"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+
+    /// Scroll to an element (selector) or by a pixel delta. Empty selector +
+    /// px=0 scrolls to the bottom (reveal lazy-loaded content).
+    pub fn scroll(&mut self, selector: &str, by_px: i64) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let js = if !selector.is_empty() {
+            format!("(function(){{var e=document.querySelector(\"{}\");if(!e)return \"not found\";e.scrollIntoView();return \"ok\";}})()", json::escape(selector))
+        } else if by_px != 0 {
+            format!("(function(){{window.scrollBy(0,{by_px});return \"ok\";}})()")
+        } else {
+            "(function(){window.scrollTo(0,document.body.scrollHeight);return \"ok\";})()".to_string()
+        };
+        let r = self.eval(&js)?;
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        Ok(r)
+    }
+
+    /// Read an attribute (or 'text'/'value') of the first matching element.
+    pub fn attr(&mut self, selector: &str, name: &str) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let getter = match name {
+            "text" => "e.innerText".to_string(),
+            "value" => "e.value".to_string(),
+            n => format!("e.getAttribute(\"{}\")", json::escape(n)),
+        };
+        let js = format!("(function(){{var e=document.querySelector(\"{}\");if(!e)return \"\";var v={getter};return v==null?\"\":String(v);}})()", json::escape(selector));
+        self.eval(&js)
+    }
+
+    /// Press Enter in the focused/selected element (submit forms after `type`).
+    pub fn press_enter(&mut self, selector: &str) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        let js = format!(
+            "(function(){{var e=document.querySelector(\"{}\");if(!e)return \"not found\";var f=e.form;if(f&&f.requestSubmit){{f.requestSubmit();return \"submitted\";}}e.dispatchEvent(new KeyboardEvent('keydown',{{key:'Enter',keyCode:13,bubbles:true}}));return \"enter\";}})()",
+            json::escape(selector)
+        );
+        let r = self.eval(&js)?;
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        Ok(r)
+    }
+
     /// Navigate history back/forward and let the page settle.
     pub fn history(&mut self, delta: i32) -> Result<String, String> {
         self.call("Runtime.enable", "{}")?;

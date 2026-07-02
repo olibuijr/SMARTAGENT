@@ -51,6 +51,23 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let names: Vec<String> = note::list(vault)?.iter().map(|p| note::note_name(p)).collect();
             Ok(if names.is_empty() { "empty vault".into() } else { names.join("\n") })
         }
+        "rm" => {
+            let vault = vault.ok_or("usage: vault rm <vault> <note>")?;
+            let name = args.get(2).ok_or("note required")?;
+            let path = note::note_path(vault, name);
+            if !path.exists() {
+                return Err(format!("no note '{name}'"));
+            }
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+            Ok(format!("removed {name}"))
+        }
+        "mv" => {
+            let vault = vault.ok_or("usage: vault mv <vault> <old> <new>")?;
+            let old = args.get(2).ok_or("old note required")?;
+            let new = args.get(3).ok_or("new title required")?;
+            let n = rename_note(vault, old, new)?;
+            Ok(format!("renamed {old} → {new} ({n} link(s) rewritten)"))
+        }
         "links" => {
             let vault = vault.ok_or("usage: vault links <vault> <note>")?;
             let name = args.get(2).ok_or("note required")?;
@@ -85,6 +102,8 @@ USAGE:
   vault new    <vault> <title>
   vault read   <vault> <note>
   vault append <vault> <note> <text>
+  vault rm     <vault> <note>
+  vault mv     <vault> <old> <new>          (rewrites [[old]] links)
   vault list   <vault>
   vault links  <vault> <note>
   vault graph  <vault>
@@ -104,4 +123,35 @@ mod neg_tests {
         assert!(run(&s(&["append",".scratch/negtest-vault","n"])).is_err()); // missing text
     }
 
+}
+
+/// Rename a note file and rewrite `[[old]]` wikilinks across the vault to the
+/// new name. Returns the count of links rewritten.
+fn rename_note(vault: &Path, old: &str, new_title: &str) -> Result<usize, String> {
+    let old_path = note::note_path(vault, old);
+    if !old_path.exists() {
+        return Err(format!("no note '{old}'"));
+    }
+    let old_name = note::note_name(&old_path);
+    let new_slug = note::slugify(new_title);
+    if new_slug.is_empty() {
+        return Err("new title produced empty slug".into());
+    }
+    let new_path = vault.join(format!("{new_slug}.md"));
+    if new_path.exists() {
+        return Err(format!("{} already exists", new_path.display()));
+    }
+    std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
+    // Rewrite [[old_name]] → [[new_slug]] in every note.
+    let old_link = format!("[[{old_name}]]");
+    let new_link = format!("[[{new_slug}]]");
+    let mut rewritten = 0;
+    for p in note::list(vault)? {
+        let body = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
+        if body.contains(&old_link) {
+            rewritten += body.matches(&old_link).count();
+            std::fs::write(&p, body.replace(&old_link, &new_link)).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(rewritten)
 }

@@ -17,7 +17,7 @@ fn queries_mock_instance() {
         sock.write_all(resp.as_bytes()).unwrap();
     });
     let instance = format!("http://127.0.0.1:{port}");
-    let q = Query { instance: &instance, terms: "rust lang", engines: None, category: None, limit: 10 };
+    let q = Query { instance: &instance, terms: "rust lang", engines: None, category: None, time_range: None, limit: 10 };
     let results = searx::search(&q).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].title, "Rust");

@@ -33,11 +33,34 @@ fn run(args: &[String]) -> Result<String, String> {
             if quiet { Ok(format!("[{status}]")) } else { Ok(format!("[{status}]\n{}", cdp.snapshot_capped(mt, ml)?)) }
         }
         Some("type") => {
-            let sel = args.get(1).ok_or("usage: browser type <css-selector> <text>")?;
-            let text = args.get(2).ok_or("usage: browser type <css-selector> <text>")?;
+            let sel = args.get(1).ok_or("usage: browser type <css-selector> <text> [--enter]")?;
+            let text = args.get(2).ok_or("usage: browser type <css-selector> <text> [--enter]")?;
             let mut cdp = Cdp::connect(&base)?;
-            let status = cdp.type_text(sel, text)?;
+            let mut status = cdp.type_text(sel, text)?;
+            if has(args, "--enter") {
+                status = format!("{status}+{}", cdp.press_enter(sel)?);
+            }
             if quiet { Ok(format!("[{status}]")) } else { Ok(format!("[{status}]\n{}", cdp.snapshot_capped(mt, ml)?)) }
+        }
+        Some("wait") => {
+            let sel = args.get(1).ok_or("usage: browser wait <css-selector> [--timeout-ms 10000]")?;
+            let ms = flag(args, "--timeout-ms").and_then(|s| s.parse().ok()).unwrap_or(10000u64);
+            let mut cdp = Cdp::connect(&base)?;
+            let status = cdp.wait_for(sel, ms)?;
+            if quiet { Ok(format!("[{status}]")) } else { Ok(format!("[{status}]\n{}", cdp.snapshot_capped(mt, ml)?)) }
+        }
+        Some("scroll") => {
+            let sel = flag(args, "--to").unwrap_or_default();
+            let by = flag(args, "--by").and_then(|s| s.parse().ok()).unwrap_or(0i64);
+            let mut cdp = Cdp::connect(&base)?;
+            cdp.scroll(&sel, by)?;
+            cdp.snapshot_capped(mt, ml)
+        }
+        Some("attr") => {
+            let sel = args.get(1).ok_or("usage: browser attr <css-selector> <name|text|value>")?;
+            let name = args.get(2).ok_or("usage: browser attr <css-selector> <name|text|value>")?;
+            let mut cdp = Cdp::connect(&base)?;
+            Ok(cdp.attr(sel, name)?)
         }
         Some("back") => {
             let mut cdp = Cdp::connect(&base)?;
