@@ -15,6 +15,10 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
+fn watch_should_restart(rec: &Record, known: bool, now: i64, next_try: i64) -> bool {
+    (rec.desired_up || !known) && now >= next_try
+}
+
 struct Ctx {
     repo: PathBuf,
     logs: PathBuf,
@@ -187,21 +191,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
                         }
                         continue;
                     }
-                    if !(rec.desired_up || !ctx.store.names().contains(&svc.name.to_string())) {
-                        continue;
+                    let now = now_unix();
+                    if !watch_should_restart(&rec, ctx.store.names().contains(&svc.name.to_string()), now, *next_try.get(svc.name).unwrap_or(&0)) {
+                        continue; // intentionally off or backing off
                     }
-                    if now_unix() < *next_try.get(svc.name).unwrap_or(&0) {
-                        continue; // backing off
-                    }
-                    let quick_death = rec.started_at > 0 && now_unix() - rec.started_at < 60;
-                    if let Ok(r) = ctx.start(svc) {
-                        let mut bumped = r;
-                        bumped.restarts += 1;
-                        let _ = ctx.store.put(svc.name, &bumped);
-                        let d = if quick_death { (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480) } else { 15 };
-                        delay.insert(svc.name, d);
-                        next_try.insert(svc.name, now_unix() + d as i64);
-                        eprintln!("[supervise] restarted {} (pid {}, next retry window {d}s)", svc.name, bumped.pid);
+                    let quick_death = rec.started_at > 0 && now - rec.started_at < 60;
+                    match ctx.start(svc) {
+                        Ok(r) => {
+                            let mut bumped = r;
+                            bumped.restarts += 1;
+                            let _ = ctx.store.put(svc.name, &bumped);
+                            let d = if quick_death { (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480) } else { 15 };
+                            delay.insert(svc.name, d);
+                            next_try.insert(svc.name, now_unix() + d as i64);
+                            eprintln!("[supervise] restarted {} (pid {}, next retry window {d}s)", svc.name, bumped.pid);
+                        }
+                        Err(e) => eprintln!("[supervise] failed to restart {}: {e}", svc.name),
                     }
                 }
             }
@@ -226,6 +231,15 @@ mod tests {
             assert!(matches!(state, "up" | "probe-fail" | "DOWN" | "off"));
         }
     }
+
+    #[test]
+    fn watch_restarts_dead_desired_gateway() {
+        let rec = super::Record { desired_up: true, pid: 123, cmd: "target/release/gateway serve".into(), started_at: 1, restarts: 0 };
+        assert!(super::watch_should_restart(&rec, true, 100, 0));
+        assert!(!super::watch_should_restart(&rec, true, 100, 101));
+        assert!(!super::watch_should_restart(&super::Record::default(), true, 100, 0));
+        assert!(super::watch_should_restart(&super::Record::default(), false, 100, 0));
+    }
 }
 
 const HELP: &str = r#"
@@ -242,6 +256,6 @@ USAGE:
                                     services every 15s) — run at boot via a
                                     single `@reboot` crontab line
 
-Services: scheduler (cron daemon), chromium (headless CDP :9222).
+Services: scheduler (cron daemon), gateway (persistent agent fleet), chromium (headless CDP :9222).
 State is a semdb table (data/supervise.semdb); logs in workspaces/supervise-logs/.
 "#;

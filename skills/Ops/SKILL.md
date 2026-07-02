@@ -1,6 +1,6 @@
 ---
 name: ops
-description: Keep the agent's services and safety rails running — supervise (a service is down or dead, restart the scheduler or chromium), schedule (cron job and one-shot reminder), notify (send a push notification), secrets (get a secret, credential, api key, token), sandbox (run a risky or untrusted command or script isolated), mcp (connect an external mcp server, call its tools), hooks (why an edit or write was blocked). USE WHEN service down, dead, restart, not responding, schedule a job, remind me, reminder, notification, alert me when done, secret, credential, api key, password, token, risky command, untrusted script, sandbox, mcp server, external tools, hook, edit blocked, gate.
+description: Keep the agent's services and safety rails running — supervise (a service is down or dead, restart the scheduler, gateway, or chromium), schedule (cron job and one-shot reminder), notify (send a push notification), secrets (get a secret, credential, api key, token), sandbox (run a risky or untrusted command or script isolated), mcp (connect an external mcp server, call its tools), hooks (why an edit or write was blocked). USE WHEN service down, dead, restart, not responding, schedule a job, remind me, reminder, notification, alert me when done, secret, credential, api key, password, token, risky command, untrusted script, sandbox, mcp server, external tools, hook, edit blocked, gate.
 ---
 
 # Ops — services, schedules, secrets, safety
@@ -10,7 +10,7 @@ description: Keep the agent's services and safety rails running — supervise (a
 When browser/search/schedule act dead, the cause is almost always a dead
 service, not your call. `supervise status` before any debugging.
 
-- Services: `scheduler` (fires cron jobs), `chromium` (headless CDP :9222).
+- Services: `scheduler` (fires cron jobs), `gateway` (persistent agent fleet), `chromium` (headless CDP :9222).
 - `up [service]`, `down [service]`, `restart <service>`,
   `logs <service>` (`tail`, default 40) for the why.
 - State lives in data/supervise.semdb; the statusline ⛭ row mirrors it —

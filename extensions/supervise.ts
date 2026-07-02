@@ -1,7 +1,7 @@
 /**
  * supervise — pi extension over the pure-Rust process manager. Lets the agent
- * see and control its own long-running services (scheduler daemon, headless
- * Chromium) without shelling out to systemctl.
+ * see and control its own long-running services (scheduler daemon, gateway,
+ * headless Chromium) without shelling out to systemctl.
  * Type-only pi imports + node builtins only (runtime imports fail silently).
  */
 
@@ -26,15 +26,15 @@ export default function (pi: ExtensionAPI) {
 		name: "supervise",
 		label: "Supervisor",
 		description:
-			"Manage SMARTAGENT's long-running background services (scheduler daemon, headless " +
+			"Manage SMARTAGENT's long-running background services (scheduler daemon, gateway, headless " +
 			"Chromium for the browser tool). Actions: 'status' shows each service's state/pid/health, " +
 			"'up' starts them, 'down' stops them, 'restart' restarts one. Use 'status' to diagnose " +
-			"why browser/search/schedule tools fail (a dead service).",
+			"why browser/search/schedule/gateway tools fail (a dead service).",
 		parameters: {
 			type: "object",
 			properties: {
 				action: { type: "string", enum: ["status", "up", "down", "restart", "logs"] },
-				service: { type: "string", description: "service name (scheduler|chromium); omit to target all" },
+				service: { type: "string", description: "service name (scheduler|gateway|chromium); omit to target all" },
 				tail: { type: "number", description: "logs: last N lines (default 40)" },
 			},
 			required: ["action"],

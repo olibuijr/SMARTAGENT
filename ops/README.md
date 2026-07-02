@@ -11,6 +11,7 @@ via the `supervise` tool.
 | Service | What | Health |
 |---------|------|--------|
 | `scheduler` | cron daemon firing due jobs (reminders via `notify`, nightly backup) | /proc liveness |
+| `gateway` | persistent agent fleet (`main,builder,qa,ops`) over `.pi/gateway.sock` | /proc liveness |
 | `chromium` | headless Chrome with CDP on `:9222` for the `browser` tool | HTTP probe `:9222/json/version` |
 
 SearXNG runs as a docker container (`smartagent-searxng`, `--restart unless-stopped`) —
@@ -27,6 +28,16 @@ supervise watch               # foreground self-healing loop (restarts dead serv
 ```
 
 State: `data/supervise.semdb`. Logs: `workspaces/supervise-logs/`.
+
+## Deploying supervisor changes
+
+`supervise watch` is itself long-lived. When `crates/supervise` changes, the
+new `target/release/supervise` binary does not affect an already-running watch
+process until that process restarts. The normal `./build.sh` gate now refreshes
+any live watch loop after a successful build (via the user systemd unit when it
+is active, otherwise by replacing the foreground watch process with `nohup`).
+This closes the 2026-07-02 incident where a 16h-old watch binary kept running
+and did not include the latest gateway revive fixes.
 
 ## Boot persistence
 

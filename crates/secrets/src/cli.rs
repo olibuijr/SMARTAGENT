@@ -12,6 +12,9 @@ fn store_dir(args: &[String]) -> Result<PathBuf, String> {
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {
+    if matches!(args.first().map(String::as_str), None | Some("help") | Some("--help") | Some("-h")) {
+        return Ok(HELP.trim().into());
+    }
     let dir = store_dir(args)?;
     match args.first().map(String::as_str) {
         Some("set") => {

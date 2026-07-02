@@ -38,7 +38,7 @@ pub fn list(root: &Path) -> Vec<Project> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            if !path.is_dir() || name.starts_with('.') {
+            if !path.is_dir() || name.starts_with('.') || is_transient_dir(&name) {
                 continue;
             }
             let is_repo = path.join(".git").exists();
@@ -51,6 +51,10 @@ pub fn list(root: &Path) -> Vec<Project> {
 
 /// Resolve a project name to its directory under `root`. Rejects path
 /// traversal so `--project` can never escape the workspaces root.
+fn is_transient_dir(name: &str) -> bool {
+    name.chars().all(|c| c.is_ascii_digit())
+}
+
 pub fn resolve_in(root: &Path, name: &str) -> Result<PathBuf, String> {
     if name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(format!("invalid project name: {name}"));
@@ -95,6 +99,7 @@ mod tests {
         std::fs::create_dir_all(ws.join("repo/.git")).unwrap();
         std::fs::create_dir_all(ws.join("plain")).unwrap();
         std::fs::create_dir_all(ws.join(".hidden")).unwrap();
+        std::fs::create_dir_all(ws.join("1782962766")).unwrap();
         let ps = list(&ws);
         let names: Vec<&str> = ps.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["plain", "repo"]);

@@ -64,7 +64,7 @@ pi (agent spine, 4 core tools)  →  extensions/*.ts (thin TS glue, NO logic)
 | rag | document ingestion + cited retrieval (RAGFlow); `project` = per-repo corpus |
 | tasks | kanban board: WIP limits + criteria-gated done ENFORCED in Rust |
 | workflow | markdown-defined process engine: evidence-gated steps, engine-driven `drive` |
-| supervise | process manager for the scheduler daemon + headless chromium |
+| supervise | process manager for scheduler, gateway, and headless chromium |
 
 (voice is built but delisted — no titan speech server; `hooks`, `statusline`,
 `session-memory` are event extensions, not tools.)

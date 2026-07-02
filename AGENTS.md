@@ -59,7 +59,7 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    voice/        STT/TTS bridge (titan-hosted models)
    notify/       notifications (ntfy-style push)
    supervise/    internal process manager for long-running services (scheduler,
-                 chromium): spawn detached, track pid/uptime in a semdb table,
+                 gateway, chromium): spawn detached, track pid/uptime in a semdb table,
                  health-check, self-heal. Replaces per-service systemd.
    tasks/        kanban board (semdb table): WIP limits, criteria-gated done,
                  pull-based next, flow metrics — policies enforced in Rust

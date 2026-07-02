@@ -73,7 +73,7 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         Some("projects") => {
             let root = project::workspaces_root()?;
-            let ps = project::list(&root);
+            let ps: Vec<_> = project::list(&root).into_iter().filter(|p| !is_transient_workspace_dir(&p.name)).collect();
             if ps.is_empty() {
                 return Ok("no projects under workspaces".into());
             }
@@ -95,7 +95,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 // (sandbox, supervise-logs) under workspaces/ are not projects.
                 // Skips are reported, never silent — `index <name>` still works
                 // on a non-repo dir explicitly.
-                let (repos, rest): (Vec<_>, Vec<_>) = project::list(&root).into_iter().partition(|p| p.is_repo);
+                let (repos, rest): (Vec<_>, Vec<_>) = project::list(&root).into_iter().filter(|p| !is_transient_workspace_dir(&p.name)).partition(|p| p.is_repo);
                 skipped = rest.into_iter().map(|p| p.name).collect();
                 repos
             } else {
@@ -148,6 +148,10 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         _ => Ok(HELP.trim().into()),
     }
+}
+
+fn is_transient_workspace_dir(name: &str) -> bool {
+    name.chars().all(|c| c.is_ascii_digit()) || matches!(name, "sandbox" | "supervise-logs")
 }
 
 /// Search/files target: `--project <name>` scopes to a workspace project;
