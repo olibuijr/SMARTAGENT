@@ -125,17 +125,27 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
     }
     let addr = format!("{}:{}", u.host, u.port);
     // connect_timeout: a blackholed address (e.g. VPN peer down) must fail fast,
-    // not block the tool indefinitely — capped at 10s regardless of read timeout.
-    let connect_deadline = Duration::from_secs(req.timeout_secs.min(10).max(1));
+    // not block the tool indefinitely — the 10s budget is shared across ALL
+    // resolved addresses (wall-clock bound), not granted per address.
+    let connect_budget = Duration::from_secs(req.timeout_secs.min(10).max(1));
     let sock_addrs: Vec<std::net::SocketAddr> = (u.host.as_str(), u.port)
         .to_socket_addrs()
         .map_err(|e| format!("resolve {addr}: {e}"))?
         .collect();
-    let mut stream = sock_addrs
-        .iter()
-        .map(|sa| TcpStream::connect_timeout(sa, connect_deadline))
-        .find_map(Result::ok)
-        .ok_or_else(|| format!("connect {addr}: unreachable within {}s", connect_deadline.as_secs()))?;
+    let started = std::time::Instant::now();
+    let mut stream = None;
+    for sa in &sock_addrs {
+        let remaining = connect_budget.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        if let Ok(s) = TcpStream::connect_timeout(sa, remaining) {
+            stream = Some(s);
+            break;
+        }
+    }
+    let mut stream = stream
+        .ok_or_else(|| format!("connect {addr}: unreachable within {}s", connect_budget.as_secs()))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(req.timeout_secs)))
         .map_err(|e| e.to_string())?;
