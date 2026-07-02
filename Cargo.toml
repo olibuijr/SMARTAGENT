@@ -21,6 +21,8 @@ members = [
     "crates/voice",
     "crates/evals",
     "crates/supervise",
+    "crates/tasks",
+    "crates/workflow",
 ]
 
 [workspace.package]

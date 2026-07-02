@@ -1,0 +1,10 @@
+//! workflow CLI entrypoint.
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match workflow::cli::run(&args) {
+        Ok(out) => { if !out.is_empty() { println!("{out}"); } ExitCode::SUCCESS }
+        Err(e) => { eprintln!("error: {e}"); ExitCode::FAILURE }
+    }
+}

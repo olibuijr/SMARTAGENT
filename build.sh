@@ -37,21 +37,21 @@ gate() {
     echo "ok (all pi imports are type-only)"
 
     echo "── smoke: pi loads and every extension tool registers ──"
-    # 18 active tools; `voice` is built but delisted (extensions/disabled/) until
+    # 20 active tools; `voice` is built but delisted (extensions/disabled/) until
     # a titan STT/TTS server exists. The check asks the model to list its tools,
     # which is mildly non-deterministic (an LLM may occasionally omit one name),
-    # so retry a few times and pass if any attempt sees all 18.
-    RE='\b(semdb|memory|codegraph|codeindex|vault|skills|schedule|search|notify|secrets|browser|orchestrate|mcp|sandbox|context|evals|rag|supervise)\b'
+    # so retry a few times and pass if any attempt sees all 20.
+    RE='\b(semdb|memory|codegraph|codeindex|vault|skills|schedule|search|notify|secrets|browser|orchestrate|mcp|sandbox|context|evals|rag|supervise|tasks|workflow)\b'
     GOT=0
     for attempt in 1 2 3; do
         GOT=$(./pi -p 'List every tool you can call, names only, comma-separated. No prose.' </dev/null 2>/dev/null \
             | grep -oE "$RE" | sort -u | wc -l | tr -d ' ')
-        [ "$GOT" -ge 18 ] && break
-        echo "  attempt $attempt: $GOT/18 — retrying"
+        [ "$GOT" -ge 20 ] && break
+        echo "  attempt $attempt: $GOT/20 — retrying"
     done
-    echo "tools the agent listed: $GOT / 18"
-    if [ "$GOT" -lt 18 ]; then echo "FAIL: only $GOT/18 crate tools registered in pi"; exit 1; fi
-    echo "ok ($GOT/18 crate tools live)"
+    echo "tools the agent listed: $GOT / 20"
+    if [ "$GOT" -lt 20 ]; then echo "FAIL: only $GOT/20 crate tools registered in pi"; exit 1; fi
+    echo "ok ($GOT/20 crate tools live)"
 }
 
 case "${1:-}" in

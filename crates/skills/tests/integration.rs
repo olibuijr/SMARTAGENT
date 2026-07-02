@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use skills::cli;
 
-fn scratch() -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/skills-it");
+fn scratch(name: &str) -> PathBuf {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("golf")).unwrap();
     std::fs::create_dir_all(d.join("cook")).unwrap();
@@ -15,7 +15,7 @@ fn s(v: &[&str]) -> Vec<String> { v.iter().map(|x| x.to_string()).collect() }
 
 #[test]
 fn list_show_search() {
-    let d = scratch();
+    let d = scratch("skills-it");
     let root = d.to_string_lossy().to_string();
     let list = cli::run(&s(&["list", &root])).unwrap();
     assert!(list.contains("golf-coach") && list.contains("chef"));
@@ -25,4 +25,19 @@ fn list_show_search() {
     assert!(show.contains("Swing tips"));
     let search = cli::run(&s(&["search", &root, "golf"])).unwrap();
     assert!(search.contains("golf-coach") && !search.contains("chef"));
+}
+
+#[test]
+fn match_scores_whole_prompts() {
+    let d = scratch("skills-match");
+    let root = d.to_string_lossy().to_string();
+    // A full sentence: substring `search` would find nothing useful here,
+    // token overlap must rank golf-coach first (name hit weighted).
+    let m = cli::run(&s(&["match", &root, "I want to improve my golf handicap this season"])).unwrap();
+    let first = m.lines().next().unwrap();
+    assert!(first.contains("golf-coach"), "{m}");
+    assert!(!first.contains("chef"), "{m}");
+    // No overlap → clean miss, not an error.
+    let none = cli::run(&s(&["match", &root, "quantum blockchain webinar"])).unwrap();
+    assert_eq!(none, "no matching skill");
 }

@@ -1,0 +1,66 @@
+use std::path::PathBuf;
+use tasks::cli;
+
+fn db(name: &str) -> String {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    d.join("tasks.semdb").display().to_string()
+}
+
+fn s(v: &[&str], db: &str) -> Vec<String> {
+    let mut a: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+    a.push("--db".into());
+    a.push(db.into());
+    a
+}
+
+#[test]
+fn kanban_flow_wip_and_done_gates() {
+    let db = db("tasks-flow");
+    // capture + promote
+    cli::run(&s(&["add", "ship feature", "--prio", "p1", "--col", "ready", "--criteria", "compiles;tested"], &db)).unwrap();
+    cli::run(&s(&["todo", "someday thing"], &db)).unwrap();
+    // pull respects capacity (doing WIP default 1)
+    let pull = cli::run(&s(&["next"], &db)).unwrap();
+    assert!(pull.contains("pull T-1"), "{pull}");
+    cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();
+    // WIP limit blocks a second doing task
+    cli::run(&s(&["add", "second", "--col", "ready"], &db)).unwrap();
+    let err = cli::run(&s(&["move", "T-3", "doing"], &db)).unwrap_err();
+    assert!(err.contains("WIP limit"), "{err}");
+    // pull explains instead of over-committing
+    let full = cli::run(&s(&["next"], &db)).unwrap();
+    assert!(full.contains("WIP full"), "{full}");
+    // done is criteria-gated
+    let gate = cli::run(&s(&["done", "T-1"], &db)).unwrap_err();
+    assert!(gate.contains("unchecked criteria"), "{gate}");
+    cli::run(&s(&["crit", "check", "T-1", "1"], &db)).unwrap();
+    cli::run(&s(&["crit", "check", "T-1", "2"], &db)).unwrap();
+    let done = cli::run(&s(&["done", "T-1"], &db)).unwrap();
+    assert!(done.contains("→ done"), "{done}");
+    // board + metrics render
+    let board = cli::run(&s(&["board"], &db)).unwrap();
+    assert!(board.contains("DONE (1)") && board.contains("BACKLOG"), "{board}");
+    let m = cli::run(&s(&["metrics"], &db)).unwrap();
+    assert!(m.contains("throughput: 1 done"), "{m}");
+}
+
+#[test]
+fn block_and_statusline_levels() {
+    let db = db("tasks-status");
+    let ok = cli::run(&s(&["statusline"], &db)).unwrap();
+    assert!(ok.starts_with("ok|▣"), "{ok}");
+    cli::run(&s(&["add", "x", "--col", "ready"], &db)).unwrap();
+    cli::run(&s(&["block", "T-1", "waiting on titan"], &db)).unwrap();
+    let warn = cli::run(&s(&["statusline"], &db)).unwrap();
+    assert!(warn.starts_with("warn|") && warn.contains("blk:1"), "{warn}");
+    // forced over-WIP shows err
+    cli::run(&s(&["unblock", "T-1"], &db)).unwrap();
+    cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();
+    cli::run(&s(&["add", "y", "--col", "ready"], &db)).unwrap();
+    cli::run(&s(&["move", "T-2", "doing", "--force"], &db)).unwrap();
+    let err = cli::run(&s(&["statusline"], &db)).unwrap();
+    assert!(err.starts_with("err|"), "{err}");
+    let board = cli::run(&s(&["board"], &db)).unwrap();
+    assert!(board.contains("OVER-WIP"), "{board}");
+}

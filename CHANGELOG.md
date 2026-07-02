@@ -17,6 +17,13 @@ runs `supervise watch`.
 - JSONL journals (schedule, evals) migrated to semdb tables — no bespoke JSONL remains.
 - Dedup: one `json::Value` (semdb re-exports httpc::json), `semdb::http` is a thin httpc wrapper, `flag()`/`has()` unified into `httpc::args`, embeddings resolution centralized in `Config::embeddings()`.
 
+**Task management + process engine (PAI patterns as pure Rust, 2 new crates → 22 total, 20 active tools):**
+- `tasks` crate: kanban board in a semdb table — backlog→ready→doing→review→done, WIP limits (doing=1 default) and criteria-gated `done` ENFORCED in Rust, pull-based `next`, explicit blockers with reasons, cycle-time/lead-time/throughput `metrics`, `statusline`. Extension `tasks.ts`.
+- `workflow` crate: markdown-defined process engine — steps in `workflows/*.md` + `skills/*/Workflows/*.md` declare `skill:` (PAI skill-per-phase routing) and `expect:`; `advance` REQUIRES evidence (trivial 'done'/'ok' rejected — the inline-verification mandate, deterministic). Run state in semdb; `statusline` warns on runs stalled >1d. Extension `workflow.ts`.
+- `skills match`: prompt-scored skill auto-trigger (word-boundary token overlap, name hits 3×) — picks the right skill for a task/step, unlike single-substring `search`.
+- `skills/Kanban`: methodology skill (six practices, column semantics, blocker/priority policy, anti-patterns) + three runnable workflows: `task-run` (observe→plan→execute→verify→learn, one skill per step), `triage`, `retro`.
+- Gate updated to 20/20 tool registration; statusline widget gained ▣ tasks + ▶ workflow segments.
+
 **P0 fixes (12-subagent tool review, all 10 fixed):**
 - secrets: caller identity is now token-authenticated — `issue-token` (admin) mints per-caller 0600 tokens; `get` requires SMARTAGENT_CALLER_TOKEN/`--token` (constant-time verify, fail-closed, audited). `./pi` launcher injects pi's token; sandbox env-scrub + secrets-mask keep it from sandboxed commands.
 - mcp: JSON injection fixed (tool name escaped, --args validated as JSON).

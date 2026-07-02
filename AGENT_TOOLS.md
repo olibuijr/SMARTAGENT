@@ -11,7 +11,7 @@ instead of guessing or shelling out manually.
 - **codegraph** — Rust code graph: index, defs, callers, refs, search, stats.
 - **codeindex** — fast code search. `mode`: count (totals only) / files (names) / lines (default, capped at `max`=50). Use count/files first to gauge breadth cheaply.
 - **vault** — markdown brain: new, read, append, rm, mv (rewrites [[links]]), list, links, graph, search.
-- **skills** — SKILL.md loader: list, show, search.
+- **skills** — SKILL.md loader: list, show, search, match (score skills against a whole prompt — use to pick the right skill for a task/step).
 - **schedule** — durable scheduler. add (`notify` message; `cron` recurring OR `at` YYYY-MM-DDTHH:MM one-shot), pause, resume, list, next, rm, tick. A supervised daemon fires jobs. Arbitrary shell is admin-only.
 - **search** — SearXNG web search: query (`timeRange` day|week|month|year, `site` domain, default k=5), health. Results fenced UNTRUSTED.
 - **notify** — push notifications (ntfy): send.
@@ -24,6 +24,8 @@ instead of guessing or shelling out manually.
 - **context** — principal identity/context loader: compose, validate, stat.
 - **evals** — trace/score/diff: log, score (`minPass` → error below threshold, `failOnly`), diff, runs.
 - **rag** — document RAG: ingest (file or `url`, http), retrieve (`docId` scope, `snippetChars`, `idsOnly`), get (full chunk), delete-doc, stats.
+- **tasks** — kanban board (backlog→ready→doing→review→done): board, add/todo, next (pull-based — obey it), move, done, show, list, crit add/check, block/unblock, wip, metrics. WIP limits and criteria-gated done are ENFORCED; read the kanban skill (skills show kanban) for methodology. Track ALL multi-step work here — no invisible WIP.
+- **workflow** — process engine: list, show, start (`task_id` links a board task), step, advance (evidence REQUIRED — describe what you verified), runs, abort. Built-ins: task-run (observe→plan→execute→verify→learn, a skill per step), triage, retro. Use task-run for every non-trivial board task.
 
 _(voice — STT/TTS — built but disabled: no titan speech server. See extensions/disabled/.)_
 

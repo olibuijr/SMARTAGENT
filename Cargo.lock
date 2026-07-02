@@ -138,6 +138,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tasks"
+version = "0.1.0"
+dependencies = [
+ "httpc",
+ "semdb",
+]
+
+[[package]]
 name = "vault"
 version = "0.1.0"
 dependencies = [
@@ -146,6 +154,14 @@ dependencies = [
 
 [[package]]
 name = "voice"
+version = "0.1.0"
+dependencies = [
+ "httpc",
+ "semdb",
+]
+
+[[package]]
+name = "workflow"
 version = "0.1.0"
 dependencies = [
  "httpc",

@@ -38,6 +38,8 @@ const SEGMENTS: { key: string; args: string[]; line: Line }[] = [
 	{ key: "schedule", args: ["statusline"], line: "data" },
 	{ key: "evals", args: ["statusline", "--db", join(ROOT, "data", "evals.jsonl")], line: "data" },
 	{ key: "orchestrate", args: ["statusline"], line: "data" },
+	{ key: "tasks", args: ["statusline", "--db", join(ROOT, "data", "tasks.semdb")], line: "data" },
+	{ key: "workflow", args: ["statusline", "--root", ROOT, "--db", join(ROOT, "data", "workflow.semdb")], line: "data" },
 ];
 
 // ANSI severity palette (raw escapes — runtime pi-tui imports are forbidden).
@@ -59,7 +61,7 @@ const paint = (raw: string): string => {
 const TOOLS = new Set([
 	"semdb", "memory", "codegraph", "codeindex", "vault", "skills", "schedule",
 	"search", "notify", "secrets", "browser", "orchestrate", "mcp", "sandbox",
-	"context", "evals", "rag", "supervise",
+	"context", "evals", "rag", "supervise", "tasks", "workflow",
 ]);
 // Tool run → which segments to re-probe afterwards.
 const REFRESH_AFTER: Record<string, string[]> = {
@@ -74,6 +76,8 @@ const REFRESH_AFTER: Record<string, string[]> = {
 	codegraph: ["codegraph"],
 	secrets: ["secrets"],
 	sandbox: ["sandbox"],
+	tasks: ["tasks"],
+	workflow: ["workflow"],
 };
 
 const CLEAR_AFTER_MS = 5000;

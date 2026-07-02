@@ -124,7 +124,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `codegraph` | `codegraph` | Rust code graph: index, defs/refs/callers/impls (`--limit`), path (BFS call-path), semantic search, stats |
 | `codeindex` | `codeindex` | Fast code search: search (mode lines/files/count, `-m` cap 50), files (`--limit`) |
 | `vault` | `vault` | Markdown brain: new, read (`--head`), append, rm, mv (link-rewrite), list, links, graph (`--note`/`--depth`), search |
-| `skills` | `skills` | Agent Skills loader: list, show (`--head`), search |
+| `skills` | `skills` | Agent Skills loader: list, show (`--head`), search, match (prompt-scored auto-trigger) |
 | `schedule` | `schedule` | Durable scheduler: add (`--notify`; `--cron` recurring OR `--at` one-shot), pause/resume, list/next/rm/tick. Supervised daemon fires jobs |
 | `search` | `search` | SearXNG search: query (`--time-range`/`--site`/`--urls-only`/`--snippet-chars`, k=5), health. Wrapped UNTRUSTED |
 | `notify` | `notify` | Push notifications (ntfy): send |
@@ -136,6 +136,8 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
 | `evals` | `evals` | Trace/score/diff: log, score (`--min-pass`/`--fail-only`), diff, runs |
 | `rag` | `rag` | Document RAG: ingest (file or `--url`), retrieve (`--doc-id`/`--snippet-chars`/`--ids-only`), get, delete-doc, stats |
+| `tasks` | `tasks` | Kanban board: board/add/todo/next/move/done/show/list/crit/block/wip/metrics. WIP limits + criteria-gated done enforced in Rust; methodology in `skills/Kanban` |
+| `workflow` | `workflow` | Markdown-defined process engine (PAI skill-per-step pattern): list/show/start/step/advance(evidence-gated)/runs/abort. Definitions in `workflows/` + `skills/*/Workflows/` |
 | `voice` | `voice` | STT/TTS bridge (Pipecat concept). BUILT+TESTED but DELISTED (extensions/disabled/) — no titan speech server deployed |
 | `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
 | _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |
