@@ -1,0 +1,130 @@
+---
+project: SMARTAGENT
+task: Rebuild best-of-breed agent stack as pi extensions + pure-Rust 0-dep tools
+effort: E5
+phase: build
+progress: 0/36
+mode: build
+started: 2026-07-02T01:10:00Z
+updated: 2026-07-02T01:20:00Z
+---
+
+# ISA — SMARTAGENT
+
+## Problem
+
+The most capable agent stacks of 2026 (LangGraph, Mem0, CodeGraph, Browser Use, RAGFlow, Langfuse, …) are fragmented Python/TS ecosystems with heavy dependency trees. Óli wants one coherent frontier-level personal agent: pi as the minimal spine, every capability rebuilt as a focused pure-Rust zero-dependency tool, concepts borrowed from the popularity winner in each category.
+
+## Vision
+
+One `cargo build` produces a fleet of small sharp binaries that give pi memory, code understanding, semantic search, browsing, scheduling, skills, sandboxing, ingestion, evals, secrets, voice, and notifications — with nothing to `npm install` or `pip install`, every file readable in one sitting, and the whole system verifiable end-to-end from a single pi session.
+
+## Out of Scope
+
+Rewriting pi itself; rewriting SearXNG's engine scrapers (host it, client it); TLS implementation in-tool (route via akurai-router/localhost); GUI/dashboard; multi-tenant packaging (later AkurAI extraction); training or hosting models (inference is external OpenAI-compatible HTTP).
+
+## Principles
+
+- Borrow, don't invent: every design decision traceable to a reference repo in `.refrepos/`.
+- Smallest correct implementation; debloat after correctness.
+- A capability exists only when pi can drive it end-to-end.
+
+## Constraints
+
+- Pure Rust, `std` only — zero crates.io dependencies in `crates/*`.
+- No source file over 1000 lines; scoped task-oriented modules.
+- pi extensions are thin TS glue; all logic lives in Rust binaries.
+- semdb is the single storage engine for vectors + metadata (own crash-safe file format; heed AkurAI-Framework overflow-page lesson for >4KB values).
+- Worktree agents branch from committed base; orchestrator merges and re-verifies.
+
+## Goal
+
+SMARTAGENT builds clean (`cargo build --release`, workspace) with 15 focused crates, each ported from its category's most popular reference, each ≤1000-line files, each driveable from pi via a thin extension — verified end-to-end, not just compiling.
+
+## Criteria
+
+Foundation:
+- [ ] ISC-1: Workspace `cargo build --release` exits 0
+- [ ] ISC-2: `rg -c '' crates/ -g '*.rs'`-style line audit shows no .rs file >1000 lines
+- [ ] ISC-3: No crate's Cargo.toml has a `[dependencies]` entry on crates.io (grep clean)
+- [ ] ISC-4: `.refrepos/` contains shallow clones of all 14 reference repos
+- [ ] ISC-5: `.refrepos/` is gitignored (git status clean of it)
+- [ ] ISC-6: AGENTS.md and CLAUDE.md exist and name all crates and rules
+- [ ] ISC-7: Anti: no TypeScript logic beyond thin pi-extension glue (extensions contain no business logic)
+- [ ] ISC-8: Anti: no file in repo imports serde/tokio/reqwest or any external crate
+
+semdb (semantic database — the core):
+- [ ] ISC-9: `semdb create <db>` initializes a crash-safe single-file store
+- [ ] ISC-10: `semdb put` stores a vector (f32 dims) + JSON-ish metadata, values >4KB survive via overflow handling
+- [ ] ISC-11: `semdb search --k 10` returns cosine top-k, correct against brute-force check
+- [ ] ISC-12: ANN index (HNSW or IVF-flat) beats brute force >10x at 100k vectors with recall ≥0.9
+- [ ] ISC-13: Kill -9 during writes → reopen recovers without corruption (WAL/shadow paging test)
+- [ ] ISC-14: `semdb embed` calls external OpenAI-compatible /v1/embeddings over plain HTTP (std::net)
+- [ ] ISC-15: Anti: semdb never runs inference in-process
+
+Capability crates (each: binary runs, core verbs work, pi extension drives it):
+- [ ] ISC-16: httpc: shared std-only HTTP/1.1 client module used by all networked crates (no duplicated clients)
+- [ ] ISC-17: codegraph: indexes a Rust repo → symbols/edges queryable (`defs`, `refs`, `callers`)
+- [ ] ISC-18: memory: 3-tier remember/recall (agentmem port) backed by semdb
+- [ ] ISC-19: vault: markdown vault CRUD + [[wikilink]] graph + semdb semantic search
+- [ ] ISC-20: search: SearXNG client returns parsed results from self-hosted instance
+- [ ] ISC-21: browser: AkurAI-AgentBrowser wrapper returns compact snapshot for a URL
+- [ ] ISC-22: orchestrate: spawn/route/fan-out N subagents via akurai-router, collect results (LangGraph send/supervisor concepts)
+- [ ] ISC-23: schedule: cron-expression parser + durable task file + daemon fires a test job (Temporal durability concept: at-least-once, journal replay)
+- [ ] ISC-24: skills: loads SKILL.md (frontmatter + body) per Agent Skills spec, lists/injects on demand
+- [ ] ISC-25: sandbox: runs a command isolated (namespaces/landlock + temp worktree), writes can't escape
+- [ ] ISC-26: rag: text/PDF-text ingestion → chunks → semdb, retrieval returns cited chunks (RAGFlow pipeline concept)
+- [ ] ISC-27: evals: JSONL trace log + scoring run + regression diff between two runs (Langfuse concept)
+- [ ] ISC-28: secrets: policy-gated get from Vaultwarden/Infisical-pattern store; deny-by-default policy file
+- [ ] ISC-29: voice: STT and TTS round-trip via external endpoints (Pipecat pipeline concept)
+- [ ] ISC-30: notify: pushes to ntfy topic via HTTP POST
+- [ ] ISC-31: Anti: no crate reaches into another crate's data files directly (only via its binary/API)
+
+Integration:
+- [ ] ISC-32: pi extension per crate exists under extensions/ and invokes the binary
+- [ ] ISC-33: End-to-end: a pi session uses memory + search + vault in one task successfully
+- [ ] ISC-34: Each crate has ≥1 integration test under tests/ that passes
+- [ ] ISC-35: README.md documents install + one-command demo
+- [ ] ISC-36: Initial release tagged v0.1.0 with CHANGELOG.md
+
+## Test Strategy
+
+| isc | type | check | threshold | tool |
+|---|---|---|---|---|
+| 1-3,8 | build/audit | cargo build; awk line count; grep deps | exit 0 / zero hits | Bash |
+| 4-6 | fs | ls .refrepos; git check-ignore | present/ignored | Bash |
+| 9-15 | functional | CLI invocations + kill -9 crash test + brute-force compare | correctness + recall ≥0.9 | Bash |
+| 16-31 | functional | per-crate CLI verb probes against live services | expected output shape | Bash/curl |
+| 32-33 | e2e | pi headless run (`< /dev/null`, --mode json) driving extensions | task completes | Bash |
+| 34-36 | release | cargo test; git tag | pass / tag exists | Bash |
+
+## Features
+
+| name | satisfies | depends_on | parallelizable |
+|---|---|---|---|
+| base-scaffold | 1,5,6 | — | no (this session) |
+| refrepos-clone | 4 | base | yes (background) |
+| semdb | 9-15 | base | yes (wave 1) |
+| httpc | 16 | base | yes (wave 1) |
+| vault | 19 | semdb | wave 2 |
+| skills | 24 | base | yes (wave 1) |
+| schedule | 23 | base | yes (wave 1) |
+| notify | 30 | httpc | wave 2 |
+| search | 20 | httpc | wave 2 |
+| memory | 18 | semdb | wave 2 |
+| codegraph | 17 | semdb | wave 2 |
+| rag | 26 | semdb, httpc | wave 2 |
+| secrets | 28 | httpc | wave 2 |
+| browser | 21 | httpc | wave 2 |
+| orchestrate | 22 | httpc | wave 3 |
+| sandbox | 25 | base | wave 3 |
+| voice | 29 | httpc | wave 3 |
+| evals | 27 | base | wave 3 |
+| pi-extensions + e2e | 32-36 | all | wave 4 |
+
+## Decisions
+
+- 2026-07-02: Forge/Cato codex agents skipped per standing user rule (Claude-family teams only) — delegation floor met via 9 research agents + worktree build agents.
+- 2026-07-02: SearXNG hosted not rewritten — engine-scraper maintenance is the value, client is the port surface.
+- 2026-07-02: TLS out of scope in-tool; https egress routed via akurai-router/localhost proxies.
+- 2026-07-02: E5 ISC floor (≥256) deferred — project ISA starts at 36 spine ISCs; per-crate ISCs grow during waves (refined: will expand as crates land).

@@ -1,0 +1,72 @@
+# SMARTAGENT — Agent Instructions
+
+Frontier-level personal AI agent, rebuilt lean: **pi as the spine, every capability a pi extension, every tool a pure-Rust zero-dependency binary.**
+
+## The one rule set
+
+1. **Pure Rust, `std` only.** No crates.io dependencies in any tool. No TypeScript logic — pi extensions are thin glue that shell out to Rust binaries.
+2. **No file over 1000 lines.** Split before you hit it. Each file has one task-oriented job (imitate AkurAI-Router's scoped-module layout).
+3. **Small focused crates.** One capability = one crate under `crates/`. Thin `main.rs`, logic in scoped modules.
+4. **Lean.** Smallest correct implementation. No dead code, no speculative features. Port for correctness, then debloat.
+5. **Verify by using.** A capability is done when driven end-to-end from pi, not when it compiles.
+
+## Architecture
+
+```
+pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
+ └── extensions/          ← thin pi extensions (TS glue only, no logic)
+      └── invoke ↓
+ crates/                  ← pure-Rust 0-dep tools (one binary each)
+   semdb/        semantic database: embeddings store + HNSW/flat cosine search,
+                 crash-safe file format (own design — see AkurAI-Framework B+tree,
+                 incl. overflow-page lesson for >4KB values)
+   codegraph/    code knowledge graph (clone of codegraph-ai/CodeGraph idea):
+                 parse → symbols/edges → semdb-backed queries
+   memory/       persistent 3-tier agent memory (agentmem pattern, Mem0 role)
+   vault/        markdown second-brain read/write/link/search (Obsidian pattern)
+   search/       web search client → self-hosted SearXNG instance
+   browser/      wrap AkurAI-AgentBrowser snapshots (Browser Use role)
+   orchestrate/  subagent spawn/route/fan-out via akurai-router (LangGraph role)
+   schedule/     cron + wake-ups + durable background tasks
+   skills/       SKILL.md loader (Agent Skills open standard)
+   sandbox/      isolated exec — worktrees + landlock/namespaces (Daytona role)
+   rag/          document ingestion: pdf/text → chunks → semdb
+   evals/        signal capture, trace log, regression evals
+   secrets/      policy-gated credential access (Vaultwarden client)
+   voice/        STT/TTS bridge (titan-hosted models)
+   notify/       notifications (ntfy-style push)
+```
+
+Embeddings inference is **external**: titan embeddinggemma at `http://100.88.0.2:8081` (akurai mesh; OpenAI-compatible, verified 2026-07-02); semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
+
+## Reference repos (do not invent — mimic)
+
+Popularity winners researched 2026-07-02; we clone the *pattern*, in Rust:
+
+| Capability | Reference | We build |
+|---|---|---|
+| Agent core | [earendil-works/pi](https://github.com/earendil-works/pi) | use as-is |
+| Code graph | [codegraph-ai/CodeGraph](https://github.com/codegraph-ai/CodeGraph) | `crates/codegraph` |
+| Memory | [mem0ai/mem0](https://github.com/mem0ai/mem0) | `crates/memory` |
+| Second brain | Obsidian (md vault pattern) | `crates/vault` |
+| Agent browser | [browser-use/browser-use](https://github.com/browser-use/browser-use) | `crates/browser` (wraps AkurAI-AgentBrowser) |
+| Web search | [searxng/searxng](https://github.com/searxng/searxng) | `crates/search` (client; host SearXNG, don't rewrite) |
+| Orchestration | [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) | `crates/orchestrate` |
+| Skills | [anthropics/skills](https://github.com/anthropics/skills) (SKILL.md standard) | `crates/skills` |
+| Sandbox | [daytonaio/daytona](https://github.com/daytonaio/daytona) | `crates/sandbox` |
+| Scheduler | [temporalio/temporal](https://github.com/temporalio/temporal) | `crates/schedule` |
+| RAG ingestion | [infiniflow/ragflow](https://github.com/infiniflow/ragflow) | `crates/rag` |
+| Evals | [langfuse/langfuse](https://github.com/langfuse/langfuse) | `crates/evals` |
+| Secrets | [Infisical/infisical](https://github.com/Infisical/infisical) | `crates/secrets` |
+| Voice | [pipecat-ai/pipecat](https://github.com/pipecat-ai/pipecat) (whisper.cpp STT + Kokoro TTS) | `crates/voice` |
+| Notifications | [binwiederhier/ntfy](https://github.com/binwiederhier/ntfy) | `crates/notify` |
+
+Reference clones live in `.refrepos/` (shallow, gitignored). **Borrow and port**: read the reference implementation, port the concept into pure Rust — never invent an API the reference doesn't justify, never copy license-incompatible code verbatim wholesale.
+
+## Conventions
+
+- Build: `cargo build --release` at workspace root; each crate also builds standalone.
+- Tests: unit tests in-module, integration under `crates/<name>/tests/`. Gates before merge.
+- Versioning: workspace semver lockstep, `CHANGELOG.md` per release (myagents pattern).
+- Existing Rust to harvest: AkurAI-Framework (B+tree, HTTP), AkurAI-AgentBrowser, agentmem, AkurAI-Router, akurai-passvault.
+- ISA.md in this repo is the system of record — read it before any work; update ISCs as you land them.
