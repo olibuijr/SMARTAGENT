@@ -44,10 +44,21 @@ impl Beat {
             .unwrap_or_default();
         let state = if busy { "working" } else { "idle" };
         let beat = format!(
-            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol. (6) Other agents work this board too: never take a task in doing/review that you did not pull yourself — pull only unclaimed ready/backlog items."
+            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill; use the `triage` skill for ready-empty/backlog ordering. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol. (6) Other agents work this board too: never take a task in doing/review that you did not pull yourself — pull only unclaimed ready/backlog items."
         );
         self.last_beat = Some(now);
         beat
+    }
+
+    /// True when an autonomous idle beat should spend a model turn.
+    ///
+    /// Work exists when the root board has anything in DOING (resume), READY
+    /// (pull), or BACKLOG (triage/promote). REVIEW is a handoff queue and does
+    /// not justify prompting an idle agent unless addressed out-of-band.
+    pub fn has_autonomous_work(&self) -> bool {
+        run_local(&self.repo_root, "tasks", &["board", "--dir", "."], 5)
+            .map(|out| board_has_autonomous_work(&out))
+            .unwrap_or(true)
     }
 
     /// First task in the DOING column, shortened — "what am I on right now".
@@ -158,6 +169,13 @@ fn first_active_line(runs: &str) -> String {
         .unwrap_or_default()
 }
 
+fn board_has_autonomous_work(board: &str) -> bool {
+    board.lines().any(|l| {
+        (l.starts_with("DOING") || l.starts_with("READY") || l.starts_with("BACKLOG"))
+            && !(l.contains("(0)") || l.contains("(0/"))
+    })
+}
+
 fn human_now() -> String {
     // UTC wall clock from the epoch, no external crates.
     let secs = SystemTime::now()
@@ -218,5 +236,18 @@ mod tests {
         assert_eq!(human_dur(Duration::from_secs(45)), "45s");
         assert_eq!(human_dur(Duration::from_secs(125)), "2m5s");
         assert_eq!(human_dur(Duration::from_secs(7300)), "2h1m");
+    }
+
+    #[test]
+    fn autonomous_work_ignores_empty_board_and_review() {
+        let empty = "BACKLOG (0)\nREADY (0)\nDOING (0/4)\nREVIEW (1/3)\n  T-1 handoff\n";
+        assert!(!board_has_autonomous_work(empty));
+    }
+
+    #[test]
+    fn autonomous_work_sees_backlog_ready_or_doing() {
+        assert!(board_has_autonomous_work("BACKLOG (1)\n  T-1 x\nREADY (0)\nDOING (0/4)\n"));
+        assert!(board_has_autonomous_work("BACKLOG (0)\nREADY (1)\n  T-2 y\nDOING (0/4)\n"));
+        assert!(board_has_autonomous_work("BACKLOG (0)\nREADY (0)\nDOING (1/4)\n  T-3 z\n"));
     }
 }

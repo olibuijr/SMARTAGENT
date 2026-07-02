@@ -236,17 +236,36 @@ fn start_heartbeat(
         beat.lock()
             .unwrap()
             .log(&agent, "beat", if busy { "busy" } else { "idle" }, &text);
-        if busy {
-            let _ = child.lock().unwrap().command("steer", Some(&text));
-        } else if autonomous {
-            let auto = format!(
-                "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task is in doing → continue it; (b) doing empty, ready has items → pull the highest-priority one; (c) doing AND ready empty → triage the backlog per the Kanban skill (accept new unclaimed tasks: promote the highest-priority backlog item to ready, then pull it). The backlog must never starve the loop. If you truly cannot act, say why in one sentence — never answer with an empty turn. One task in doing, maximum."
-            );
-            let _ = child.lock().unwrap().command("prompt", Some(&auto));
-        } else {
-            *queued.lock().unwrap() = Some(text);
+        match heartbeat_action(busy, autonomous, beat.lock().unwrap().has_autonomous_work()) {
+            HeartbeatAction::Steer => {
+                let _ = child.lock().unwrap().command("steer", Some(&text));
+            }
+            HeartbeatAction::Prompt => {
+                let auto = format!(
+                    "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task is in doing → continue it; (b) doing empty, ready has items → pull the highest-priority one; (c) doing AND ready empty → load the Triage skill and promote exactly one backlog task by p1→p2→p3, oldest, then smallest id before pulling it. The backlog must never starve the loop. If you truly cannot act, say why in one sentence — never answer with an empty turn. One task in doing, maximum."
+                );
+                let _ = child.lock().unwrap().command("prompt", Some(&auto));
+            }
+            HeartbeatAction::Queue => *queued.lock().unwrap() = Some(text),
         }
     });
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HeartbeatAction {
+    Steer,
+    Prompt,
+    Queue,
+}
+
+fn heartbeat_action(busy: bool, autonomous: bool, has_work: bool) -> HeartbeatAction {
+    if busy {
+        HeartbeatAction::Steer
+    } else if autonomous && has_work {
+        HeartbeatAction::Prompt
+    } else {
+        HeartbeatAction::Queue
+    }
 }
 
 fn handle_client(stream: UnixStream, agents: Agents) {
