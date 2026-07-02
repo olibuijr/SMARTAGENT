@@ -2,6 +2,7 @@
 //! `notify send --topic T --message M [--title X] [--priority 1-5] [--tags a,b]
 //!         [--server http://host:port]`
 
+use httpc::args::flag;
 use std::process::ExitCode;
 
 mod ntfy;
@@ -40,9 +41,6 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 notify — push notifications (ntfy protocol, plain HTTP)

@@ -1,5 +1,6 @@
 //! codeindex CLI: search / files
 
+use httpc::args::{flag, has};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -61,11 +62,7 @@ fn positional_dir(args: &[String]) -> PathBuf {
     args.iter().skip(skip).find(|a| !a.starts_with('-')).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
-fn has(args: &[String], name: &str) -> bool { args.iter().any(|a| a == name) }
 
 const HELP: &str = r#"
 codeindex — fast code search (ripgrep concept)

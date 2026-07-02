@@ -1,5 +1,6 @@
 //! CLI: query / health
 
+use httpc::args::flag;
 use crate::searx::{self, Query};
 
 pub fn run(args: &[String]) -> Result<String, String> {
@@ -47,9 +48,6 @@ fn resolve_instance(args: &[String]) -> Result<String, String> {
         .ok_or_else(|| "--instance required (or set searx_instance in config)".into())
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 search — SearXNG metasearch client

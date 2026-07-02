@@ -2,6 +2,7 @@
 //! Composes a context/ dir of markdown files into one system-prompt block,
 //! trimming to a char budget by dropping lowest-priority files first.
 
+use httpc::args::flag;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -35,9 +36,6 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 pub(crate) fn order_path(dir: &Path) -> PathBuf {
     dir.join("ORDER")

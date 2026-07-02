@@ -1,5 +1,6 @@
 //! CLI: log / score / diff / runs
 
+use httpc::args::flag;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -71,9 +72,6 @@ pub fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 evals — trace, score, and regression-diff (Langfuse concept)

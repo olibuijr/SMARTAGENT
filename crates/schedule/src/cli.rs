@@ -1,5 +1,6 @@
 //! CLI: add / list / rm / next / run [--once]
 
+use httpc::args::flag;
 use std::path::PathBuf;
 
 use crate::cron::{Civil, Cron};
@@ -131,9 +132,6 @@ fn fmt_time(t: i64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", c.year, c.month, c.day, c.hour, c.minute)
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 schedule — durable cron scheduler (journal + replay)

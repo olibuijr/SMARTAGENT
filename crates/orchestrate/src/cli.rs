@@ -1,5 +1,6 @@
 //! CLI: run / fan / list
 
+use httpc::args::flag;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -71,9 +72,6 @@ fn fan_out(args: &[String], prompts: Vec<String>) -> Result<String, String> {
     Ok(out.join("\n"))
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 orchestrate — subagent fan-out (LangGraph send/supervisor concept)

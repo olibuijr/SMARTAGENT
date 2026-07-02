@@ -1,5 +1,6 @@
 //! CLI: chunk / ingest / retrieve / get / delete-doc / stats.
 
+use httpc::args::flag;
 use std::path::{Path, PathBuf};
 
 use semdb::config::Config;
@@ -153,11 +154,6 @@ fn path_arg(args: &[String], idx: usize, what: &str) -> Result<PathBuf, String> 
         .ok_or_else(|| format!("{what} required"))
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
-}
 
 fn format_hits(hits: &[RetrievedChunk]) -> String {
     if hits.is_empty() {

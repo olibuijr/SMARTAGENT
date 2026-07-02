@@ -1,5 +1,6 @@
 //! Command-line interface: create / put / get / del / search / embed / stats / compact.
 
+use httpc::args::flag;
 use std::path::Path;
 
 use crate::config::Config;
@@ -139,9 +140,6 @@ fn required(args: &[String], idx: usize, what: &str) -> Result<String, String> {
     args.get(idx).cloned().ok_or_else(|| format!("{what} required"))
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 fn endpoint(args: &[String]) -> Result<(String, u16), String> {
     let cfg = Config::load();

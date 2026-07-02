@@ -1,5 +1,6 @@
 //! sandbox CLI: run / clean
 
+use httpc::args::{flag, has};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -67,10 +68,6 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
-fn has(args: &[String], name: &str) -> bool { args.iter().any(|a| a == name) }
 
 const HELP: &str = r#"
 sandbox — isolated command execution (Daytona concept, Linux)

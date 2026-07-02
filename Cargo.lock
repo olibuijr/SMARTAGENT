@@ -14,20 +14,30 @@ dependencies = [
 name = "codegraph"
 version = "0.1.0"
 dependencies = [
+ "httpc",
  "semdb",
 ]
 
 [[package]]
 name = "codeindex"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+]
 
 [[package]]
 name = "context"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+]
 
 [[package]]
 name = "evals"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+]
 
 [[package]]
 name = "httpc"
@@ -44,6 +54,7 @@ dependencies = [
 name = "memory"
 version = "0.1.0"
 dependencies = [
+ "httpc",
  "semdb",
 ]
 
@@ -59,6 +70,7 @@ dependencies = [
 name = "orchestrate"
 version = "0.1.0"
 dependencies = [
+ "httpc",
  "semdb",
 ]
 
@@ -74,6 +86,7 @@ dependencies = [
 name = "sandbox"
 version = "0.1.0"
 dependencies = [
+ "httpc",
  "semdb",
 ]
 
@@ -81,6 +94,7 @@ dependencies = [
 name = "schedule"
 version = "0.1.0"
 dependencies = [
+ "httpc",
  "semdb",
 ]
 
@@ -96,12 +110,16 @@ dependencies = [
 name = "secrets"
 version = "0.1.0"
 dependencies = [
+ "httpc",
  "semdb",
 ]
 
 [[package]]
 name = "semdb"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+]
 
 [[package]]
 name = "skills"

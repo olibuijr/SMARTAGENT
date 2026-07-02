@@ -1,5 +1,6 @@
 //! CLI: set / get / list / audit / policy-allow
 
+use httpc::args::flag;
 use std::path::PathBuf;
 
 use crate::audit::Audit;
@@ -60,9 +61,6 @@ pub fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 secrets — policy-gated, audited secret store (deny by default)

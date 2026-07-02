@@ -1,5 +1,6 @@
 //! mcp CLI: tools / call  (--cmd for stdio, --url for HTTP)
 
+use httpc::args::flag;
 use std::process::ExitCode;
 
 use mcp::{http::HttpClient, jsonrpc, stdio::StdioClient};
@@ -53,9 +54,6 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 mcp — Model Context Protocol client (stdio + HTTP)

@@ -1,5 +1,6 @@
 //! CLI: remember / recall / forget / promote / stats
 
+use httpc::args::flag;
 use std::path::PathBuf;
 
 use crate::tiers::{resolve_tiers, Memory};
@@ -68,9 +69,6 @@ fn default_id(text: &str) -> String {
     format!("{ts}-{slug}")
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
 
 const HELP: &str = r#"
 memory — 3-tier persistent agent memory (Mem0 role)

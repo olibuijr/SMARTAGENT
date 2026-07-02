@@ -1,5 +1,6 @@
 //! codegraph CLI: index / defs / refs / callers / search / stats
 
+use httpc::args::{flag, has};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -85,10 +86,6 @@ fn walk_rs(root: &Path, dir: &Path, graph: &mut Graph, files: &mut usize) {
     }
 }
 
-fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
-}
-fn has(args: &[String], name: &str) -> bool { args.iter().any(|a| a == name) }
 
 trait Pipe: Sized { fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R { f(self) } }
 impl<T> Pipe for T {}
