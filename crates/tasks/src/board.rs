@@ -73,9 +73,9 @@ pub fn statusline(store: &Store) -> Result<String, String> {
     let ready = tasks.iter().filter(|t| t.col == "ready").count();
     let review = tasks.iter().filter(|t| t.col == "review").count();
     let blocked = tasks.iter().filter(|t| !t.blocked.is_empty() && t.col != "done").count();
-    let mut text = format!("▣ d:{doing}/{} r:{ready}", wip.doing);
-    if review > 0 { text.push_str(&format!(" rv:{review}")); }
-    if blocked > 0 { text.push_str(&format!(" blk:{blocked}")); }
+    let mut text = format!("▣ {doing}/{} doing · {ready} ready", wip.doing);
+    if review > 0 { text.push_str(&format!(" · {review} review")); }
+    if blocked > 0 { text.push_str(&format!(" · {blocked} blocked")); }
     let level = if doing > wip.doing || review > wip.review {
         "err" // WIP breached — the board is being pushed, not pulled
     } else if blocked > 0 || doing == wip.doing {

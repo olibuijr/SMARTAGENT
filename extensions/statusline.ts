@@ -72,6 +72,11 @@ const LABEL: Record<string, string> = {
 	rag: "Docs",
 };
 const label = (key: string) => LABEL[key] ?? key[0].toUpperCase() + key.slice(1);
+// Infra segments are pure health checks — when ok, their detail ("chrome✓",
+// "2/2 up") is redundant with the level, so they collapse to `icon Name ✓`.
+// Workspace/data segments carry real stats (board counts, repos indexed,
+// memory tiers) and keep their detail: bold Name, plain text, no color wash.
+const COMPACT = new Set(SEGMENTS.filter((s) => s.line === "infra").map((s) => s.key));
 const paint = (key: string, raw: string): string => {
 	const cut = raw.indexOf("|");
 	if (cut < 0) return raw;
@@ -80,15 +85,14 @@ const paint = (key: string, raw: string): string => {
 	const sp = text.indexOf(" ");
 	const first = sp > 0 ? text.slice(0, sp) : "";
 	const iconLike = first.length > 0 && /[^\x00-\x7f]/.test(first);
-	// Healthy = `icon Name ✓` only — the details are noise when nothing is
-	// wrong; Rust already judged the level. warn/err keep the full message.
+	const icon = iconLike ? `${first} ` : "";
+	const rest = iconLike ? text.slice(sp + 1) : text;
 	if (level === "ok") {
-		return `${iconLike ? `${first} ` : ""}\x1b[1m${label(key)}\x1b[22m ${COLOR.ok("✓")}`;
+		return COMPACT.has(key)
+			? `${icon}\x1b[1m${label(key)}\x1b[22m ${COLOR.ok("✓")}`
+			: `${icon}\x1b[1m${label(key)}\x1b[22m ${rest} ${COLOR.ok("✓")}`;
 	}
-	const body = iconLike
-		? `${first} \x1b[1m${label(key)}:\x1b[22m${text.slice(sp)}`
-		: `\x1b[1m${label(key)}:\x1b[22m ${text}`;
-	return (COLOR[level] ?? ((s: string) => s))(body);
+	return (COLOR[level] ?? ((s: string) => s))(`${icon}\x1b[1m${label(key)}:\x1b[22m ${rest}`);
 };
 
 // Tools whose footer activity is shown (all registered crate tools).
@@ -125,19 +129,47 @@ export default function (pi: ExtensionAPI) {
 	let ui: any; // latest ctx.ui, captured from events (only used when hasUI)
 	let timer: ReturnType<typeof setInterval> | undefined;
 
-	// Visible width of a cell: ANSI codes count 0, wide glyphs (emoji/CJK) 2,
-	// variation selectors 0 — so padding aligns on screen, not in bytes.
+	// Visible width of a cell: ANSI codes count 0, wide glyphs 2. Wide follows
+	// wcwidth/kitty: East-Asian-Wide + DEFAULT-EMOJI-PRESENTATION ranges only.
+	// Text-presentation pictographs (🕸 U+1F578, 🗃 U+1F5C3, ▶, ⛭, ▣, ⌂, ▦)
+	// render ONE cell in kitty — counting them 2 skewed the top row's columns.
 	const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+	function isWide(c: number): boolean {
+		return (
+			(c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) ||
+			(c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) ||
+			(c >= 0xfe30 && c <= 0xfe4f) ||
+			(c >= 0x231a && c <= 0x231b) || (c >= 0x23e9 && c <= 0x23ec) ||
+			c === 0x23f0 || c === 0x23f3 || (c >= 0x25fd && c <= 0x25fe) ||
+			(c >= 0x2614 && c <= 0x2615) || (c >= 0x2648 && c <= 0x2653) ||
+			c === 0x267f || c === 0x2693 || c === 0x26a1 ||
+			(c >= 0x26aa && c <= 0x26ab) || (c >= 0x26bd && c <= 0x26be) ||
+			(c >= 0x26c4 && c <= 0x26c5) || c === 0x26ce || c === 0x26d4 ||
+			c === 0x26ea || (c >= 0x26f2 && c <= 0x26f3) || c === 0x26f5 ||
+			c === 0x26fa || c === 0x26fd || c === 0x2705 ||
+			(c >= 0x270a && c <= 0x270b) || c === 0x2728 || c === 0x274c ||
+			c === 0x274e || (c >= 0x2753 && c <= 0x2755) || c === 0x2757 ||
+			(c >= 0x2795 && c <= 0x2797) || c === 0x27b0 || c === 0x27bf ||
+			(c >= 0x2b1b && c <= 0x2b1c) || c === 0x2b50 || c === 0x2b55 ||
+			(c >= 0x1f300 && c <= 0x1f53d) || (c >= 0x1f550 && c <= 0x1f567) ||
+			(c >= 0x1f5fb && c <= 0x1f64f) || (c >= 0x1f680 && c <= 0x1f6ff) ||
+			(c >= 0x1f7e0 && c <= 0x1f7f0) || (c >= 0x1f90c && c <= 0x1f9ff) ||
+			(c >= 0x1fa70 && c <= 0x1faff)
+		);
+	}
 	function vwidth(s: string): number {
 		let w = 0;
+		let narrowSym = false; // last glyph was a narrow symbol (VS16 can widen it)
 		for (const ch of stripAnsi(s)) {
 			const c = ch.codePointAt(0) ?? 0;
-			if (c === 0xfe0f || c === 0x200d) continue; // VS16 / ZWJ
-			const wide =
-				(c >= 0x1100 && c <= 0x115f) || (c >= 0x231a && c <= 0x23f3) ||
-				(c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
-				(c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) ||
-				(c >= 0x1f300 && c <= 0x1faff);
+			if (c === 0x200d) continue; // ZWJ
+			if (c === 0xfe0f) {
+				// VS16 upgrades a preceding narrow symbol to emoji (2 cells).
+				if (narrowSym) { w += 1; narrowSym = false; }
+				continue;
+			}
+			const wide = isWide(c);
+			narrowSym = !wide && c >= 0x2100;
 			w += wide ? 2 : 1;
 		}
 		return w;

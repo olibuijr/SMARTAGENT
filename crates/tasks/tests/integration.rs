@@ -53,7 +53,7 @@ fn block_and_statusline_levels() {
     cli::run(&s(&["add", "x", "--col", "ready"], &db)).unwrap();
     cli::run(&s(&["block", "T-1", "waiting on titan"], &db)).unwrap();
     let warn = cli::run(&s(&["statusline"], &db)).unwrap();
-    assert!(warn.starts_with("warn|") && warn.contains("blk:1"), "{warn}");
+    assert!(warn.starts_with("warn|") && warn.contains("1 blocked"), "{warn}");
     // forced over-WIP shows err
     cli::run(&s(&["unblock", "T-1"], &db)).unwrap();
     cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();
