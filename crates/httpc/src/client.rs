@@ -46,18 +46,40 @@ impl Request {
     }
 
     pub fn send(&self) -> Result<Response, String> {
-        let mut url = self.url.clone();
+        // Work on a mutable copy so redirects can rewrite method/body/headers
+        // per RFC 9110 without mutating the caller's Request.
+        let mut req = self.clone();
         for _ in 0..=5 {
-            let resp = send_once(self, &url)?;
+            let resp = send_once(&req, &req.url)?;
             if self.follow_redirects && matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
                 if let Some(loc) = resp.header("location") {
-                    url = if loc.starts_with("http") {
+                    let prev_host = Url::parse(&req.url).map(|u| u.host).unwrap_or_default();
+                    let next_url = if loc.starts_with("http") {
                         loc.to_string()
                     } else {
-                        // Relative redirect: keep host, replace path.
-                        let u = Url::parse(&url)?;
+                        let u = Url::parse(&req.url)?;
                         format!("http://{}:{}{}", u.host, u.port, loc)
                     };
+                    // 301/302/303 on a non-GET/HEAD become a bodyless GET
+                    // (browser + RFC 9110 §15.4 behavior). 307/308 preserve
+                    // method and body. Either way, drop Authorization when the
+                    // host changes so credentials never leak cross-origin.
+                    if matches!(resp.status, 301 | 302 | 303)
+                        && !matches!(req.method.as_str(), "GET" | "HEAD")
+                    {
+                        req.method = "GET".into();
+                        req.body.clear();
+                        req.headers.retain(|(k, _)| {
+                            let k = k.to_ascii_lowercase();
+                            k != "content-length" && k != "content-type"
+                        });
+                    }
+                    let next_host = Url::parse(&next_url).map(|u| u.host).unwrap_or_default();
+                    if next_host != prev_host {
+                        req.headers
+                            .retain(|(k, _)| k.to_ascii_lowercase() != "authorization");
+                    }
+                    req.url = next_url;
                     continue;
                 }
             }

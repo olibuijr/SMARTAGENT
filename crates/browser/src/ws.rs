@@ -7,9 +7,14 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
+/// Reject frames larger than this to prevent a corrupt/hostile length field
+/// from triggering a multi-GB allocation. CDP frames are well under this.
+const MAX_FRAME: usize = 64 * 1024 * 1024;
+
 pub struct WebSocket {
     stream: TcpStream,
     buf: Vec<u8>,
+    pos: usize, // read cursor into buf; consumed prefix is compacted lazily
 }
 
 impl WebSocket {
@@ -48,7 +53,7 @@ impl WebSocket {
                     return Err(format!("handshake failed: {}", head.lines().next().unwrap_or("")));
                 }
                 let leftover = buf[pos + 4..].to_vec();
-                return Ok(WebSocket { stream, buf: leftover });
+                return Ok(WebSocket { stream, buf: leftover, pos: 0 });
             }
         }
     }
@@ -124,29 +129,60 @@ impl WebSocket {
             }
             len = l;
         }
+        if len > MAX_FRAME {
+            return Err(format!("frame too large: {len} bytes (max {MAX_FRAME})"));
+        }
         let mask = if masked {
             [self.read_byte()?, self.read_byte()?, self.read_byte()?, self.read_byte()?]
         } else {
             [0; 4]
         };
-        let mut payload = Vec::with_capacity(len);
-        for i in 0..len {
-            let b = self.read_byte()?;
-            payload.push(if masked { b ^ mask[i % 4] } else { b });
+        // Bulk-read the whole payload at once, then unmask in place — O(n),
+        // not the O(n²) that byte-by-byte Vec::remove(0) produced on large
+        // (hundreds-of-KB) CDP frames.
+        let mut payload = self.read_exact(len)?;
+        if masked {
+            for (i, b) in payload.iter_mut().enumerate() {
+                *b ^= mask[i % 4];
+            }
         }
         Ok((fin, opcode, payload))
     }
 
-    fn read_byte(&mut self) -> Result<u8, String> {
-        if self.buf.is_empty() {
-            let mut tmp = [0u8; 4096];
+    /// Ensure at least one buffered byte, reading from the socket if needed.
+    fn fill(&mut self) -> Result<(), String> {
+        if self.pos >= self.buf.len() {
+            self.buf.clear();
+            self.pos = 0;
+            let mut tmp = [0u8; 8192];
             let n = self.stream.read(&mut tmp).map_err(|e| e.to_string())?;
             if n == 0 {
                 return Err("connection closed".into());
             }
             self.buf.extend_from_slice(&tmp[..n]);
         }
-        Ok(self.buf.remove(0))
+        Ok(())
+    }
+
+    fn read_byte(&mut self) -> Result<u8, String> {
+        self.fill()?;
+        let b = self.buf[self.pos];
+        self.pos += 1;
+        Ok(b)
+    }
+
+    /// Read exactly `n` bytes, copying buffered runs in bulk.
+    fn read_exact(&mut self, n: usize) -> Result<Vec<u8>, String> {
+        let mut out = Vec::with_capacity(n);
+        while out.len() < n {
+            self.fill()?;
+            let want = n - out.len();
+            let avail = self.buf.len() - self.pos;
+            let take = want.min(avail);
+            out.extend_from_slice(&self.buf[self.pos..self.pos + take]);
+            self.pos += take;
+        }
+        Ok(out)
     }
 }
 
