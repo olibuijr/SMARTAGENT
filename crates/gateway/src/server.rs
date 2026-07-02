@@ -229,8 +229,13 @@ fn start_heartbeat(
     autonomous: bool,
 ) {
     let period = Duration::from_secs(heartbeat_secs.max(10));
-    std::thread::spawn(move || loop {
-        std::thread::sleep(period);
+    std::thread::spawn(move || {
+        // T-79: startup beat ~10s after serve — a restart must not cost a
+        // full period of dead air before in-doing work resumes.
+        let mut next = Duration::from_secs(10);
+        loop {
+        std::thread::sleep(next);
+        next = period;
         let busy = child.lock().unwrap().is_busy();
         let text = beat.lock().unwrap().compose(busy);
         beat.lock()
@@ -247,6 +252,7 @@ fn start_heartbeat(
                 let _ = child.lock().unwrap().command("prompt", Some(&auto));
             }
             HeartbeatAction::Queue => *queued.lock().unwrap() = Some(text),
+        }
         }
     });
 }
