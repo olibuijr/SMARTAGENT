@@ -14,7 +14,11 @@ function untrusted(source: string, body: string): string {
 
 function run(args: string[]): string {
 	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 60_000, cwd: ROOT }).trim(); }
-	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
+	catch (e: any) {
+		const msg = e.stderr?.toString().trim() || e.message;
+		if (/unreachable|refused|connect|required/i.test(msg)) return `error: ${msg}\n[hint: searxng may be down or unset — call supervise status/up, or check searx_instance]`;
+		return `error: ${msg}`;
+	}
 }
 
 export default function (pi: ExtensionAPI) {
@@ -30,6 +34,8 @@ export default function (pi: ExtensionAPI) {
 				k: { type: "number", description: "max results (default 5)" },
 				timeRange: { type: "string", enum: ["day","week","month","year"], description: "restrict to a recency window" },
 				site: { type: "string", description: "restrict to one domain (site:)" },
+				urlsOnly: { type: "boolean", description: "title+url only, skip snippets" },
+				snippetChars: { type: "number", description: "cap each snippet (default 160)" },
 				engines: { type: "string", description: "comma-separated engines to restrict to" },
 				category: { type: "string", description: "category filter: general|news|it" },
 				instance: { type: "string", description: "SearXNG instance URL (default from SEARX_INSTANCE env)" },
@@ -47,6 +53,8 @@ export default function (pi: ExtensionAPI) {
 				if (p.engines) args.push("--engines", p.engines);
 					if (p.timeRange) args.push("--time-range", p.timeRange);
 					if (p.site) args.push("--site", p.site);
+					if (p.urlsOnly) args.push("--urls-only");
+					if (p.snippetChars != null) args.push("--snippet-chars", String(p.snippetChars));
 				if (p.category) args.push("--category", p.category);
 				out = untrusted("WEB SEARCH RESULTS", run(args));
 			}

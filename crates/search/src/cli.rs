@@ -29,10 +29,20 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if results.is_empty() {
                 return Ok("no results".into());
             }
+            // --urls-only: title + url (skip snippets). --snippet-chars N: cap
+            // snippet length (some engines return paragraph-long content × k).
+            let urls_only = args.iter().any(|a| a == "--urls-only");
+            let snip = flag(args, "--snippet-chars").and_then(|s| s.parse::<usize>().ok()).unwrap_or(160);
             Ok(results
                 .iter()
                 .enumerate()
-                .map(|(i, r)| format!("{}\t{}\t{}\t{}", i + 1, r.title, r.url, r.snippet))
+                .map(|(i, r)| {
+                    if urls_only {
+                        format!("{}\t{}\t{}", i + 1, r.title, r.url)
+                    } else {
+                        format!("{}\t{}\t{}\t{}", i + 1, r.title, r.url, truncate_chars(&r.snippet, snip))
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
@@ -79,4 +89,9 @@ mod neg_tests {
         assert!(run(&s(&["bogus"])).is_ok());
     }
 
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { return s.to_string(); }
+    format!("{}…", s.chars().take(max).collect::<String>())
 }

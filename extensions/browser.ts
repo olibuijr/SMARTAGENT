@@ -14,7 +14,11 @@ function untrusted(source: string, body: string): string {
 
 function run(args: string[]): string {
 	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 60_000, cwd: ROOT }).trim(); }
-	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
+	catch (e: any) {
+		const msg = e.stderr?.toString().trim() || e.message;
+		if (/unreachable|refused|connect/i.test(msg)) return `error: ${msg}\n[hint: chromium may be down — call supervise (status, then up)]`;
+		return `error: ${msg}`;
+	}
 }
 
 export default function (pi: ExtensionAPI) {
