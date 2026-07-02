@@ -37,10 +37,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let passed = scores.iter().filter(|s| s.pass).count();
             // --fail-only: list just the failures (typical CI use). Otherwise all.
             let fail_only = args.iter().any(|a| a == "--fail-only");
+            // Failures always print; PASS lines cap at 20 (token discipline —
+            // a big green suite is summary-enough via the accuracy line).
             let mut lines: Vec<String> = scores.iter()
-                .filter(|s| !fail_only || !s.pass)
-                .map(|s| format!("{}\t{}", if s.pass { "PASS" } else { "FAIL" }, s.case))
+                .filter(|s| !s.pass)
+                .map(|s| format!("FAIL\t{}", s.case))
                 .collect();
+            if !fail_only {
+                let passes: Vec<&str> = scores.iter().filter(|s| s.pass).map(|s| s.case.as_str()).collect();
+                for c in passes.iter().take(20) {
+                    lines.push(format!("PASS\t{c}"));
+                }
+                if passes.len() > 20 {
+                    lines.push(format!("…[+{} more PASS]", passes.len() - 20));
+                }
+            }
             lines.push(format!("accuracy: {passed}/{} = {:.1}%", scores.len(), acc * 100.0));
             // Latency aggregates from the stored-but-previously-dead latency_ms.
             let mut lats: Vec<i64> = traces.iter().filter(|t| t.run == run).filter_map(|t| t.latency_ms).collect();

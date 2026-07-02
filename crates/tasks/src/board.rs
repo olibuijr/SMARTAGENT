@@ -21,7 +21,20 @@ pub fn render(tasks: &[Task], wip: Wip) -> String {
             None => format!("{} ({})", col.to_uppercase(), in_col.len()),
         };
         out.push(head);
-        for t in in_col {
+        // Token discipline: a grown board must not flood the model. Backlog
+        // and done show the newest N with a "+N more" tail; active columns
+        // (doing/ready/review) are naturally WIP-bounded and print fully.
+        let cap = match col {
+            "backlog" | "done" => 15,
+            _ => usize::MAX,
+        };
+        let shown: Vec<&&Task> = if col == "done" {
+            in_col.iter().rev().take(cap).collect() // newest done first
+        } else {
+            in_col.iter().take(cap).collect()
+        };
+        let hidden = in_col.len().saturating_sub(shown.len());
+        for &t in shown {
             let blocked = if t.blocked.is_empty() { String::new() } else { format!(" ⛔{}", t.blocked) };
             let crit = if t.criteria.is_empty() {
                 String::new()
@@ -34,6 +47,9 @@ pub fn render(tasks: &[Task], wip: Wip) -> String {
             }
             let owner = if t.owner.is_empty() { String::new() } else { format!(" @{}", t.owner) };
             out.push(format!("  {} {} {}{}{}{}", t.id, t.prio, title, owner, crit, blocked));
+        }
+        if hidden > 0 {
+            out.push(format!("  … +{hidden} more (tasks list --col {col})"));
         }
     }
     out.join("\n")

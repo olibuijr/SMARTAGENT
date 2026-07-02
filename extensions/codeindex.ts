@@ -16,7 +16,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codeindex",
 		label: "Code Search",
-		description: "Fast literal/regex code search (ripgrep concept), respecting .gitignore, plus per-project workspace indexing. Actions: 'search' finds a pattern across a dir with optional case-insensitivity, regex, context lines, and extension filter; 'files' lists indexable files; 'projects' lists the repos under workspaces/ with index status; 'index' builds the per-project file index (one project, or all workspace repos when no project is given). Use 'project' to scope search/files to a workspace repo.",
+		description: "Code search (gitignore-aware) + workspace project index. search (regex/case/context/ext filters), files, projects (repos + index status), index (one or all repos). project scopes to a workspace repo.",
 		parameters: {
 			type: "object",
 			properties: {

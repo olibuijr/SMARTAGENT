@@ -17,7 +17,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codegraph",
 		label: "Code Graph",
-		description: "Rust code knowledge graph. Actions: 'index' scans a repo dir into a graph (add embed=true for semantic search); 'defs'/'callers'/'refs'/'impls' walk the structural graph for a symbol; 'path' finds a call path between two symbols; 'search' finds symbols by meaning; 'stats' summarizes. Set 'project' to use a workspace repo's OWN graph (workspaces/<project>/.smartagent/codegraph.json) for both indexing and queries — per-repo graphs never clobber each other; omit it for the root SMARTAGENT graph. Use to understand where things are defined and what calls what.",
+		description: "Rust code graph: index (embed=true for semantic), defs/callers/refs/impls, path (call path between symbols), search (by meaning), stats. project = that repo's own graph; omit for root.",
 		parameters: {
 			type: "object",
 			properties: {

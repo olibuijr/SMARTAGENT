@@ -118,6 +118,19 @@ function rule(width: number): string {
 	return row(dim("─".repeat(Math.max(4, width - 4))), width);
 }
 
+/** Framed card with rounded corners — one per agent, for visual separation. */
+function card(content: string[], borderCol: string, width: number): string[] {
+	const cw = Math.max(10, width - 4); // fits inside row()'s content area
+	const b = (s: string) => fg(borderCol, s);
+	const out: string[] = [row(b("╭" + "─".repeat(cw - 2) + "╮"), width)];
+	for (const c of content) {
+		const pad = Math.max(0, cw - 4 - vlen(c));
+		out.push(row(b("│") + " " + c + " ".repeat(pad) + " " + b("│"), width));
+	}
+	out.push(row(b("╰" + "─".repeat(cw - 2) + "╯"), width));
+	return out;
+}
+
 function render(width: number): string[] {
 	const w = Math.max(24, width);
 	const inner = w - 4;
@@ -163,20 +176,22 @@ function render(width: number): string[] {
 		// so each agent keeps its color identity whether working or idle.
 		const accentOf = (name: string) => ACCENTS[Math.max(0, agents.findIndex((x) => x.name === name)) % ACCENTS.length];
 
+		const cardw = w - 8; // card content width for clipping
 		working.forEach((a, i) => {
 			const accent = accentOf(a.name);
 			const spin = fg(accent, SPIN[(frame + i) % SPIN.length]);
 			const head = `${fg(accent, avatar(a.name))} ${fg("46", "●")}${spin} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
 			const tok = humanTokens(a.tokens);
-			const gapw = Math.max(1, inner - vlen(head) - tok.length);
-			lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
+			const gapw = Math.max(1, cardw - vlen(head) - tok.length);
+			const body: string[] = [head + " ".repeat(gapw) + dim(tok)];
 			if (a.tools) {
 				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
-				lines.push(row("  " + dim("⚙ ") + fg("252", clip(a.tools, inner - 8)) + " " + tick, w));
+				body.push(dim("⚙ ") + fg("252", clip(a.tools, cardw - 6)) + " " + tick);
 			}
 			if (a.words) {
-				lines.push(row("  " + dim("“" + clip(a.words, inner - 6) + "”"), w));
+				body.push(dim("“" + clip(a.words, cardw - 4) + "”"));
 			}
+			lines.push(...card(body, accent, w));
 		});
 
 		// Idle agents: one line each — orange status dot with a slow breathing
@@ -187,8 +202,8 @@ function render(width: number): string[] {
 				const tok = humanTokens(a.tokens);
 				const pulse = (frame + i * 2) % 6 < 3 ? fg("208", "●") : fg("130", "●");
 				const head = `${fg(accentOf(a.name), avatar(a.name))} ${pulse} ${fg("250", a.name)} ${dim("· " + a.role)}`;
-				const gapw = Math.max(1, inner - vlen(head) - tok.length);
-				lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
+				const gapw = Math.max(1, cardw - vlen(head) - tok.length);
+				lines.push(...card([head + " ".repeat(gapw) + dim(tok)], "238", w));
 			});
 	}
 

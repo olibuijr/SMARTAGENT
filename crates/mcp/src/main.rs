@@ -88,13 +88,17 @@ fn run(args: &[String]) -> Result<String, String> {
             let mut t = Transport::open(args)?;
             let res = t.call("tools/call", &params)?;
             let out = jsonrpc::parse_call(&res);
-            // --head N: cap the response length (a chatty tool can flood context).
-            match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
-                Some(n) if out.chars().count() > n => Ok(format!(
-                    "{}…[truncated]",
-                    out.chars().take(n).collect::<String>()
-                )),
-                _ => Ok(out),
+            // Cap the response BY DEFAULT (4000 chars) — a chatty MCP server
+            // otherwise dumps an arbitrary payload straight into agent context.
+            // --head 0 = uncapped; --head N overrides.
+            let head = flag(args, "--head").and_then(|s| s.parse::<usize>().ok()).unwrap_or(4000);
+            if head > 0 && out.chars().count() > head {
+                Ok(format!(
+                    "{}…[truncated at {head} chars — pass head:0 for full]",
+                    out.chars().take(head).collect::<String>()
+                ))
+            } else {
+                Ok(out)
             }
         }
         _ => Ok(HELP.trim().into()),

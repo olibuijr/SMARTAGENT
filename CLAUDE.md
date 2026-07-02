@@ -16,7 +16,7 @@
 
 When the user asks for workspace contents, report the folders/projects and files under `workspaces/`, not the repository root.
 
-**Extensions catalog:** the full list of `./pi` tools/extensions and what each does lives in [AGENTS.md](./AGENTS.md) → "Extensions catalog". Keep that table current — update it in the same commit whenever you add, rename, or remove an extension.
+**Extensions catalog:** the full list of `./pi` tools/extensions and what each does lives in [CATALOG.md](./CATALOG.md) (human/CLI reference; the agent-facing brief is AGENT_TOOLS.md). Keep both current — update them in the same commit whenever you add, rename, or remove an extension.
 
 Hard rules (repeated here because they bite):
 

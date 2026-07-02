@@ -165,6 +165,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 })
                 .collect();
             out.sort();
+            // Token discipline: cap at 50 jobs (--all for everything).
+            if out.len() > 50 && !args.iter().any(|a| a == "--all") {
+                let total = out.len();
+                out.truncate(50);
+                out.push(format!("…[50 of {total} jobs; --all for full list]"));
+            }
             Ok(out.join("\n"))
         }
         "next" => {

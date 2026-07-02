@@ -46,7 +46,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		if (!firstUserIntent) return;
 		try {
-			execFileSync(BIN, ["remember", "--dir", MEM_DIR, "--tier", "episodic", "--text", `Session intent: ${firstUserIntent}`], {
+			execFileSync(BIN, ["remember", "--dir", MEM_DIR, "--tier", "episodic", "--text", `Session intent: ${firstUserIntent.slice(0, 280)}`], {
 				encoding: "utf8",
 				timeout: 15_000,
 				cwd: ROOT,

@@ -20,7 +20,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "memory",
 		label: "Memory",
-		description: "Persistent 3-tier memory (working=recent, episodic=events, semantic=durable facts). Actions: 'remember' stores a fact; 'update' overwrites an existing fact by id (dedupe/correct — prefer over remembering a contradiction); 'recall' semantically searches (optionally scoped to one tier); 'recent' lists the newest N in a tier; 'forget' deletes by id; 'promote' moves a fact between tiers; 'stats' shows counts. Set 'project' to use a workspace repo's OWN memory (workspaces/<project>/.smartagent/memory) — per the memory policy, durable facts about a repo belong in that repo's store, not the global one.",
+		description: "3-tier memory (working/episodic/semantic). remember, update (correct by id — prefer over contradicting), recall (semantic search, tier scoped), recent, forget, promote, stats. project = a workspace repo's own store (repo facts live there, not globally).",
 		parameters: {
 			type: "object",
 			properties: {

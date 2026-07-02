@@ -3,7 +3,7 @@ project: SMARTAGENT
 task: Rebuild best-of-breed agent stack as pi extensions + pure-Rust 0-dep tools
 effort: E5
 phase: build
-progress: 125/130
+progress: 133/138
 mode: build
 started: 2026-07-02T01:10:00Z
 updated: 2026-07-02T19:30:00Z
@@ -213,6 +213,17 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - [x] ISC-129: concurrent sweeps are lock-guarded (`.eval-triage.lock`, first-writer-wins, 120s stale expiry, self-cleaning)
 - [x] ISC-130: kill switch — `data/eval-triage.off` disables the loop instantly without rebuild/restart
 
+### Codebase review + token efficiency (2026-07-02 ultrathink sweep)
+
+- [x] ISC-131: clippy zero warnings in all non-fleet-owned crates (was 9 workspace-wide; gateway's 1 left for the fleet)
+- [x] ISC-132: unbounded tool outputs capped by default — tasks board (15/col +N-more), schedule list (50), vault read (150 lines), mcp call (4000 chars), evals score (20 PASS lines), memory recall (500 chars/row); all with explicit override flags
+- [x] ISC-133: secrets audit esc() control-char JSON bug fixed via semdb::json::escape (same class memory fixed before)
+- [x] ISC-134: devtools_base + dead supervise::start_ticks deduped/removed; session-memory intent capped at 280 chars at write (board-dump leak into future sessions)
+- [x] ISC-135: AGENTS.md extensions catalog → CATALOG.md pointer: injected context −7.3KB (~1.8k tokens/session)
+- [x] ISC-136: top-5 tool schema descriptions trimmed 3,428→1,381 chars (~500 tokens/turn, every fleet turn)
+- [x] ISC-137: Anti: no behavior removed — every cap has an override flag and the full gate + all crate tests stay green
+- [x] ISC-138: deferred findings boarded as fleet tasks T-128..T-131 (pipe-fill deadlock p2; extension/crate dedup sweeps; store-side row caps)
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |
@@ -323,3 +334,12 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - ISC-127/128: Bash + unit — statusline reads `ok|▣ 55 open · 0/4 doing · 20 ready` (arrow appears on first change; trend_dir_tracks_last_change_direction covers rise/fall/flat persistence); live on Óli's screen: `▣ 55 open ▼`
 - ISC-129/130: unit kill_switch_and_sweep_lock + live probes — lock absent after sweep; `eval-triage.off` → "disabled" message, removed to re-enable
 - LOOP CLOSED AUTONOMOUSLY (2026-07-02 ~22:00): triage-created tasks T-100..T-104+ on the board; fleet pulled and completed T-100 (gateway-multi-agent cargo test) and T-101 (orchestrate-list-statusline) with no human involvement — failure → task → fix → done
+
+### Review sweep (2026-07-02 ultrathink)
+
+- ISC-131: Bash — cargo clippy workspace census 9→gateway-only; safe-zone re-run 0 warnings
+- ISC-132: Bash — live probes: board prints `… +21 more (tasks list --col backlog)`; all five crates rebuilt green
+- ISC-133/134: Read + build — esc() now semdb::json::escape; start_ticks removed (zero call sites verified); intent .slice(0,280)
+- ISC-135/136: wc — AGENTS.md 25,977→18,671 B; description extraction 3,428→1,381 chars; import-lint + tools-smoke green
+- ISC-137: Bash — full ./build.sh gate PASS post-changes (build+tests+audits+21/21)
+- ISC-138: Bash — tasks add → T-128..T-131 on the board

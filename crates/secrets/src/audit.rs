@@ -58,7 +58,9 @@ impl Audit {
 }
 
 fn esc(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    // Control chars (newline/tab in a caller or secret name) would write
+    // unparseable JSON into the audit meta — use the real escaper.
+    semdb::json::escape(s)
 }
 
 #[cfg(test)]

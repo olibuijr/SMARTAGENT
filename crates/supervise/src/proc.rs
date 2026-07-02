@@ -61,14 +61,6 @@ pub fn terminate(pid: u32) {
     }
 }
 
-/// Read a process start time (ticks since boot, field 22 of /proc/<pid>/stat)
-/// as a cheap uptime discriminator; None if unavailable.
-pub fn start_ticks(pid: u32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // comm may contain spaces/parens; split after the trailing ')'.
-    let rest = stat.rsplit_once(')')?.1;
-    rest.split_whitespace().nth(19)?.parse().ok()
-}
 
 #[cfg(test)]
 mod tests {

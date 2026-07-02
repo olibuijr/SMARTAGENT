@@ -13,7 +13,7 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &[String]) -> Result<String, String> {
-    let base = devtools_base(args);
+    let base = browser::devtools_base(args);
     // Snapshot size caps (fewer tokens); `--quiet` on click/type returns only
     // the status line (no page dump) — right for intermediate steps of a flow.
     let mt = flag(args, "--max-text").and_then(|s| s.parse().ok()).unwrap_or(4000usize);
@@ -87,14 +87,6 @@ fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-fn devtools_base(args: &[String]) -> String {
-    args.iter().position(|a| a == "--devtools").and_then(|i| args.get(i + 1).cloned())
-        .or_else(|| std::env::var("BROWSER_DEVTOOLS").ok())
-        .unwrap_or_else(|| {
-            semdb::config::Config::load().resolve("browser_devtools", "BROWSER_DEVTOOLS", None)
-                .unwrap_or_else(|| "http://127.0.0.1:9222".into())
-        })
-}
 
 const HELP: &str = r#"
 browser — Browser Use port (pure-Rust CDP client)

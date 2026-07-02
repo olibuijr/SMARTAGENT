@@ -39,17 +39,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let vault = vault.ok_or("usage: vault read <vault> <note>")?;
             let name = args.get(2).ok_or("note required")?;
             let body = note::read(&note::note_path(vault, name))?;
-            // --head N: first N lines only (notes grow via append; don't dump all).
-            match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
-                Some(n) => {
+            // Head-capped BY DEFAULT (150 lines) — notes grow via append and a
+            // full dump can flood agent context. --head 0 = full note.
+            let n = flag(args, "--head").and_then(|s| s.parse::<usize>().ok()).unwrap_or(150);
+            match n {
+                n if n > 0 => {
                     let lines: Vec<&str> = body.lines().collect();
                     let mut out = lines.iter().take(n).cloned().collect::<Vec<_>>().join("\n");
                     if lines.len() > n {
-                        out.push_str(&format!("\n…[{n} of {} lines; omit --head for all]", lines.len()));
+                        out.push_str(&format!("\n…[{n} of {} lines; --head 0 for all]", lines.len()));
                     }
                     Ok(out)
                 }
-                None => Ok(body),
+                _ => Ok(body),
             }
         }
         "append" => {

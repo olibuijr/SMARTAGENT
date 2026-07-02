@@ -30,18 +30,7 @@ export default function (pi: ExtensionAPI) {
 		name: "workflow",
 		label: "Workflow engine",
 		description:
-			"Markdown-defined multi-step process engine (PAI pattern): each step names the skill/tool " +
-			"to use; advancing REQUIRES evidence of what you verified ('done'/'ok' rejected). " +
-			"Built-in workflows: task-run (observe→plan→execute→verify→learn for one kanban task), " +
-			"triage (backlog refinement), retro (flow retrospective). Actions: list (discover), " +
-			"show (outline), start (begin; link a board task with task_id), step (current instructions), " +
-			"advance (complete step with evidence), runs, abort, drive (ENGINE-DRIVEN: the harness runs " +
-			"every step in a fresh headless pi and validates each step's EVIDENCE line — use for well-" +
-			"defined multi-step work you want executed deterministically; NEVER call drive from within " +
-			"a driven step). Follow the printed step instructions, " +
-			"load the step's skill, verify, then advance. Set 'project' to keep run state with a workspace " +
-			"repo (workspaces/<project>/.smartagent/workflow.semdb) — use the SAME project as the tasks " +
-			"board the run's task lives on.",
+			"Process engine for multi-step work. 'start' runs a definition (task_id links a board task); 'step' shows current instructions; 'advance' REQUIRES real evidence ('done'/'ok' rejected); 'runs' lists (live=true filters to actually-worked); 'abort'; 'drive' executes every step in fresh headless agents with validated evidence — for well-defined work; never inside a driven step. Built-ins: task-run, triage, retro. project scopes run state to a workspace repo.",
 		parameters: {
 			type: "object",
 			properties: {

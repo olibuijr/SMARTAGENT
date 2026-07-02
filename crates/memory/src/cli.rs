@@ -33,7 +33,17 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if hits.is_empty() {
                 return Ok("no memories".into());
             }
-            Ok(hits.iter().map(|h| format!("{:.4}\t[{}]\t{}\t{}", h.score, h.tier, h.id, h.text)).collect::<Vec<_>>().join("\n"))
+            // Per-row char cap (rows can embed board dumps/heartbeats): 500
+            // default, --chars N overrides, 0 = uncapped.
+            let cap = flag(args, "--chars").and_then(|s| s.parse::<usize>().ok()).unwrap_or(500);
+            let trim = |t: &str| {
+                if cap > 0 && t.chars().count() > cap {
+                    format!("{}…", t.chars().take(cap).collect::<String>())
+                } else {
+                    t.to_string()
+                }
+            };
+            Ok(hits.iter().map(|h| format!("{:.4}\t[{}]\t{}\t{}", h.score, h.tier, h.id, trim(&h.text))).collect::<Vec<_>>().join("\n"))
         }
         Some("forget") => {
             let m = Memory::new(&dir(args)?);

@@ -27,7 +27,7 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &[String]) -> Result<String, String> {
-    let base = devtools_base(args);
+    let base = browser::devtools_base(args);
     let mt = flag(args, "--max-text").and_then(|s| s.parse().ok()).unwrap_or(4000usize);
     let ml = flag(args, "--max-links").and_then(|s| s.parse().ok()).unwrap_or(40usize);
     match args.first().map(String::as_str) {
@@ -112,17 +112,6 @@ fn normalize_url(url: &str) -> String {
     }
 }
 
-fn devtools_base(args: &[String]) -> String {
-    args.iter()
-        .position(|a| a == "--devtools")
-        .and_then(|i| args.get(i + 1).cloned())
-        .or_else(|| std::env::var("BROWSER_DEVTOOLS").ok())
-        .unwrap_or_else(|| {
-            semdb::config::Config::load()
-                .resolve("browser_devtools", "BROWSER_DEVTOOLS", None)
-                .unwrap_or_else(|| "http://127.0.0.1:9222".into())
-        })
-}
 
 const HELP: &str = r#"
 sa-browser — visual browser: DOM snapshots + pages as high-DPI terminal art
