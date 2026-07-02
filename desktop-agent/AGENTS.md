@@ -80,3 +80,21 @@ binaries (`data.rs`).
   lines when parsing.
 - egui `Button` needs explicit `Sense::click()` when wrapped in `horizontal()`
   responses (tool-card header).
+- **`get_session_stats` nests token totals under `data.tokens.{input,output,…}`**,
+  not flat on `data`. Reading flat leaves the inspector Usage pane empty. The
+  reducer reads `data.tokens.*` with a flat fallback.
+- **A multiline egui `TextEdit` does NOT report `lost_focus()` on Enter** and
+  swallows Enter as a newline. Enter-to-send must use `has_focus() &&
+  key_pressed(Enter) && !shift`, then trim the trailing newline.
+- **On Wayland/KDE, winit doesn't deliver `system_theme`** — light/dark follows
+  the OS only because a watcher thread polls the XDG portal
+  (`org.freedesktop.appearance color-scheme`) and repaints on change.
+- **Never invent extension_ui / event JSON shapes — read `docs/rpc.md`.** Four
+  handlers shipped no-oping because the field names were guessed: `setStatus`
+  uses `statusKey`/`statusText` (not name/status), `setWidget` uses
+  `widgetKey`/`widgetLines` (not lines/content), `editor` prefill is `prefill`
+  (not default), and `message_update`→`error` carries an `AssistantMessage`
+  object + `reason` (not a string). Unit tests built on invented shapes pass
+  while the real path is dead — always test against a shape quoted from rpc.md.
+- **pi statusline `widgetLines` contain ANSI SGR codes** — strip `\x1b[…m`
+  (`agent::strip_ansi`) before rendering or egui shows escape garbage.

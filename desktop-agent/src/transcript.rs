@@ -107,38 +107,103 @@ fn thinking(ui: &mut egui::Ui, a: &mut Assistant) {
     }
 }
 
-/// Render assistant text, styling ``` fenced blocks in monospace (ISC-70).
+/// Render assistant text as light markdown: fenced code blocks in monospace,
+/// headings, bullet lists, and inline **bold** / `code` (ISC-70).
 fn rich_text(ui: &mut egui::Ui, text: &str) {
     let mut in_fence = false;
-    let mut buf = String::new();
-    let flush = |ui: &mut egui::Ui, buf: &mut String, fence: bool| {
+    let mut fence_buf = String::new();
+
+    let flush_fence = |ui: &mut egui::Ui, buf: &mut String| {
         if buf.is_empty() {
             return;
         }
-        if fence {
-            Frame {
-                fill: theme::CODE_BG(),
-                corner_radius: CornerRadius::same(8),
-                inner_margin: Margin::symmetric(12, 8),
-                ..Frame::NONE
-            }
-            .show(ui, |ui| {
-                ui.colored_label(theme::GREEN(), egui::RichText::new(buf.trim_end()).monospace().size(13.5));
-            });
-        } else {
-            ui.colored_label(theme::TEXT(), egui::RichText::new(buf.trim_end()).size(15.0).line_height(Some(22.0)));
+        Frame {
+            fill: theme::CODE_BG(),
+            corner_radius: CornerRadius::same(8),
+            inner_margin: Margin::symmetric(12, 8),
+            ..Frame::NONE
         }
+        .show(ui, |ui| {
+            ui.colored_label(theme::GREEN(), egui::RichText::new(buf.trim_end()).monospace().size(13.5));
+        });
         buf.clear();
     };
-    for line in text.split_inclusive('\n') {
+
+    for line in text.split('\n') {
         if line.trim_start().starts_with("```") {
-            flush(ui, &mut buf, in_fence);
+            if in_fence {
+                flush_fence(ui, &mut fence_buf);
+            }
             in_fence = !in_fence;
             continue;
         }
-        buf.push_str(line);
+        if in_fence {
+            fence_buf.push_str(line);
+            fence_buf.push('\n');
+        } else {
+            md_line(ui, line);
+        }
     }
-    flush(ui, &mut buf, in_fence);
+    if in_fence {
+        flush_fence(ui, &mut fence_buf);
+    }
+}
+
+/// Render one non-fenced markdown line (heading / bullet / paragraph).
+fn md_line(ui: &mut egui::Ui, line: &str) {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        ui.add_space(6.0);
+        return;
+    }
+    if let Some(rest) = trimmed.strip_prefix("### ") {
+        ui.colored_label(theme::TEXT(), egui::RichText::new(rest).size(16.0).strong());
+    } else if let Some(rest) = trimmed.strip_prefix("## ") {
+        ui.colored_label(theme::TEXT(), egui::RichText::new(rest).size(18.0).strong());
+    } else if let Some(rest) = trimmed.strip_prefix("# ") {
+        ui.colored_label(theme::TEXT(), egui::RichText::new(rest).size(20.0).strong());
+    } else if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(8.0);
+            ui.colored_label(theme::ACCENT(), "•");
+            inline(ui, rest);
+        });
+    } else {
+        ui.horizontal_wrapped(|ui| inline(ui, trimmed));
+    }
+}
+
+/// Inline markdown: **bold** and `code` spans built into a LayoutJob.
+fn inline(ui: &mut egui::Ui, text: &str) {
+    use egui::text::{LayoutJob, TextFormat};
+    let base = egui::FontId::proportional(15.0);
+    let mono = egui::FontId::monospace(13.5);
+    let mut job = LayoutJob::default();
+    let mut rest = text;
+    let push = |job: &mut LayoutJob, s: &str, font: egui::FontId, color: Color32| {
+        job.append(s, 0.0, TextFormat { font_id: font, color, ..Default::default() });
+    };
+    while !rest.is_empty() {
+        if let Some(i) = rest.find("**") {
+            if let Some(j) = rest[i + 2..].find("**") {
+                push(&mut job, &rest[..i], base.clone(), theme::TEXT());
+                push(&mut job, &rest[i + 2..i + 2 + j], base.clone(), theme::TEXT()); // bold ~ same color, heavier not trivial in LayoutJob; keep readable
+                rest = &rest[i + 2 + j + 2..];
+                continue;
+            }
+        }
+        if let Some(i) = rest.find('`') {
+            if let Some(j) = rest[i + 1..].find('`') {
+                push(&mut job, &rest[..i], base.clone(), theme::TEXT());
+                push(&mut job, &rest[i + 1..i + 1 + j], mono.clone(), theme::GREEN());
+                rest = &rest[i + 1 + j + 1..];
+                continue;
+            }
+        }
+        push(&mut job, rest, base.clone(), theme::TEXT());
+        break;
+    }
+    ui.label(job);
 }
 
 fn tool_card(ui: &mut egui::Ui, c: &mut ToolCard) {

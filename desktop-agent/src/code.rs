@@ -213,9 +213,7 @@ fn chat_pane(ui: &mut egui::Ui, conn: &mut AgentConn, emits: &mut Vec<Emit>) {
                         }
                     });
                 ui.add_space(8.0);
-                if let Some(e) = composer::render(ui, &conn.state, &mut conn.input, width, "Code in this project…") {
-                    emits.push(e);
-                }
+                composer::render(ui, &conn.state, &mut conn.input, width, "Code in this project…", emits);
             },
         );
     });

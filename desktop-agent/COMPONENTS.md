@@ -11,7 +11,7 @@ small and single-purpose; keep it that way — split before a file grows past
 | `src/root.rs` | ~70 | Repo-root autodetection (walk up until `./pi` + `.pi/`), derived paths, username, clock |
 | `src/jsonw.rs` | ~130 | JSON serializer + value builders over `httpc::json`, unicode-safe truncation |
 | `src/rpc.rs` | ~230 | Spawn `./pi --mode rpc`, LF-JSONL reader/stderr threads, typed send helpers, graceful shutdown |
-| `src/agent.rs` | ~560 | Event → state reducer: transcript items, tool cards, stats, dialogs, statusline, files |
+| `src/agent.rs` | ~770 | Event → state reducer: transcript items, tool cards, stats, dialogs, statusline, files (incl. reducer unit tests) |
 | `src/sessions.rs` | ~510 | `.pi/sessions/*.jsonl` browser: list metas (title/cwd/project/mtime) + transcript replay |
 | `src/conn.rs` | ~150 | One agent connection (child + state + input) per tab context: ensure/pump/send/switch |
 | `src/data.rs` | ~180 | App-side repo data: session refresh, workspaces projects, lazy file tree, git status, tasks board |
@@ -27,9 +27,11 @@ small and single-purpose; keep it that way — split before a file grows past
 | `src/transcript.rs` | ~200 | Shared renderer: bubbles, assistant text with code fences, thinking, live tool cards, banners |
 | `src/composer.rs` | ~100 | Shared input bar: Enter-send / Shift+Enter newline, Stop while streaming, model footer |
 | `src/chat.rs` | ~60 | Chat tab: greeting empty state + transcript + composer |
-| `src/cowork.rs` | ~120 | Cowork tab: working banner (elapsed + current tool), kanban strip, transcript, task composer |
+| `src/cowork.rs` | ~180 | Cowork "Tasks" tab: suggestions, Scheduled section, working banner, interactive board, transcript, task composer |
+| `src/board.rs` | ~180 | Interactive kanban: parse `tasks board`, add / advance / done via the real `tasks` binary |
 | `src/code.rs` | ~230 | Code tab: project picker, lazy file tree, read-only viewer, git changes, project-rooted chat |
-| `src/inspector.rs` | ~200 | Right panel: session info, usage + context gauge, statusline rows, tool activity, files/artifacts |
+| `src/inspector.rs` | ~260 | Right panel: session action bar (rename/compact/duplicate/export/fork), info, usage + context gauge, statusline rows, tool activity, files/artifacts |
+| `src/panels.rs` | ~180 | Tools command-center: launcher + panels for workflow/memory/vault/schedule/services/hooks/evals, each shelling to its real binary |
 | `src/dialogs.rs` | ~130 | Extension-UI modals (select/confirm/input/editor) + escape-to-cancel |
 
 *approximate, at time of writing — regenerate with `wc -l src/*.rs`.

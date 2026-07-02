@@ -46,9 +46,7 @@ pub fn render(ui: &mut egui::Ui, conn: &mut AgentConn, username: &str, emits: &m
                     ui.add_space(10.0);
                 }
 
-                if let Some(e) = composer::render(ui, &conn.state, &mut conn.input, width, "Reply to the agent…") {
-                    emits.push(e);
-                }
+                composer::render(ui, &conn.state, &mut conn.input, width, "Reply to the agent…", emits);
             },
         );
     });

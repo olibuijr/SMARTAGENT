@@ -10,6 +10,12 @@ use crate::storage::Db;
 use crate::vector;
 
 pub fn run(args: &[String]) -> Result<String, String> {
+    if args.is_empty()
+        || args.iter().any(|a| a == "--help" || a == "-h")
+        || args.first().is_some_and(|a| a == "help")
+    {
+        return Ok(HELP.trim().to_string());
+    }
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     match cmd {
         "create" => {
@@ -49,7 +55,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 if prefix.is_empty() {
                     return Err("--prefix must be non-empty".into());
                 }
-                let ids: Vec<String> = db.index.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+                let ids: Vec<String> = db
+                    .index
+                    .keys()
+                    .filter(|k| k.starts_with(&prefix))
+                    .cloned()
+                    .collect();
                 for id in &ids {
                     db.delete(id)?;
                 }
@@ -67,21 +78,32 @@ pub fn run(args: &[String]) -> Result<String, String> {
             // POST and one db open for the whole set.
             let db_path = required(args, 1, "db path")?;
             let file = flag(args, "--file").ok_or("--file with id<TAB>text lines required")?;
-            let content = std::fs::read_to_string(&file).map_err(|e| format!("read {file}: {e}"))?;
+            let content =
+                std::fs::read_to_string(&file).map_err(|e| format!("read {file}: {e}"))?;
             let mut ids = Vec::new();
             let mut texts = Vec::new();
             for (i, line) in content.lines().enumerate() {
-                if line.trim().is_empty() { continue; }
-                let (id, text) = line.split_once('\t').ok_or_else(|| format!("line {}: expected id<TAB>text", i + 1))?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let (id, text) = line
+                    .split_once('\t')
+                    .ok_or_else(|| format!("line {}: expected id<TAB>text", i + 1))?;
                 ids.push(id.to_string());
                 texts.push(text.to_string());
             }
-            if ids.is_empty() { return Ok("nothing to embed".into()); }
+            if ids.is_empty() {
+                return Ok("nothing to embed".into());
+            }
             let (host, port, model) = embed_backend(args)?;
             let vecs = http::fetch_embeddings(&host, port, &model, &texts)?;
             let mut db = Db::open(Path::new(&db_path))?;
             for ((id, text), vec) in ids.iter().zip(&texts).zip(vecs) {
-                db.put(id, &format!(r#"{{"text":"{}"}}"#, crate::json::escape(text)), vec)?;
+                db.put(
+                    id,
+                    &format!(r#"{{"text":"{}"}}"#, crate::json::escape(text)),
+                    vec,
+                )?;
             }
             Ok(format!("embedded {} rows (one request)", ids.len()))
         }
@@ -100,17 +122,24 @@ pub fn run(args: &[String]) -> Result<String, String> {
             };
             if let Some(d) = db.dim() {
                 if query.len() > 1 && query.len() != d {
-                    return Err(format!("query dim {} does not match db dim {d}", query.len()));
+                    return Err(format!(
+                        "query dim {} does not match db dim {d}",
+                        query.len()
+                    ));
                 }
             }
             // --filter key=value keeps only rows whose meta JSON has that field.
             // Over-fetch candidates first so the top-k survives filtering.
-            let filter = flag(args, "--filter").and_then(|f| f.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())));
+            let filter = flag(args, "--filter").and_then(|f| {
+                f.split_once('=')
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+            });
             let fetch_k = if filter.is_some() { (k * 8).max(64) } else { k };
             let mut results = search(&db, &query, fetch_k, exact);
             if let Some((fk, fv)) = &filter {
                 results.retain(|(_, _, meta)| {
-                    crate::json::parse(meta).ok()
+                    crate::json::parse(meta)
+                        .ok()
                         .and_then(|v| v.get(fk).and_then(|x| x.as_str().map(str::to_string)))
                         .map(|got| &got == fv)
                         .unwrap_or(false)
@@ -142,9 +171,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let db_path = required(args, 1, "db path")?;
             let id = flag(args, "--id").ok_or("--id required")?;
             let text = flag(args, "--text").ok_or("--text required")?;
-            let meta = flag(args, "--meta").unwrap_or_else(|| {
-                format!(r#"{{"text":"{}"}}"#, crate::json::escape(&text))
-            });
+            let meta = flag(args, "--meta")
+                .unwrap_or_else(|| format!(r#"{{"text":"{}"}}"#, crate::json::escape(&text)));
             let (host, port, model) = embed_backend(args)?;
             let vec = http::fetch_embedding(&host, port, &model, &text)?;
             let dim = vec.len();
@@ -166,7 +194,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let db_path = required(args, 1, "db path")?;
             let db = Db::open(Path::new(&db_path))?;
             match flag(args, "--prefix") {
-                Some(p) => Ok(db.index.keys().filter(|k| k.starts_with(&p)).count().to_string()),
+                Some(p) => Ok(db
+                    .index
+                    .keys()
+                    .filter(|k| k.starts_with(&p))
+                    .count()
+                    .to_string()),
                 None => Ok(db.index.len().to_string()),
             }
         }
@@ -174,10 +207,18 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let db_path = required(args, 1, "db path")?;
             let db = Db::open(Path::new(&db_path))?;
             let prefix = flag(args, "--prefix").unwrap_or_default();
-            let limit = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(usize::MAX);
-            let mut ids: Vec<&String> = db.index.keys().filter(|k| k.starts_with(&prefix)).collect();
+            let limit = flag(args, "--limit")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(usize::MAX);
+            let mut ids: Vec<&String> =
+                db.index.keys().filter(|k| k.starts_with(&prefix)).collect();
             ids.sort();
-            Ok(ids.into_iter().take(limit).cloned().collect::<Vec<_>>().join("\n"))
+            Ok(ids
+                .into_iter()
+                .take(limit)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n"))
         }
         "compact" => {
             let db_path = required(args, 1, "db path")?;
@@ -223,18 +264,24 @@ pub fn search(db: &Db, query: &[f32], k: usize, exact: bool) -> Vec<(String, f32
 }
 
 fn required(args: &[String], idx: usize, what: &str) -> Result<String, String> {
-    args.get(idx).cloned().ok_or_else(|| format!("{what} required"))
+    args.get(idx)
+        .cloned()
+        .ok_or_else(|| format!("{what} required"))
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max { return s.to_string(); }
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
     format!("{}…", s.chars().take(max).collect::<String>())
 }
 
-
 /// (host, port, model) for embeddings, honoring --endpoint/--model overrides.
 fn embed_backend(args: &[String]) -> Result<(String, u16, String), String> {
-    Config::load().embeddings(flag(args, "--endpoint").as_deref(), flag(args, "--model").as_deref())
+    Config::load().embeddings(
+        flag(args, "--endpoint").as_deref(),
+        flag(args, "--model").as_deref(),
+    )
 }
 
 const HELP: &str = r#"

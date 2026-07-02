@@ -6,10 +6,17 @@ use eframe::egui::{self, Align, Color32, Layout, Vec2};
 
 use crate::agent::AgentState;
 use crate::emit::Emit;
+use crate::icons;
 use crate::jsonw::truncate_chars;
 use crate::theme;
 
-pub fn render(ui: &mut egui::Ui, state: Option<&AgentState>, emits: &mut Vec<Emit>) {
+pub fn render(
+    ui: &mut egui::Ui,
+    state: Option<&AgentState>,
+    rename_active: &mut bool,
+    rename_buf: &mut String,
+    emits: &mut Vec<Emit>,
+) {
     ui.add_space(14.0);
     ui.horizontal(|ui| {
         ui.add_space(14.0);
@@ -37,6 +44,7 @@ pub fn render(ui: &mut egui::Ui, state: Option<&AgentState>, emits: &mut Vec<Emi
     };
 
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        actions(ui, state, rename_active, rename_buf, emits);
         meta(ui, state);
         stats(ui, state);
         statusline(ui, state);
@@ -44,6 +52,76 @@ pub fn render(ui: &mut egui::Ui, state: Option<&AgentState>, emits: &mut Vec<Emi
         files(ui, "Working files", &state.working_files, false, emits);
         files(ui, "Artifacts", &state.artifacts, true, emits);
     });
+}
+
+/// Session action bar: rename, compact, export, duplicate (ISC-152..155).
+fn actions(
+    ui: &mut egui::Ui,
+    state: &AgentState,
+    rename_active: &mut bool,
+    rename_buf: &mut String,
+    emits: &mut Vec<Emit>,
+) {
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(14.0);
+        if *rename_active {
+            let resp = ui.add(
+                egui::TextEdit::singleline(rename_buf).desired_width(150.0).hint_text("session name"),
+            );
+            let go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if action_btn(ui, &format!("{} Save", icons::CHECK)).clicked() || go {
+                if !rename_buf.trim().is_empty() {
+                    emits.push(Emit::Rename(rename_buf.trim().to_string()));
+                }
+                *rename_active = false;
+            }
+        } else {
+            if action_btn(ui, &format!("{} Rename", icons::RENAME)).clicked() {
+                *rename_buf = state.session_name.clone();
+                *rename_active = true;
+            }
+            if action_btn(ui, &format!("{} Compact", icons::COMPACT)).on_hover_text("Compact the context").clicked() {
+                emits.push(Emit::Compact);
+            }
+            if action_btn(ui, &format!("{} Duplicate", icons::DUPLICATE)).clicked() {
+                emits.push(Emit::CloneSession);
+            }
+            if action_btn(ui, &format!("{} Export", icons::EXPORT)).on_hover_text("Export transcript to HTML").clicked() {
+                emits.push(Emit::ExportHtml);
+            }
+            if action_btn(ui, &format!("{} Fork", icons::FORK)).on_hover_text("Branch from a past message").clicked() {
+                emits.push(Emit::ListForkPoints);
+            }
+        }
+    });
+
+    // Fork-point picker (populated by get_fork_messages).
+    if !state.fork_points.is_empty() {
+        ui.add_space(4.0);
+        pad_label(ui, theme::TEXT_FAINT(), "fork at:");
+        for (id, text) in &state.fork_points {
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                if ui
+                    .add(egui::Button::new(egui::RichText::new(text).size(12.0).color(theme::TEXT_MUTED())).fill(theme::TOOL_BG()))
+                    .clicked()
+                {
+                    emits.push(Emit::Fork(id.clone()));
+                }
+            });
+        }
+    }
+    ui.add_space(6.0);
+    ui.separator();
+}
+
+fn action_btn(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).size(12.0).color(theme::TEXT_MUTED()))
+            .fill(theme::TOOL_BG())
+            .corner_radius(6)
+            .min_size(Vec2::new(0.0, 26.0)),
+    )
 }
 
 fn section(ui: &mut egui::Ui, label: &str) {

@@ -76,6 +76,10 @@ pub struct AgentState {
     pub connected: bool,
     pub model: String,
     pub thinking_level: String,
+    /// (provider, id, name) from get_available_models — model picker source.
+    pub available_models: Vec<(String, String, String)>,
+    /// (name, description) from get_commands — slash-palette source.
+    pub commands: Vec<(String, String)>,
     pub session_file: String,
     pub session_id: String,
     pub session_name: String,
@@ -89,11 +93,15 @@ pub struct AgentState {
     pub notice: Option<String>,
     pub error_banner: Option<String>,
     pub dialogs: Vec<Dialog>,
+    /// (entryId, message text) fork points from get_fork_messages.
+    pub fork_points: Vec<(String, String)>,
     pub window_title: Option<String>,
     pub turn_started: Option<Instant>,
     pub current_tool: Option<String>,
     /// Prompt queued before the child finished booting (ISC-131).
     pub pending_prompt: Option<String>,
+    /// Composer prefill requested by an extension (set_editor_text).
+    pub pending_editor_text: Option<String>,
     pub stick_to_bottom: bool,
 }
 
@@ -266,6 +274,46 @@ impl AgentState {
                     self.rebuild_from_messages(arr);
                 }
             }
+            "get_available_models" => {
+                if let Some(arr) = data.and_then(|d| d.get("models")).and_then(|m| m.as_arr()) {
+                    self.available_models = arr
+                        .iter()
+                        .filter_map(|m| {
+                            let id = m.get("id").and_then(|x| x.as_str())?;
+                            let provider = m.get("provider").and_then(|x| x.as_str()).unwrap_or("");
+                            let name = m.get("name").and_then(|x| x.as_str()).unwrap_or(id);
+                            Some((provider.to_string(), id.to_string(), name.to_string()))
+                        })
+                        .collect();
+                }
+            }
+            "get_fork_messages" => {
+                let arr = data
+                    .and_then(|d| d.get("messages").or_else(|| d.get("forkPoints")).or(Some(d)))
+                    .and_then(|m| m.as_arr());
+                if let Some(arr) = arr {
+                    self.fork_points = arr
+                        .iter()
+                        .filter_map(|m| {
+                            let id = m.get("entryId").and_then(|x| x.as_str())?;
+                            let text = m.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                            Some((id.to_string(), jsonw::truncate_chars(text, 60)))
+                        })
+                        .collect();
+                }
+            }
+            "get_commands" => {
+                if let Some(arr) = data.and_then(|d| d.get("commands")).and_then(|c| c.as_arr()) {
+                    self.commands = arr
+                        .iter()
+                        .filter_map(|c| {
+                            let name = c.get("name").and_then(|x| x.as_str())?;
+                            let desc = c.get("description").and_then(|x| x.as_str()).unwrap_or("");
+                            Some((name.to_string(), desc.to_string()))
+                        })
+                        .collect();
+                }
+            }
             _ => {}
         }
     }
@@ -366,11 +414,14 @@ impl AgentState {
                         }
                     }
                     "error" => {
-                        let msg = ev
-                            .and_then(|e| e.get("error"))
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("stream error")
-                            .to_string();
+                        // Wire shape: {type:"error", reason, error: AssistantMessage}.
+                        let reason = ev.and_then(|e| e.get("reason")).and_then(|r| r.as_str()).unwrap_or("error");
+                        let detail = text_of(ev.and_then(|e| e.get("error")).and_then(|m| m.get("content")));
+                        let msg = if detail.trim().is_empty() {
+                            format!("stream error ({reason})")
+                        } else {
+                            detail
+                        };
                         self.items.push(Item::Error(msg));
                     }
                     _ => {}
@@ -465,6 +516,26 @@ impl AgentState {
                     self.turn_started = Some(Instant::now());
                 }
             }
+            "turn_end" => {
+                self.turn_started = None;
+            }
+            // Agent-side state changes (rename, model/thinking switch from another
+            // client or a slash command) — reflect them live.
+            "session_info_changed" => {
+                if let Some(n) = v.get("name").or_else(|| v.get("sessionName")).and_then(|x| x.as_str()) {
+                    self.session_name = n.to_string();
+                }
+            }
+            "thinking_level_changed" => {
+                if let Some(l) = v.get("thinkingLevel").or_else(|| v.get("level")).and_then(|x| x.as_str()) {
+                    self.thinking_level = l.to_string();
+                }
+            }
+            "model_select" => {
+                if let Some(m) = v.get("model") {
+                    self.model = model_label(Some(m));
+                }
+            }
             "auto_retry_start" => {
                 let attempt = v.get("attempt").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
                 let max = v.get("maxAttempts").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
@@ -525,7 +596,13 @@ impl AgentState {
                         options.push(label);
                     }
                 }
-                let default = v.get("default").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                // editor prefill field is `prefill`; input/select have no prefill.
+                let default = v
+                    .get("prefill")
+                    .or_else(|| v.get("default"))
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let deadline = v
                     .get("timeout")
                     .and_then(|t| t.as_f64())
@@ -548,32 +625,41 @@ impl AgentState {
                 None
             }
             "setStatus" => {
-                let name = v.get("name").and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let status = v.get("status").and_then(|t| t.as_str());
-                self.tool_status.retain(|(n, _)| n != &name);
-                if let Some(st) = status {
+                // Wire fields: statusKey / statusText.
+                let key = v.get("statusKey").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let text = v.get("statusText").and_then(|t| t.as_str()).map(strip_ansi);
+                self.tool_status.retain(|(n, _)| n != &key);
+                if let Some(st) = text {
                     if !st.is_empty() {
-                        self.tool_status.push((name, st.to_string()));
+                        self.tool_status.push((key, st));
                     }
                 }
                 None
             }
             "setWidget" => {
+                // Wire fields: widgetKey / widgetLines (array of ANSI-colored strings).
                 self.widget_lines.clear();
-                if let Some(arr) = v.get("lines").or_else(|| v.get("content")).and_then(|l| l.as_arr()) {
+                if let Some(arr) = v.get("widgetLines").and_then(|l| l.as_arr()) {
                     for l in arr {
                         if let Some(s) = l.as_str() {
-                            self.widget_lines.push(s.to_string());
+                            let clean = strip_ansi(s);
+                            if !clean.trim().is_empty() {
+                                self.widget_lines.push(clean);
+                            }
                         }
                     }
-                } else if let Some(s) = v.get("content").and_then(|c| c.as_str()) {
-                    self.widget_lines.push(s.to_string());
                 }
                 None
             }
             "setTitle" => {
                 let t = v.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
                 self.window_title = Some(t);
+                None
+            }
+            "set_editor_text" => {
+                // Extension prefills the composer.
+                let t = v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                self.pending_editor_text = Some(t);
                 None
             }
             // Unknown fire-and-forget method: caller acks so the agent never hangs.
@@ -597,6 +683,28 @@ impl AgentState {
             }
         }
     }
+}
+
+/// Strip ANSI SGR escape sequences (`\x1b[…m`) — pi's statusline widget lines
+/// are terminal-colored; egui renders the raw escapes as garbage otherwise.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for e in chars.by_ref() {
+                    if e.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn clamp_output(s: &str) -> String {
@@ -728,11 +836,47 @@ mod tests {
 
     #[test]
     fn ext_ui_setwidget_and_unknown_ack() {
+        // Real wire fields: widgetKey / widgetLines (regression guard — earlier
+        // code read `lines`/`content` and silently no-oped against real pi).
         let mut s = AgentState::fresh();
-        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"w","method":"setWidget","lines":["info ✓","data ▦"]}"#).unwrap());
+        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"w","method":"setWidget","widgetKey":"k","widgetLines":["info ✓","data ▦"]}"#).unwrap());
         assert_eq!(s.widget_lines, vec!["info ✓", "data ▦"]);
         let ack = s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"z","method":"mysteryMethod"}"#).unwrap());
         assert_eq!(ack.as_deref(), Some("z"), "unknown method must be acked by id");
+    }
+
+    #[test]
+    fn ext_ui_setstatus_real_fields() {
+        let mut s = AgentState::fresh();
+        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"s","method":"setStatus","statusKey":"my-ext","statusText":"Turn 3 running…"}"#).unwrap());
+        assert_eq!(s.tool_status, vec![("my-ext".to_string(), "Turn 3 running…".to_string())]);
+    }
+
+    #[test]
+    fn ext_ui_editor_prefill_and_set_editor_text() {
+        let mut s = AgentState::fresh();
+        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"e","method":"editor","title":"Edit","prefill":"Line 1\nLine 2"}"#).unwrap());
+        assert_eq!(s.dialogs[0].input, "Line 1\nLine 2");
+        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"t","method":"set_editor_text","text":"hello"}"#).unwrap());
+        assert_eq!(s.pending_editor_text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn stream_error_reads_object_reason() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"message_start","message":{"role":"assistant"}}"#);
+        ev(&mut s, r#"{"type":"message_update","assistantMessageEvent":{"type":"error","reason":"error","error":{"role":"assistant","content":[{"type":"text","text":"rate limited"}]}}}"#);
+        let has_err = s.items.iter().any(|i| matches!(i, Item::Error(t) if t == "rate limited"));
+        assert!(has_err, "error text must come from the AssistantMessage object");
+    }
+
+    #[test]
+    fn session_info_and_thinking_change_live() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"session_info_changed","name":"Renamed Session"}"#);
+        assert_eq!(s.session_name, "Renamed Session");
+        ev(&mut s, r#"{"type":"thinking_level_changed","thinkingLevel":"high"}"#);
+        assert_eq!(s.thinking_level, "high");
     }
 
     #[test]

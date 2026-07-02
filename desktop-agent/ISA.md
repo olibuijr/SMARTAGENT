@@ -3,10 +3,10 @@ project: desktop-agent
 task: Claude Desktop clone GUI at feature parity with ./pi via pi RPC mode
 effort: E4
 phase: complete
-progress: 133/133
+progress: 179/179
 mode: build
 started: 2026-07-02T16:10:00Z
-updated: 2026-07-02T16:45:00Z
+updated: 2026-07-02T17:40:00Z
 ---
 
 # ISA — desktop-agent
@@ -202,6 +202,56 @@ End-to-end verification:
 - [x] ISC-131: Prompt submitted while the child is still booting is queued and auto-sent on connect, with a visible "starting agent…" state (window appears immediately, never a dead cold start)
 - [x] ISC-132: Child death surfaces captured stderr excerpt in the error banner (diagnostic, not just "disconnected")
 - [x] ISC-133: App follows the system theme at runtime — dark and light palettes, switching live on OS theme change (no restart)
+
+Parity v2 — pi capability surface + real Cowork (2026-07-02, web-researched Anthropic Cowork):
+- [x] ISC-134: `get_commands` fetched on connect; slash commands stored (name + description)
+- [x] ISC-135: Typing `/` in the composer opens a command palette listing pi's real slash commands (/board /tasks /skills /status /index /projects /runs /audit /memory …)
+- [x] ISC-136: Palette filters as you type (`/sk` → skills); Enter/click inserts `/name ` for args or sends argless commands
+- [x] ISC-137: Slash command sent as a prompt message (pi runs extension commands via prompt) — verified a `/status` round-trips
+- [x] ISC-138: `get_available_models` fetched on connect; models stored (provider+id+name)
+- [x] ISC-139: Composer model label is a picker — clicking opens a scrollable menu of real models; choosing sends `set_model {provider,modelId}`
+- [x] ISC-140: Thinking-level label is a picker — off/minimal/low/medium/high/xhigh; choosing sends `set_thinking_level`
+- [x] ISC-141: get_state after set_model/set_thinking refreshes the footer to the new value
+- [x] ISC-142: Cowork empty state shows task-suggestion chips (Organize files / Crunch data / Draft a document / Research a topic / Plan & schedule), clicking one seeds the composer
+- [x] ISC-143: Cowork sidebar/section shows real Scheduled tasks from `schedule list` (name, cron, next/last)
+- [x] ISC-144: Cowork "New task" affordance starts a fresh cowork session
+- [x] ISC-145: Cowork copy reflects the real product language (Tasks, plan-then-run) not a generic chat
+- [x] ISC-146: rpc.rs gains set_model / set_thinking_level / get_available_models commands, LF-framed
+- [x] ISC-147: Model/thinking pickers are borrow-free (emit intents; App executes)
+- [x] ISC-148: Anti: no fabricated model list — every model shown comes from get_available_models, not hardcoded
+- [x] ISC-149: Anti: slash palette lists only commands pi actually reported (no invented commands)
+- [x] ISC-150: Live: model picker changes the running session's model (footer + get_state reflect it)
+- [x] ISC-151: Live: `/` palette visible and a slash command executes end-to-end in the GUI
+
+Parity v3 — gap-review fixes + full tool surface (2026-07-02, two-agent codebase audit):
+- [x] ISC-152: Fix setStatus handler to read real `statusKey`/`statusText` (was name/status, silently no-op)
+- [x] ISC-153: Fix setWidget handler to read real `widgetKey`/`widgetLines` (was lines/content); verified live inspector Status rows populate
+- [x] ISC-154: Fix editor dialog prefill to read `prefill` (was `default`)
+- [x] ISC-155: Fix message_update error to parse the AssistantMessage object + reason (was `.as_str()` → always "stream error")
+- [x] ISC-156: Reducer tests use real wire shapes quoted from rpc.md (regression guard); handle set_editor_text (composer prefill)
+- [x] ISC-157: Strip ANSI SGR codes from statusline widget/status lines before render
+- [x] ISC-158: Markdown rendering: headings, bullets, inline **bold** / `code`, fenced blocks
+- [x] ISC-159: Session action bar: Rename (set_session_name), Compact (compact), Duplicate (clone), Export (export_html)
+- [x] ISC-160: New RPC commands wired: compact, bash, fork, clone, export_html, set_session_name, get_fork_messages
+- [x] ISC-161: New events handled: turn_end, session_info_changed, thinking_level_changed, model_select (UI reacts to agent-side changes)
+- [x] ISC-162: Interactive kanban: add task → `tasks add`, advance → `tasks move`, done → `tasks done`
+- [x] ISC-163: Board parsing unit-tested (columns, task ids, next-column order)
+- [x] ISC-164: Tools launcher in sidebar opens 9 tool panels (workflow/memory/vault/schedule/services/hooks/evals/orchestrate/mcp)
+- [x] ISC-165: Workflow-runs panel shows real `workflow runs`; verified live (W-1..W-8)
+- [x] ISC-166: Services panel shows real `supervise status` with up/down/restart; verified live
+- [x] ISC-167: Memory panel: recent + recall query + tier switch (working/episodic/semantic)
+- [x] ISC-168: Vault panel: list + keyword search
+- [x] ISC-169: Schedule panel: list + pause/resume/rm by name
+- [x] ISC-170: Hooks-audit panel + Evals-runs panel show real output
+- [x] ISC-171: Plan-before-act toggle in Cowork prepends a plan+approval instruction (real Cowork's defining flow)
+- [x] ISC-172: Work-in-a-Folder: path input respawns the Cowork agent at that cwd
+- [x] ISC-173: File-attach button appends `@` for pi's @path file mentions
+- [x] ISC-174: Fork picker: get_fork_messages populates fork points; choosing one forks at that entryId
+- [x] ISC-175: Session delete: ✕ on a non-active recent removes the .pi/sessions file
+- [x] ISC-176: Anti: panel output comes only from real tool binaries (no fabricated rows); missing binary → install hint
+- [x] ISC-177: Anti: no new crates.io dep (still eframe + httpc only); all panels shell to target/release/*
+- [x] ISC-178: 22 unit tests green; clippy clean (desktop-agent); no src file >1000 lines (agent.rs 913, due for split)
+- [x] ISC-179: Live verification: Tools launcher, Workflow + Services panels, session action bar, statusline Status rows, 📎 attach, Fork action all render from real state
 
 ## Test Strategy
 

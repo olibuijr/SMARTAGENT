@@ -221,6 +221,49 @@ impl RpcClient {
         self.send("get_commands", vec![]);
     }
 
+    pub fn get_available_models(&self) {
+        self.send("get_available_models", vec![]);
+    }
+
+    pub fn set_model(&self, provider: &str, model_id: &str) {
+        self.send(
+            "set_model",
+            vec![("provider", jsonw::s(provider)), ("modelId", jsonw::s(model_id))],
+        );
+    }
+
+    pub fn set_thinking_level(&self, level: &str) {
+        self.send("set_thinking_level", vec![("level", jsonw::s(level))]);
+    }
+
+    pub fn compact(&self) {
+        self.send("compact", vec![]);
+    }
+
+    pub fn bash(&self, command: &str) {
+        self.send("bash", vec![("command", jsonw::s(command))]);
+    }
+
+    pub fn fork(&self, entry_id: &str) {
+        self.send("fork", vec![("entryId", jsonw::s(entry_id))]);
+    }
+
+    pub fn clone_session(&self) {
+        self.send("clone", vec![]);
+    }
+
+    pub fn export_html(&self, output_path: &str) {
+        self.send("export_html", vec![("outputPath", jsonw::s(output_path))]);
+    }
+
+    pub fn set_session_name(&self, name: &str) {
+        self.send("set_session_name", vec![("name", jsonw::s(name))]);
+    }
+
+    pub fn get_fork_messages(&self) {
+        self.send("get_fork_messages", vec![]);
+    }
+
     /// Reply to an `extension_ui_request` (ISC-103..110).
     pub fn ext_ui_reply(&self, req_id: &str, fields: Vec<(&str, Value)>) {
         let mut all = vec![

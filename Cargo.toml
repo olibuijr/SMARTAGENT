@@ -24,6 +24,7 @@ members = [
     "crates/tasks",
     "crates/workflow",
     "crates/hooks",
+    "crates/gateway",
     "desktop-agent",
 ]
 

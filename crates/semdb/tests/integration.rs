@@ -36,20 +36,48 @@ fn cli_roundtrip() {
     let s = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
     cli::run(&s(&["create", &db])).unwrap();
-    cli::run(&s(&["put", &db, "--id", "a", "--vector", "1,0,0", "--meta", r#"{"t":"first"}"#]))
-        .unwrap();
+    cli::run(&s(&[
+        "put",
+        &db,
+        "--id",
+        "a",
+        "--vector",
+        "1,0,0",
+        "--meta",
+        r#"{"t":"first"}"#,
+    ]))
+    .unwrap();
     cli::run(&s(&["put", &db, "--id", "b", "--vector", "0,1,0"])).unwrap();
 
     let got = cli::run(&s(&["get", &db, "--id", "a"])).unwrap();
     assert!(got.contains("first"));
 
-    let hits = cli::run(&s(&["search", &db, "--vector", "0.9,0.1,0", "--k", "1", "--exact"]))
-        .unwrap();
+    let hits = cli::run(&s(&[
+        "search",
+        &db,
+        "--vector",
+        "0.9,0.1,0",
+        "--k",
+        "1",
+        "--exact",
+    ]))
+    .unwrap();
     assert!(hits.lines().next().unwrap().contains("\ta\t"));
 
     cli::run(&s(&["del", &db, "--id", "a"])).unwrap();
     assert!(cli::run(&s(&["get", &db, "--id", "a"])).is_err());
     std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn cli_help_flags_work_after_subcommands() {
+    let s = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    let help = cli::run(&s(&["embed", "--help"])).unwrap();
+    assert!(help.contains("semdb embed   <db> --id X --text"));
+
+    let help = cli::run(&s(&["search", "-h"])).unwrap();
+    assert!(help.contains("semdb search  <db>"));
 }
 
 #[test]
@@ -60,7 +88,8 @@ fn ann_recall_vs_brute_force() {
     let n = 1000;
     let dim = 32;
     for i in 0..n {
-        db.put(&format!("v{i}"), "", rand_vec(&mut seed, dim)).unwrap();
+        db.put(&format!("v{i}"), "", rand_vec(&mut seed, dim))
+            .unwrap();
     }
 
     let k = 10;
@@ -68,8 +97,14 @@ fn ann_recall_vs_brute_force() {
     let mut total_overlap = 0usize;
     for _ in 0..queries {
         let q = rand_vec(&mut seed, dim);
-        let exact: Vec<String> = cli::search(&db, &q, k, true).into_iter().map(|r| r.0).collect();
-        let approx: Vec<String> = cli::search(&db, &q, k, false).into_iter().map(|r| r.0).collect();
+        let exact: Vec<String> = cli::search(&db, &q, k, true)
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
+        let approx: Vec<String> = cli::search(&db, &q, k, false)
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
         total_overlap += approx.iter().filter(|id| exact.contains(id)).count();
     }
     let recall = total_overlap as f64 / (queries * k) as f64;
@@ -113,7 +148,9 @@ fn kill9_recovery() {
         .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(700));
     // SIGKILL the whole loop (kill -9).
-    let _ = Command::new("pkill").args(["-9", "-P", &child.id().to_string()]).status();
+    let _ = Command::new("pkill")
+        .args(["-9", "-P", &child.id().to_string()])
+        .status();
     let _ = child.kill();
     let _ = child.wait();
 
@@ -155,9 +192,15 @@ fn mid_file_corruption_truncates_later_records() {
     std::fs::write(&path, &bytes).unwrap();
 
     let db = Db::open(&path).unwrap(); // must not error
-    // r1 survives; r2 (corrupted) and r3 (after the boundary) are gone.
-    assert!(db.get("r1").is_some(), "record before corruption should survive");
-    assert!(db.get("r3").is_none(), "records after a mid-file corruption are truncated away");
+                                       // r1 survives; r2 (corrupted) and r3 (after the boundary) are gone.
+    assert!(
+        db.get("r1").is_some(),
+        "record before corruption should survive"
+    );
+    assert!(
+        db.get("r3").is_none(),
+        "records after a mid-file corruption are truncated away"
+    );
     std::fs::remove_file(&path).unwrap();
 }
 
@@ -182,13 +225,17 @@ fn compact_survives_stale_tmp_and_preserves_live_after_delete() {
     let db2 = Db::open(&path).unwrap();
     assert!(db2.get("keep").is_some());
     assert!(db2.get("added").is_some());
-    assert!(db2.get("drop").is_none(), "deleted entry must not resurrect after compact");
+    assert!(
+        db2.get("drop").is_none(),
+        "deleted entry must not resurrect after compact"
+    );
     std::fs::remove_file(&path).unwrap();
 }
 
 #[test]
 fn rejects_mismatched_dimensions() {
-    let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/semdb-dim");
+    let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch/semdb-dim");
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     let mut db = semdb::storage::Db::create(&d.join("t.semdb")).unwrap();

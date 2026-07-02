@@ -4,6 +4,7 @@
 use eframe::egui::{self, Align, Color32, Layout, Vec2};
 
 use crate::emit::Emit;
+use crate::icons;
 use crate::jsonw::truncate_chars;
 use crate::root;
 use crate::theme;
@@ -20,6 +21,20 @@ pub fn render(ui: &mut egui::Ui, app: &App, emits: &mut Vec<Emit>) {
     if row(ui, w, "✦  New session", theme::TEXT(), false).clicked() {
         emits.push(Emit::NewSession);
     }
+    ui.add_space(6.0);
+    ui.separator();
+
+    // Tools launcher.
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.colored_label(theme::TEXT_FAINT(), egui::RichText::new("Tools").size(12.5).strong());
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.add_space(12.0);
+        ui.vertical(|ui| crate::panels::launcher(ui, w, app.active_panel, emits));
+    });
     ui.add_space(6.0);
     ui.separator();
 
@@ -109,10 +124,20 @@ fn session_list(ui: &mut egui::Ui, app: &App, w: f32, emits: &mut Vec<Emit>) {
                 title = truncate_chars(&title, 36);
             }
             let color = if sel { theme::TEXT() } else { theme::TEXT_MUTED() };
-            let resp = row2(ui, w, &title, &crate::sessions::relative_time(now, s.mtime_secs), color, sel);
-            if resp.clicked() {
-                emits.push(Emit::SwitchSession(s.path.clone()));
-            }
+            ui.horizontal(|ui| {
+                let resp = row2(ui, w - 30.0, &title, &crate::sessions::relative_time(now, s.mtime_secs), color, sel);
+                if resp.clicked() {
+                    emits.push(Emit::SwitchSession(s.path.clone()));
+                }
+                if !sel
+                    && ui
+                        .add(egui::Button::new(egui::RichText::new("✕").size(11.0).color(theme::TEXT_FAINT())).fill(Color32::TRANSPARENT))
+                        .on_hover_text("Delete session")
+                        .clicked()
+                {
+                    emits.push(Emit::DeleteSession(s.path.clone()));
+                }
+            });
         }
     });
 }

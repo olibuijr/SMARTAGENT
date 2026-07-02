@@ -45,6 +45,8 @@ impl AgentConn {
         match RpcClient::spawn(pi, &self.cwd, ctx.clone()) {
             Ok(c) => {
                 c.get_state();
+                c.get_available_models();
+                c.get_commands();
                 self.client = Some(c);
                 self.state.connected = false;
                 self.state.error_banner = None;
@@ -84,6 +86,11 @@ impl AgentConn {
         }
         state.prune_dialogs();
 
+        // An extension asked to prefill the composer (set_editor_text).
+        if let Some(text) = state.pending_editor_text.take() {
+            self.input = text;
+        }
+
         // Flush a prompt queued before the child was ready (ISC-131).
         if state.connected {
             if let Some(text) = state.pending_prompt.take() {
@@ -118,6 +125,66 @@ impl AgentConn {
         if let Some(c) = &self.client {
             c.abort();
         }
+    }
+
+    pub fn set_model(&self, provider: &str, model_id: &str) {
+        if let Some(c) = &self.client {
+            c.set_model(provider, model_id);
+            c.get_state();
+        }
+    }
+
+    pub fn set_thinking(&self, level: &str) {
+        if let Some(c) = &self.client {
+            c.set_thinking_level(level);
+            c.get_state();
+        }
+    }
+
+    pub fn compact(&self) {
+        if let Some(c) = &self.client {
+            c.compact();
+        }
+    }
+
+    pub fn run_bash(&self, cmd: &str) {
+        if let Some(c) = &self.client {
+            c.bash(cmd);
+        }
+    }
+
+    pub fn fork(&self, entry_id: &str) {
+        if let Some(c) = &self.client {
+            c.fork(entry_id);
+            c.get_state();
+            c.get_messages();
+        }
+    }
+
+    pub fn list_fork_points(&self) {
+        if let Some(c) = &self.client {
+            c.get_fork_messages();
+        }
+    }
+
+    pub fn clone_session(&self) {
+        if let Some(c) = &self.client {
+            c.clone_session();
+            c.get_state();
+        }
+    }
+
+    pub fn export_html(&self, path: &str) {
+        if let Some(c) = &self.client {
+            c.export_html(path);
+        }
+    }
+
+    pub fn rename(&mut self, name: &str) {
+        if let Some(c) = &self.client {
+            c.set_session_name(name);
+        }
+        self.state.session_name = name.to_string();
     }
 
     pub fn new_session(&mut self, pi: &Path, ctx: &egui::Context) {

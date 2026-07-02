@@ -2,6 +2,7 @@
 //! (RPC mode). Module map in desktop-agent/COMPONENTS.md.
 
 mod agent;
+mod board;
 mod chat;
 mod code;
 mod composer;
@@ -10,8 +11,10 @@ mod cowork;
 mod data;
 mod dialogs;
 mod emit;
+mod icons;
 mod inspector;
 mod jsonw;
+mod panels;
 mod root;
 mod rpc;
 mod sessions;
@@ -63,7 +66,16 @@ pub struct App {
     pub git_status: Vec<String>,
     pub git_is_repo: bool,
     pub tasks_board: Vec<String>,
+    pub scheduled_jobs: Vec<String>,
     pub inspector_open: bool,
+    pub rename_active: bool,
+    pub rename_buf: String,
+    pub board_input: String,
+    pub active_panel: Option<panels::Panel>,
+    pub panel_out: Vec<String>,
+    pub panel_input: String,
+    pub plan_first: bool,
+    pub folder_input: String,
     startup_error: Option<String>,
 }
 
@@ -96,14 +108,25 @@ impl App {
             git_status: Vec::new(),
             git_is_repo: false,
             tasks_board: Vec::new(),
+            scheduled_jobs: Vec::new(),
             inspector_open: true,
+            rename_active: false,
+            rename_buf: String::new(),
+            board_input: String::new(),
+            active_panel: None,
+            panel_out: Vec::new(),
+            panel_input: String::new(),
+            plan_first: false,
+            folder_input: String::new(),
             startup_error,
         };
+        icons::install(ctx);
         theme::start_watcher(ctx.clone());
         if app.startup_error.is_none() {
             app.refresh_sessions();
             app.refresh_projects();
             app.refresh_tasks();
+            app.refresh_scheduled();
             // Boot the Chat agent immediately in the background (ISC-131):
             // window appears now, child connects when ready.
             app.chat.ensure(&app.paths.pi.clone(), ctx);
@@ -176,6 +199,21 @@ impl eframe::App for App {
         theme::apply(ctx);
         self.pump_all(ctx);
 
+        // Drag-and-drop files → append @path mentions to the active composer.
+        let dropped: Vec<PathBuf> =
+            ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        if !dropped.is_empty() {
+            if let Some(conn) = self.active_conn_mut() {
+                for p in dropped {
+                    if !conn.input.is_empty() && !conn.input.ends_with(' ') {
+                        conn.input.push(' ');
+                    }
+                    conn.input.push('@');
+                    conn.input.push_str(&p.to_string_lossy());
+                }
+            }
+        }
+
         let mut emits: Vec<Emit> = Vec::new();
 
         egui::SidePanel::left("sidebar")
@@ -200,8 +238,12 @@ impl eframe::App for App {
                     ..egui::Frame::NONE
                 })
                 .show(ctx, |ui| {
+                    let mut rename_active = self.rename_active;
+                    let mut rename_buf = std::mem::take(&mut self.rename_buf);
                     let state = self.active_conn().map(|c| &c.state);
-                    inspector::render(ui, state, &mut emits);
+                    inspector::render(ui, state, &mut rename_active, &mut rename_buf, &mut emits);
+                    self.rename_active = rename_active;
+                    self.rename_buf = rename_buf;
                 });
         }
 
@@ -215,16 +257,21 @@ impl eframe::App for App {
                 if !self.inspector_open {
                     reopen_inspector_button(ui, &mut emits);
                 }
-                match self.active_tab {
-                    Tab::Chat => {
-                        let user = root::username();
-                        chat::render(ui, &mut self.chat, &user, &mut emits);
+                if let Some(panel) = self.active_panel {
+                    panels::render(ui, panel, &self.panel_out, &mut self.panel_input, &mut emits);
+                } else {
+                    match self.active_tab {
+                        Tab::Chat => {
+                            let user = root::username();
+                            chat::render(ui, &mut self.chat, &user, &mut emits);
+                        }
+                        Tab::Cowork => {
+                            let board = self.tasks_board.clone();
+                            let scheduled = self.scheduled_jobs.clone();
+                            cowork::render(ui, &mut self.cowork, &board, &scheduled, &mut self.board_input, self.plan_first, &mut self.folder_input, &mut emits);
+                        }
+                        Tab::Code => code::render(ui, self, &mut emits),
                     }
-                    Tab::Cowork => {
-                        let board = self.tasks_board.clone();
-                        cowork::render(ui, &mut self.cowork, &board, &mut emits);
-                    }
-                    Tab::Code => code::render(ui, self, &mut emits),
                 }
             });
 

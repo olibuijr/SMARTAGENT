@@ -126,6 +126,61 @@ impl App {
         };
     }
 
+    /// `schedule list` output for the Cowork Scheduled section (ISC-143).
+    pub fn refresh_scheduled(&mut self) {
+        let bin = self.paths.root.join("target").join("release").join("schedule");
+        if !bin.exists() {
+            self.scheduled_jobs = Vec::new();
+            return;
+        }
+        let out = Command::new(&bin).arg("list").current_dir(&self.paths.root).output();
+        self.scheduled_jobs = match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.to_string())
+                .take(20)
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+    }
+
+    /// Run a tool binary at repo root and store its output for a Tools panel.
+    pub fn panel_exec(&mut self, bin: &str, args: &[&str]) {
+        let path = self.paths.root.join("target").join("release").join(bin);
+        if !path.exists() {
+            self.panel_out = vec![format!("{bin} binary not built — run ./build.sh")];
+            return;
+        }
+        let out = Command::new(&path).args(args).current_dir(&self.paths.root).output();
+        self.panel_out = match out {
+            Ok(o) => {
+                let mut text = String::from_utf8_lossy(&o.stdout).to_string();
+                let err = String::from_utf8_lossy(&o.stderr);
+                if !err.trim().is_empty() {
+                    text.push_str(&err);
+                }
+                if text.trim().is_empty() {
+                    vec!["(no output)".to_string()]
+                } else {
+                    text.lines().map(crate::agent::strip_ansi).take(500).collect()
+                }
+            }
+            Err(e) => vec![format!("error: {e}")],
+        };
+    }
+
+    /// Run a `tasks` subcommand at repo root, then refresh the board (ISC-156).
+    pub fn run_tasks(&mut self, args: &[&str]) {
+        if self.paths.tasks_bin.exists() {
+            let _ = Command::new(&self.paths.tasks_bin)
+                .args(args)
+                .current_dir(&self.paths.root)
+                .output();
+        }
+        self.refresh_tasks();
+    }
+
     /// `tasks board` output for the Cowork kanban strip (ISC-77/82).
     pub fn refresh_tasks(&mut self) {
         if !self.paths.tasks_bin.exists() {
