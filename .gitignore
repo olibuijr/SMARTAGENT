@@ -1,3 +1,4 @@
 .refrepos/
 target/
 *.log
+workspaces/

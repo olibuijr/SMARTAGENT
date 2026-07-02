@@ -26,7 +26,11 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    vault/        markdown second-brain read/write/link/search (Obsidian pattern)
    search/       web search client → self-hosted SearXNG instance
    browser/      wrap AkurAI-AgentBrowser snapshots (Browser Use role)
-   orchestrate/  subagent spawn/route/fan-out via akurai-router (LangGraph role)
+   orchestrate/  subagent spawn/route/fan-out via akurai-router (LangGraph role);
+                 subagent workspaces live in ./workspaces/ (project dir, gitignored),
+                 launched from the project cwd
+   mcp/          MCP client bridge — connect pi to any MCP server (stdio + HTTP)
+   context/      principal identity/context loader (TELOS pattern) injected per session
    schedule/     cron + wake-ups + durable background tasks
    skills/       SKILL.md loader (Agent Skills open standard)
    sandbox/      isolated exec — worktrees + landlock/namespaces (Daytona role)
