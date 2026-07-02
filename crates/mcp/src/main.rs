@@ -1,6 +1,6 @@
 //! mcp CLI: tools / call  (--cmd for stdio, --url for HTTP)
 
-use httpc::args::flag;
+use httpc::args::{flag, has};
 use std::process::ExitCode;
 
 use mcp::{http::HttpClient, jsonrpc, stdio::StdioClient};
@@ -38,8 +38,16 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("tools") => {
             let mut t = Transport::open(args)?;
             let res = t.call("tools/list", "{}")?;
-            let tools = jsonrpc::parse_tools(&res);
+            let mut tools = jsonrpc::parse_tools(&res);
+            if let Some(f) = flag(args, "--filter") {
+                let fl = f.to_ascii_lowercase();
+                tools.retain(|(n, d)| n.to_ascii_lowercase().contains(&fl) || d.to_ascii_lowercase().contains(&fl));
+            }
             if tools.is_empty() { return Ok("no tools".into()); }
+            // --names-only: just tool names (skip the full schema descriptions).
+            if has(args, "--names-only") {
+                return Ok(tools.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>().join("\n"));
+            }
             Ok(tools.iter().map(|(n, d)| format!("{n}\t{d}")).collect::<Vec<_>>().join("\n"))
         }
         Some("call") => {
@@ -48,7 +56,14 @@ fn run(args: &[String]) -> Result<String, String> {
             let params = format!(r#"{{"name":"{}","arguments":{}}}"#, tool, call_args);
             let mut t = Transport::open(args)?;
             let res = t.call("tools/call", &params)?;
-            Ok(jsonrpc::parse_call(&res))
+            let out = jsonrpc::parse_call(&res);
+            // --head N: cap the response length (a chatty tool can flood context).
+            match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
+                Some(n) if out.chars().count() > n => {
+                    Ok(format!("{}…[truncated]", out.chars().take(n).collect::<String>()))
+                }
+                _ => Ok(out),
+            }
         }
         _ => Ok(HELP.trim().into()),
     }

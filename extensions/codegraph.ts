@@ -17,14 +17,16 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codegraph",
 		label: "Code Graph",
-		description: "Rust code knowledge graph. Actions: 'index' scans a repo dir into a graph (add embed=true for semantic search); 'defs'/'callers' walk the structural graph for a symbol; 'search' finds symbols by meaning; 'stats' summarizes. Use to understand where things are defined and what calls what.",
+		description: "Rust code knowledge graph. Actions: 'index' scans a repo dir into a graph (add embed=true for semantic search); 'defs'/'callers'/'refs'/'impls' walk the structural graph for a symbol; 'path' finds a call path between two symbols; 'search' finds symbols by meaning; 'stats' summarizes. Use to understand where things are defined and what calls what.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["index", "defs", "callers", "refs", "search", "stats"] },
+				action: { type: "string", enum: ["index", "defs", "callers", "refs", "impls", "path", "search", "stats"] },
 				repo: { type: "string", description: "repo dir to index (index action)" },
 				embed: { type: "boolean", description: "build semantic index too (index action)" },
-				name: { type: "string", description: "symbol name (defs/callers/refs)" },
+				name: { type: "string", description: "symbol name (defs/callers/refs/impls); the FROM symbol for path" },
+				to: { type: "string", description: "TO symbol (path — finds a call path from name→to)" },
+				limit: { type: "number", description: "cap defs/callers/refs/impls results (default 50)" },
 				query: { type: "string", description: "semantic query (search)" },
 				k: { type: "number", description: "result count for search (default 5)" },
 			},
@@ -38,8 +40,10 @@ export default function (pi: ExtensionAPI) {
 				out = run(["search", GRAPH, p.query ?? "", "--k", String(p.k ?? 5)]);
 			} else if (p.action === "stats") {
 				out = run(["stats", GRAPH]);
+			} else if (p.action === "path") {
+				out = run(["path", GRAPH, p.name ?? "", p.to ?? ""]);
 			} else {
-				out = run([p.action, GRAPH, p.name ?? ""]);
+				out = run([p.action, GRAPH, p.name ?? "", ...(p.limit != null ? ["--limit", String(p.limit)] : [])]);
 			}
 			return { content: [{ type: "text", text: out }] };
 		},

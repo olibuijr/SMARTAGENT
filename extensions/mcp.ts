@@ -25,14 +25,25 @@ export default function (pi: ExtensionAPI) {
 				url: { type: "string", description: "streamable-HTTP server URL" },
 				tool: { type: "string", description: "tool name (call action)" },
 				args: { type: "string", description: "JSON arguments object (call action)" },
+				namesOnly: { type: "boolean", description: "tools: names only, skip schemas (cheap discovery)" },
+				filter: { type: "string", description: "tools: only tools matching this substring" },
+				head: { type: "number", description: "call: cap response length" },
 			},
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
 			const conn = p.cmd ? ["--cmd", p.cmd] : p.url ? ["--url", p.url] : [];
-			const out = p.action === "tools"
-				? run(["tools", ...conn])
-				: run(["call", ...conn, "--tool", p.tool ?? "", "--args", p.args ?? "{}"]);
+			let out: string;
+			if (p.action === "tools") {
+				const a = ["tools", ...conn];
+				if (p.namesOnly) a.push("--names-only");
+				if (p.filter) a.push("--filter", p.filter);
+				out = run(a);
+			} else {
+				const a = ["call", ...conn, "--tool", p.tool ?? "", "--args", p.args ?? "{}"];
+				if (p.head != null) a.push("--head", String(p.head));
+				out = run(a);
+			}
 			return { content: [{ type: "text", text: out }] };
 		},
 	});

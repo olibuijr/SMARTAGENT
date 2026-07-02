@@ -47,6 +47,60 @@ impl Graph {
             .collect()
     }
 
+    /// Types that implement `trait_name` (impls edges to → from).
+    pub fn impls(&self, trait_name: &str) -> Vec<String> {
+        let mut v: Vec<String> = self
+            .edges
+            .iter()
+            .filter(|e| e.kind == "impls" && e.to == trait_name)
+            .map(|e| e.from.clone())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    /// A shortest call path from `from` to `to` (BFS over "calls" edges).
+    /// Returns the chain of symbol names, or empty if unreachable.
+    pub fn call_path(&self, from: &str, to: &str) -> Vec<String> {
+        use std::collections::{HashMap, VecDeque};
+        if from == to {
+            return vec![from.to_string()];
+        }
+        let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+        for e in &self.edges {
+            if e.kind == "calls" {
+                adj.entry(&e.from).or_default().push(&e.to);
+            }
+        }
+        let mut prev: HashMap<&str, &str> = HashMap::new();
+        let mut q = VecDeque::new();
+        q.push_back(from);
+        prev.insert(from, from);
+        while let Some(cur) = q.pop_front() {
+            if let Some(nexts) = adj.get(cur) {
+                for &n in nexts {
+                    if !prev.contains_key(n) {
+                        prev.insert(n, cur);
+                        if n == to {
+                            // Reconstruct.
+                            let mut chain = vec![to];
+                            let mut c = to;
+                            while c != from {
+                                c = prev[c];
+                                chain.push(c);
+                            }
+                            chain.reverse();
+                            return chain.into_iter().map(String::from).collect();
+                        }
+                        q.push_back(n);
+                    }
+                }
+            }
+        }
+        Vec::new()
+    }
+
     /// Functions that call `name`.
     pub fn callers(&self, name: &str) -> Vec<String> {
         let mut v: Vec<String> = self

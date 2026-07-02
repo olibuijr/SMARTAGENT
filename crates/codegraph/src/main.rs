@@ -35,6 +35,14 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("defs") => query(args, |g, n| g.defs(n), "not defined")?.pipe(Ok),
         Some("refs") => query(args, |g, n| g.refs(n), "no references")?.pipe(Ok),
         Some("callers") => query(args, |g, n| g.callers(n), "no callers")?.pipe(Ok),
+        Some("impls") => query(args, |g, n| g.impls(n), "no implementors")?.pipe(Ok),
+        Some("path") => {
+            let graph = Graph::load(&graph_arg(args)?)?;
+            let from = args.get(2).ok_or("usage: codegraph path <graph> <from> <to>")?;
+            let to = args.get(3).ok_or("usage: codegraph path <graph> <from> <to>")?;
+            let chain = graph.call_path(from, to);
+            Ok(if chain.is_empty() { format!("no call path {from} → {to}") } else { chain.join(" → ") })
+        }
         Some("stats") => {
             let graph = Graph::load(&graph_arg(args)?)?;
             Ok(graph.stats())
@@ -56,8 +64,19 @@ fn run(args: &[String]) -> Result<String, String> {
 fn query(args: &[String], f: impl Fn(&Graph, &str) -> Vec<String>, empty: &str) -> Result<String, String> {
     let graph = Graph::load(&graph_arg(args)?)?;
     let name = args.get(2).ok_or("symbol name required")?;
-    let res = f(&graph, name);
-    Ok(if res.is_empty() { empty.to_string() } else { res.join("\n") })
+    let mut res = f(&graph, name);
+    if res.is_empty() {
+        return Ok(empty.to_string());
+    }
+    // Cap results (default 50) so a common symbol's refs/callers can't flood.
+    let limit = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(50usize);
+    let total = res.len();
+    res.truncate(limit);
+    let mut out = res.join("\n");
+    if total > limit {
+        out.push_str(&format!("\n…[{limit} of {total}; raise --limit]"));
+    }
+    Ok(out)
 }
 
 fn graph_arg(args: &[String]) -> Result<PathBuf, String> {
