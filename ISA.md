@@ -128,4 +128,5 @@ Integration:
 - 2026-07-02: SearXNG hosted not rewritten — engine-scraper maintenance is the value, client is the port surface.
 - 2026-07-02: TLS out of scope in-tool; https egress routed via akurai-router/localhost proxies.
 - 2026-07-02: E5 ISC floor (≥256) deferred — project ISA starts at 36 spine ISCs; per-crate ISCs grow during waves (refined: will expand as crates land).
+- 2026-07-02: TUI statusline shipped — pi natively supports `ctx.ui.setStatus` + `setWidget(placement: belowEditor)`; added `supervise statusline` Rust verb + `extensions/statusline.ts` (per-tool footer statuses from tool_execution events, services widget below input). No new tool registered; logic stays in Rust per constraint.
 - 2026-07-02: ISC-26 landed and certified — `crates/rag` ports the RAGFlow ingestion/retrieval slice into std-only Rust, stores chunks as semdb rows, returns `[ID:...]` cited chunks, has `extensions/rag.ts`, passes codex fusion tester, and was driven through `./pi -p`.

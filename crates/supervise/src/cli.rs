@@ -127,6 +127,26 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             Ok(out.join("\n"))
         }
+        "statusline" => {
+            // Compact single line for UI statuslines: `name:state[:health]` per service.
+            let mut parts = Vec::new();
+            for svc in ctx.registry.iter() {
+                let rec = ctx.store.get(svc.name);
+                let alive = ctx.alive(svc, &rec);
+                let mark = if alive {
+                    match ctx.probe_ok(svc) {
+                        Some(false) => "probe-fail",
+                        _ => "up",
+                    }
+                } else if rec.desired_up {
+                    "DOWN"
+                } else {
+                    "off"
+                };
+                parts.push(format!("{}:{}", svc.name, mark));
+            }
+            Ok(parts.join(" "))
+        }
         "watch" => {
             // Self-healing loop: restart any enabled+desired service that died.
             // This is the "mini-systemd" — the one process that must stay up;
@@ -158,11 +178,29 @@ pub fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::run;
+
+    #[test]
+    fn statusline_is_one_compact_line() {
+        let out = run(&["statusline".to_string()]).unwrap();
+        assert!(!out.contains('\n'));
+        assert!(!out.is_empty());
+        for part in out.split(' ') {
+            let (name, state) = part.split_once(':').expect("name:state token");
+            assert!(!name.is_empty());
+            assert!(matches!(state, "up" | "probe-fail" | "DOWN" | "off"));
+        }
+    }
+}
+
 const HELP: &str = r#"
 supervise — pure-Rust process manager for SMARTAGENT services
 
 USAGE:
   supervise status                 show each service: state, pid, health probe
+  supervise statusline             compact one-line status (for UI statuslines)
   supervise up   [service]         start all enabled services (or one)
   supervise down [service]         stop all (or one); clears desired-up
   supervise restart <service>      stop then start one service

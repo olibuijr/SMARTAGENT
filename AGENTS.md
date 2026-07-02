@@ -139,6 +139,7 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `voice` | `voice` | STT/TTS bridge (Pipecat concept). BUILT+TESTED but DELISTED (extensions/disabled/) — no titan speech server deployed |
 | `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
 | _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |
+| _(no tool)_ | `supervise` | `statusline.ts`: TUI statusline — per-tool ⚙/✓/✗+duration footer statuses on tool_execution events, plus a belowEditor services widget fed by `supervise statusline` (refreshed on session start, after service-touching tools, every 30s) |
 
 ## Conventions
 

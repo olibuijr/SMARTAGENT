@@ -17,6 +17,10 @@ runs `supervise watch`.
 - JSONL journals (schedule, evals) migrated to semdb tables — no bespoke JSONL remains.
 - Dedup: one `json::Value` (semdb re-exports httpc::json), `semdb::http` is a thin httpc wrapper, `flag()`/`has()` unified into `httpc::args`, embeddings resolution centralized in `Config::embeddings()`.
 
+**TUI statusline (new):**
+- `supervise statusline` verb: compact one-line `name:state` service status for UI consumption (+ unit test).
+- `extensions/statusline.ts`: per-tool footer statuses (running/✓/✗ + duration, auto-clear) via pi `tool_execution_*` events + `ctx.ui.setStatus`, and a belowEditor services widget via `ctx.ui.setWidget` fed by the Rust verb. Guarded by `ctx.hasUI` (no-op headless).
+
 **Agent capabilities & continuity:**
 - Session memory: session intent captured on shutdown → episodic; recent recall injected at launch.
 - Voice delisted (built but no titan STT/TTS deployed) → `extensions/disabled/`.
