@@ -44,10 +44,15 @@ for ext in "$ROOT"/extensions/*.ts; do
 done
 
 # Project isolation: disable pi's AGENTS.md ancestor walk (it would pull in
-# ~/AGENTS.md) and inject ONLY this repo's AGENTS.md explicitly.
+# ~/AGENTS.md). Inject explicitly: the repo's AGENTS.md, plus the invocation
+# cwd's AGENTS.md when launched from elsewhere.
+INVOKE_CWD="$(pwd)"
 set -- --no-context-files "$@"
 if [ -f "$ROOT/AGENTS.md" ]; then
     set -- --append-system-prompt "$ROOT/AGENTS.md" "$@"
+fi
+if [ "$INVOKE_CWD" != "$ROOT" ] && [ -f "$INVOKE_CWD/AGENTS.md" ]; then
+    set -- --append-system-prompt "$INVOKE_CWD/AGENTS.md" "$@"
 fi
 
 # Inject the tools brief into the agent's initial context so it never has to
@@ -57,5 +62,6 @@ if [ -f "$TOOLS_BRIEF" ]; then
     set -- --append-system-prompt "$TOOLS_BRIEF" "$@"
 fi
 
-cd "$ROOT"
+# Run in the invocation cwd (agent dir/sessions/extension bins are absolute).
+cd "$INVOKE_CWD"
 exec "$PI_BIN" "$@"
