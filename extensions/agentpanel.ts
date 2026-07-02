@@ -24,27 +24,34 @@ const bold = (s: string) => `\x1b[1m${s}${RESET}`;
 const color = (c: string, s: string) => `\x1b[38;5;${c}m${s}${RESET}`;
 const ACCENTS = ["212", "80", "150", "215", "141", "117"];
 
-type Agent = { name: string; state: string; task: string; role: string; activity: string };
+type Agent = { name: string; state: string; task: string; role: string; tools: string; words: string };
 
-function agents(): Agent[] {
+// Data cache: refreshed every REFRESH_MS by a timer; render() must stay cheap
+// because the spinner timer re-renders several times a second.
+let cache: Agent[] = [];
+let frame = 0;
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function refreshAgents(): void {
 	try {
 		const out = execFileSync(GATEWAY, ["agents"], { timeout: 3000, encoding: "utf8" });
-		return out
+		cache = out
 			.split("\n")
 			.filter((l) => l.includes("\t"))
 			.map((l) => {
-				const [name, state, task, role, activity] = l.split("\t");
+				const [name, state, task, role, tools, words] = l.split("\t");
 				return {
 					name: name ?? "?",
 					state: state ?? "idle",
 					task: task ?? "",
 					role: role ?? "Agent",
-					activity: (activity ?? "").trim(),
+					tools: (tools ?? "").trim(),
+					words: (words ?? "").trim(),
 				};
 			})
 			.sort((a, b) => a.name.localeCompare(b.name));
 	} catch {
-		return [];
+		cache = [];
 	}
 }
 
@@ -52,23 +59,28 @@ const clip = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w 
 
 function render(width: number): string[] {
 	const w = Math.max(20, width - 2);
-	const list = agents();
 	const lines: string[] = ["", " " + bold("AGENT TEAM"), ""];
-	if (list.length === 0) {
+	if (cache.length === 0) {
 		lines.push(" " + dim("no agents — gateway offline"));
 		return lines;
 	}
-	list.forEach((a, i) => {
+	cache.forEach((a, i) => {
 		const accent = ACCENTS[i % ACCENTS.length];
 		const working = a.state === "working";
-		// state dot: green = working, orange = idle
-		const icon = working ? color("46", "●") : color("208", "●");
+		// green working / orange idle; working agents get a live spinner
+		const dot = working ? color("46", "●") : color("208", "●");
+		const spin = working ? " " + color(accent, SPIN[(frame + i) % SPIN.length]) : "  ";
 		const name = working ? bold(color(accent, a.name)) : color("252", a.name);
-		lines.push(` ${icon} ${name} ${dim("· " + a.role)}`);
-		const task = a.task && a.task !== "nothing" ? clip(a.task, w - 4) : "idle";
-		lines.push("    " + (working ? color(accent, task) : dim(task)));
-		if (a.activity) {
-			lines.push("    " + dim(clip(a.activity, w - 4)));
+		lines.push(` ${dot}${spin}${name} ${dim("· " + a.role)}`);
+		const task = a.task && a.task !== "nothing" ? clip(a.task, w - 5) : "idle";
+		lines.push("     " + (working ? color(accent, task) : dim(task)));
+		if (a.tools) {
+			// tool ticker: marching dots while working, static when idle
+			const tick = working ? color(accent, ["·  ", "·· ", "···"][frame % 3]) : dim("···");
+			lines.push("     " + dim("⚙ ") + clip(a.tools, w - 10) + " " + tick);
+		}
+		if (a.words) {
+			lines.push("     " + dim("“" + clip(a.words, w - 8) + "”"));
 		}
 		lines.push("");
 	});
@@ -79,6 +91,7 @@ export default function (pi: ExtensionAPI) {
 	let tuiRef: any;
 	let finish: ((r: unknown) => void) | undefined;
 	let timer: ReturnType<typeof setInterval> | undefined;
+	let spinTimer: ReturnType<typeof setInterval> | undefined;
 	let active = false;
 
 	function open(ctx: any): string {
@@ -112,7 +125,14 @@ export default function (pi: ExtensionAPI) {
 				active = false;
 				tuiRef = undefined;
 			});
-		if (!timer) timer = setInterval(() => tuiRef?.requestRender(), REFRESH_MS);
+		refreshAgents();
+		if (!timer) timer = setInterval(refreshAgents, REFRESH_MS);
+		// spinner/ticker frames: cheap (cache-only render), no process spawns
+		if (!spinTimer)
+			spinTimer = setInterval(() => {
+				frame++;
+				if (cache.some((a) => a.state === "working")) tuiRef?.requestRender();
+			}, 350);
 		return "agent team sidebar on (right) — /team toggles";
 	}
 
@@ -120,6 +140,10 @@ export default function (pi: ExtensionAPI) {
 		if (timer) {
 			clearInterval(timer);
 			timer = undefined;
+		}
+		if (spinTimer) {
+			clearInterval(spinTimer);
+			spinTimer = undefined;
 		}
 		finish?.(undefined);
 		finish = undefined;

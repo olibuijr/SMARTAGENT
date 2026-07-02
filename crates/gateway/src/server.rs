@@ -368,21 +368,50 @@ fn role_of(name: &str) -> &'static str {
     }
 }
 
-/// Last visible activity from the agent's own transcript — the honest
-/// per-agent line until board ownership (T-77) exists. Tools show as ⚙name;
-/// otherwise the tail of its last words.
-fn last_activity(name: &str) -> String {
+/// Structured last activity from the agent's own transcript: the recent tool
+/// chain ("tasks→memory→codeindex") and its last words (clean word-boundary
+/// tail) as separate fields — raw log tails render as garbage in the panel.
+fn last_activity(name: &str) -> (String, String) {
     let path = semdb::config::Config::load()
         .data_dir()
         .join("gateway")
         .join(format!("{name}.log"));
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return String::new();
+        return (String::new(), String::new());
     };
-    let tail: String = text.chars().rev().take(220).collect::<String>().chars().rev().collect();
-    let flat = tail.replace('\n', " ").trim().to_string();
-    let snip: String = flat.chars().rev().take(70).collect::<String>().chars().rev().collect();
-    snip.trim_start_matches(['-', ' ']).to_string()
+    let tail: String = text.chars().rev().take(1500).collect::<String>().chars().rev().collect();
+    let tools: Vec<&str> = tail
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("⚙ "))
+        .collect();
+    let chain = tools
+        .iter()
+        .rev()
+        .take(3)
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("→");
+    let words_raw = tail
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("⚙ ") && *l != "---")
+        .last()
+        .unwrap_or("");
+    // keep the freshest words: take the LAST ≤56 chars, then trim to a word start
+    let w: Vec<&str> = words_raw.split_whitespace().collect();
+    let mut words = String::new();
+    for word in w.iter().rev() {
+        if words.chars().count() + word.chars().count() + 1 > 56 {
+            break;
+        }
+        if words.is_empty() {
+            words = (*word).to_string();
+        } else {
+            words = format!("{word} {words}");
+        }
+    }
+    (chain, words)
 }
 
 fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
@@ -390,13 +419,15 @@ fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
         let busy = agent.child.lock().unwrap().is_busy();
         let doing = agent.beat.lock().unwrap().doing_short();
         let state = if busy { "working" } else { "idle" };
+        let (tools, words) = last_activity(&agent.name);
         let line = format!(
-            "{{\"ev\":\"info\",\"data\":\"{}\\t{}\\t{}\\t{}\\t{}\"}}\n",
+            "{{\"ev\":\"info\",\"data\":\"{}\\t{}\\t{}\\t{}\\t{}\\t{}\"}}\n",
             json::escape(&agent.name),
             state,
             json::escape(&doing),
             role_of(&agent.name),
-            json::escape(&last_activity(&agent.name))
+            json::escape(&tools),
+            json::escape(&words)
         );
         let _ = write_side.write_all(line.as_bytes());
     }
