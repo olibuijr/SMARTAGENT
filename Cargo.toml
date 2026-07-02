@@ -13,6 +13,7 @@ members = [
     "crates/secrets",
     "crates/rag",
     "crates/browser",
+    "crates/sa-browser",
     "crates/codeindex",
     "crates/orchestrate",
     "crates/mcp",

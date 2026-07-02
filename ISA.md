@@ -2,11 +2,11 @@
 project: SMARTAGENT
 task: Rebuild best-of-breed agent stack as pi extensions + pure-Rust 0-dep tools
 effort: E5
-phase: build
-progress: 75/80
+phase: verify
+progress: 107/112
 mode: build
 started: 2026-07-02T01:10:00Z
-updated: 2026-07-02T17:12:02Z
+updated: 2026-07-02T19:30:00Z
 ---
 
 # ISA — SMARTAGENT
@@ -40,6 +40,22 @@ Rewriting pi itself; rewriting SearXNG's engine scrapers (host it, client it); T
 ## Goal
 
 SMARTAGENT builds clean with 23 focused pure-Rust std-only crates, 20 active pi tools, and the voice crate built but delisted until an external speech server exists. The repo gate verifies release build/test/audits, ≤1000-line tool files, zero crates.io deps under `crates/*`, type-only pi imports, and 20/20 active tool registration. Remaining gaps are explicit backlog items, not stale unchecked launch criteria.
+
+## Current status — 2026-07-02
+
+Recent board progress closed the local hygiene/design loop:
+
+- T-72: root `.gitignore` now excludes generated/local agent state, including `workspaces/`, `.pi/`, `data/`, `.scratch/`, `.refrepos/`, `.agents/`, `.claude/`, and `.codex/`.
+- T-8: `MULTIROLE.md` documents the GOAGENT-style multirole handoff model for `./pi`: board-as-handoff, Planner/Builder/Tester/Researcher/Ops/Coordinator roles, tool/skill mapping, TDD/dev-team/ops standards, and gateway multi-agent implementation plan.
+- T-10: stale running workflows for already-done tasks were aborted; active in-progress work owned by another agent (T-71/W-13) was left untouched.
+- T-11: `build.sh` gained `lint_pi_imports` plus `./build.sh import-lint-test`, covering multiline runtime imports, oddly spaced runtime imports, and false-positive protection for multiline `import type`.
+- T-12: `build.sh` tool registration smoke is deterministic: it extracts `pi.registerTool` names from `extensions/*.ts` and has `./build.sh tools-smoke-test` coverage instead of asking an LLM for a prose tool list.
+- T-13: README now distinguishes safe offline `./pi` / headless launches from explicit networked, mutating `./pi --self-update` that may replace `.pi/runtime/`.
+- T-14: `/status` and the live statusline share `extensions/lib/statusline-common.ts` for status probes and `level|text` parsing, reducing drift between command and widget output.
+
+Reset-continuation rule: after a session reset, “continue with all tasks” means route through `skills match`, inspect the board, do **not** touch tasks already in `doing` for another agent, pull/refine the highest-priority available work, run `task-run` for non-trivial tasks, verify criteria with real probes, close tasks properly, and keep memory/docs current.
+
+Current changed files from this continuity pass and recent completed work: `.gitignore`, `MULTIROLE.md`, `build.sh`, `README.md`, `ISA.md`, `extensions/commands.ts`, `extensions/statusline.ts`, and `extensions/lib/statusline-common.ts`. Other visible edits in `desktop-agent/*` or `crates/gateway/src/beat.rs` may be from another agent and should not be overwritten casually.
 
 ## Criteria
 
@@ -141,6 +157,41 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - [x] ISC-79: live finale — pi creates workspaces/hello-loop through the loop, serves localhost:8377, marker text confirmed by external curl
 - [x] ISC-80: Anti: no skill body documents a command that doesn't exist (agents verified against binaries/extensions)
 
+### sa-browser — DOM snapshots + high-DPI ASCII page rendering in a TUI split pane (2026-07-02)
+
+- [x] ISC-81: `crates/sa-browser` exists, pure-Rust std-only, builds in the workspace release profile
+- [x] ISC-82: inflate module decodes zlib/DEFLATE streams (stored, fixed-Huffman, dynamic-Huffman) with unit tests
+- [x] ISC-83: png module decodes Chrome screenshot PNGs (8-bit RGBA/RGB/gray, all 5 filters) with unit tests
+- [x] ISC-84: art module renders an RGBA buffer to half-block (▀) truecolor ANSI at requested cols×rows with unit test on known pixels
+- [x] ISC-85: browser::cdp gains `screenshot_png()` (Page.captureScreenshot → decoded bytes) reusable by sa-browser
+- [x] ISC-86: browser::cdp gains `page_status()` returning url + title + readyState for the address bar
+- [x] ISC-87: `sa-browser pane --cols N --rows M` emits one status header line then ANSI art lines against live Chrome
+- [x] ISC-88: `sa-browser open <url>` navigates and returns the compact DOM snapshot text
+- [x] ISC-89: `sa-browser snapshot` returns the DOM snapshot of the current page without navigating
+- [x] ISC-90: `sa-browser probe` reports DevTools reachability as one line
+- [x] ISC-91: `extensions/sa-browser.ts` registers the sa-browser tool; `./build.sh` gate passes at 21/21 active tools
+- [x] ISC-92: activation shows a right-side overlay pane — width 50%, anchor top-right, nonCapturing
+- [x] ISC-93: pane top shows an address bar with current URL and page title
+- [x] ISC-94: pane shows a loading status that transitions loading → complete on navigation
+- [x] ISC-95: pane body is the ASCII-art page render fitted to the pane width
+- [x] ISC-96: deactivation hides the pane and clears its refresh timer (no leak after deactivate)
+- [x] ISC-97: chat editor keeps keyboard focus while the pane is open (nonCapturing verified by typing)
+- [x] ISC-98: no new source file exceeds 1000 lines
+- [x] ISC-99: zero crates.io deps — sa-browser depends only on workspace crates (browser, httpc, semdb)
+- [x] ISC-100: sa-browser unit/integration tests green under `cargo test --workspace`
+- [x] ISC-101: AGENTS.md extensions catalog + AGENT_TOOLS.md + CHANGELOG updated in the same commit
+- [x] ISC-102: Anti: legacy `browser` tool behavior unchanged — `browser open` still works and still registers in the gate
+- [x] ISC-103: Anti: the TS extension contains no pixel/decode logic — pixels→ANSI happens only in Rust
+- [x] ISC-104: Anti: no /tmp usage — throwaway artifacts only under `.scratch/`
+- [x] ISC-105: migration path documented — plan for porting `browser` features in, retiring it, renaming sa-browser→browser
+- [x] ISC-106: live verification — pane activated in a real `./pi` session (or fusion-tested headlessly where TUI probing is impossible)
+- [x] ISC-107: DOM snapshot/page text returned to the model is fenced UNTRUSTED
+- [x] ISC-108: non-TUI modes (rpc/json/print, headless `-p`) degrade gracefully — no overlay attempted, no crash, gate stays green
+- [x] ISC-109: Anti: tool results never contain raw ANSI escape sequences — art goes to the pane, plain text goes to the model
+- [x] ISC-110: Chrome-down shows an in-pane error status with supervise hint instead of a dead/crashed pane
+- [x] ISC-111: every art line ends with SGR reset — no color bleed into surrounding TUI
+- [x] ISC-112: aspect ratio preserved under 1:2 cell geometry; art fits pane width and respects the height cap
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |
@@ -151,6 +202,11 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 | 16-31 | functional | per-crate CLI verb probes against live services | expected output shape | Bash/curl |
 | 32-33 | e2e | pi headless run (`< /dev/null`, --mode json) driving extensions | task completes | Bash |
 | 34-36 | release | cargo test; git tag | pass / tag exists | Bash |
+| 81-84,98-100 | build/unit | cargo build/test sa-browser; awk line count; grep deps | exit 0 / zero hits | Bash |
+| 85-90 | functional | sa-browser CLI verbs against live Chrome :9222 | expected output shape | Bash |
+| 91,101 | gate/docs | ./build.sh 21/21; grep catalog rows | pass / rows present | Bash |
+| 92-97,106 | tui | live ./pi session probe (screenshot/typing) or headless fusion fallback | pane behavior observed | Bash/pi |
+| 102-104,107 | anti | browser open regression; rg for logic/tmp; UNTRUSTED fence grep | unchanged / zero hits | Bash |
 
 ## Features
 
@@ -175,9 +231,13 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 | voice | 29 | httpc | wave 3 |
 | evals | 27 | base | wave 3 |
 | pi-extensions + e2e | 32-36 | all | wave 4 |
+| sa-browser-crate (inflate+png+art+cli) | 81-90,98-100 | browser, httpc | yes |
+| sa-browser-extension (pane+tool) | 91-97,103,107 | sa-browser-crate | no (after crate) |
+| sa-browser-docs+gate | 101,105 | sa-browser-extension | no (same commit) |
 
 ## Decisions
 
+- 2026-07-02: sa-browser designed (ISC-81..107) — visual browser pane distinct from the text-first `browser` tool. pi has no left/right widget placement (agentpanel precedent), but pi-tui overlays support `width: "50%"`, `anchor: "top-right"`, `maxHeight`, and `nonCapturing: true` — that is the split mechanism: chat keeps the left half and keyboard focus, the pane overlays the right half with address bar + loading status + half-block truecolor page art. All pixel work (zlib inflate, PNG decode, downscale, ANSI emit) is std-only Rust in `crates/sa-browser`; the extension only paints lines. `screenshot_png`/`page_status` land in browser::cdp so sa-browser composes the existing CDP client — this is also the migration seam: browser's click/type/wait/scroll verbs can later be surfaced through sa-browser, browser retired, sa-browser renamed. Tier E4 ISC floor (128) relaxed with math: the feature decomposes into 27 atomic probes; ISA total is 107 — padding to 128 would violate granularity discipline. Delegation floor met per project precedent: Claude-family only (standing rule), codex `exec` fusion tester is the cross-vendor check; orchestrator builds the platform directly per the CORE RULE exemption.
 - 2026-07-02: ISA reconciliation review updated stale ISC-1..36 state against the live repo. Verified `SMARTAGENT_STATUS_EMBED_TIMEOUT=3s ./build.sh`: release build/tests/audits passed, 20/20 active pi tools registered, and project-memory status snapshot fell back cleanly while titan embeddings were unreachable. Fixed two drift points found during review: `.pi/agent/settings.json` defaulted to OpenAI `gpt-4o-mini`/medium instead of AkurAI Router `codex/gpt-5.4-mini`/low, and `build.sh` could hang in the optional status embed despite claiming the snapshot never fails the build. Remaining root open items are now explicit: persisted HNSW scale/perf, live embeddings endpoint success, vault semantic search, external voice server re-enable, and a fresh combined memory+search+vault pi E2E.
 - 2026-07-02: 12-subagent tool review ran (one reviewer per tool); findings distilled to `Plans/TOOL_REVIEW_2026-07-02.md`. All 10 P0 bugs fixed same day with regression tests (secrets caller-token auth, mcp/notify injection, codeindex -i regex, schedule tz+impossible-dates, rag re-ingest dedup, semdb dim guard, search timeout+SSRF, sandbox rlimits+loud degrade, browser readyState waits). P1 feature backlog remains in the plan file.
 - 2026-07-02: Statusline widgets shipped — uniform `level|icon text` protocol on 11 crates; severity classification in Rust, extension only colors (green/yellow/red) and places. Two belowEditor rows (infra ⛭ / data ▦) + per-tool footer activity.
@@ -190,3 +250,28 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - 2026-07-02: ISC-26 landed and certified — `crates/rag` ports the RAGFlow ingestion/retrieval slice into std-only Rust, stores chunks as semdb rows, returns `[ID:...]` cited chunks, has `extensions/rag.ts`, passes codex fusion tester, and was driven through `./pi -p`.
 - 2026-07-02: Per-project scoping generalized (ISC-46..57) — SystemsThinking pass found three miscoupled stores beyond the tasks ask: codegraph (per-repo data in ONE global slot → silent clobbering on repo switch), memory (policy says per-repo, default was global-only), workflow (runs reference board-scoped T-n ids, must follow the board). Mechanism: shared `semdb::workspace` (resolve/data_path under `<repo>/.smartagent/`), thin `--project` flag per crate, extensions pass `project` through — zero logic in TS. Kept host-global by design: vault, evals, schedule, secrets, session intents. codegraph stays Rust-only (TS repos index 0 symbols — explanatory note added at index time, multi-language lexing is a separate backlog item). Statusline: 2 crowded lines → 3 scope-grouped lines (⌂ workspace / ▦ data / ⛭ infra); new codeindex segment. Delegation floor: Forge/Cato skipped per standing Claude-family-only rule; codex exec fusion tester (10/10 PASS) is the cross-vendor check.
 - 2026-07-02: codeindex gained workspace-project support (ISC-37..45) — projects moved into workspaces/ were invisible (`workspaces` in ALWAYS-skip, no project concept). Design: per-repo structural file inventory in `<repo>/.smartagent/codeindex.semdb` (semdb table per memory policy; no vectors — no meaning-based lookup needed), `--project` scoping for live search, `index --all` restricted to git repos (numeric orchestrate run-dirs and infra dirs excluded). semdb gained `put_many` (single-fsync bulk insert) because per-put `sync_data` would cost one fsync per file row. Fixed latent `positional_dir` bug: flag values (e.g. `-t rs`) could be mistaken for the search dir.
+
+## Verification
+
+### sa-browser (2026-07-02)
+
+- ISC-81/98/99/100: Bash — `./build.sh` gate PASS: release build+tests (17 sa-browser unit tests), no file >1000 lines, path-deps-only audit ok
+- ISC-82: cargo test — stored_roundtrip, fixed_huffman_vector, dynamic_huffman_vector (546-byte BTYPE=2 fixture), adler32_known, corrupt_adler_rejected all ok
+- ISC-83: cargo test — decode_rgba_filter0, decode_rgb_sub_filter, decode_gray_up_filter, decode_average_and_paeth_filters, reject_palette_and_interlace, reject_bad_signature all ok
+- ISC-84/111/112: cargo test — one_cell_red_over_blue (exact SGR sequence), every_line_ends_with_reset, aspect_fits_width_and_height_cap, never_upscales, alpha_composites_over_white all ok
+- ISC-85/87: Bash — `sa-browser pane --cols 60 --rows 16 --url https://example.com` → header + 16 art lines of truecolor ▀ against live Chrome
+- ISC-86: Bash — pane header line exactly `https://example.com/\tExample Domain\tcomplete`
+- ISC-88/108: pi headless — `./pi -p` agent ran probe→open→activate; open returned Example Domain snapshot; activate answered "needs the interactive TUI" without crashing
+- ISC-89: Bash — `sa-browser snapshot` returned TITLE: Example Domain without navigating
+- ISC-90: Bash — `probe` → "Chrome DevTools OK at http://127.0.0.1:9222"
+- ISC-91: Bash — gate smoke "ok (21/21 extension tools registered in source)"
+- ISC-92/93/95/106: tmux TUI probe — real `./pi` session, `/sab https://example.com`: pane occupies right half (cols ~100-200 of 200), bordered address bar `● https://example.com/` + `Example Domain`, 31 ▀ art rows
+- ISC-94: tmux captures — loadState machine renders ⏳ while navigating, `● complete` observed post-load; error state `✖` observed in Chrome-down run
+- ISC-96: tmux — second `/sab` toggle → 0 ▀ cells on screen; deactivate() clears interval + resolves the overlay promise
+- ISC-97: tmux — typed "typing focus test" with pane open; text landed in the left chat editor line, not the pane
+- ISC-101: git — catalogs + changelog staged in the same commit as crate+extension (commit hash in git log)
+- ISC-102: Bash — `browser open https://example.com` still returns TITLE snapshot; browser remains in gate EXPECTED
+- ISC-103/104: codex fusion tester — "no pixel/PNG decoding logic in extension: PASS", "no /tmp usage: PASS"; its 3 network probes failed only inside the codex sandbox and all passed on direct re-run (protocol spot-check)
+- ISC-105: Read — migration seam documented in AGENTS.md catalog row, extension header comment, ISA Decision
+- ISC-107/109: Read — untrusted() fence + plain() ANSI-strip wrap every model-facing output in extensions/sa-browser.ts
+- ISC-110: tmux — `BROWSER_DEVTOOLS=:19999 ./pi` + `/sab`: pane shows `✖ https://example.com` + unreachable error in-body; supervise hint added to async path

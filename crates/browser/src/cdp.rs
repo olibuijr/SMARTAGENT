@@ -189,6 +189,70 @@ impl Cdp {
         self.wait_ready(5000);
         Ok(r)
     }
+
+    /// Capture the visible viewport as PNG bytes (Page.captureScreenshot).
+    pub fn screenshot_png(&mut self) -> Result<Vec<u8>, String> {
+        let result = self.call("Page.captureScreenshot", r#"{"format":"png"}"#)?;
+        let data = result
+            .get("data")
+            .and_then(Value::as_str)
+            .ok_or("captureScreenshot returned no data")?;
+        base64_decode(data)
+    }
+
+    /// Current page status for address bars: `url \t title \t readyState`.
+    pub fn page_status(&mut self) -> Result<String, String> {
+        self.call("Runtime.enable", "{}")?;
+        self.eval("location.href + '\\t' + (document.title||'') + '\\t' + document.readyState")
+    }
+}
+
+/// Decode standard base64 (with or without padding). CDP screenshot payloads.
+pub fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    fn val(c: u8) -> Result<u32, String> {
+        match c {
+            b'A'..=b'Z' => Ok((c - b'A') as u32),
+            b'a'..=b'z' => Ok((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Ok((c - b'0' + 52) as u32),
+            b'+' => Ok(62),
+            b'/' => Ok(63),
+            _ => Err(format!("bad base64 byte {c}")),
+        }
+    }
+    let bytes: Vec<u8> = s.bytes().filter(|b| !b" \r\n\t".contains(b)).collect();
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        let pad = chunk.iter().filter(|&&c| c == b'=').count();
+        let mut acc = 0u32;
+        let mut n = 0;
+        for &c in chunk.iter().take(chunk.len() - pad) {
+            acc = (acc << 6) | val(c)?;
+            n += 1;
+        }
+        acc <<= 6 * (4 - n);
+        if n >= 2 { out.push((acc >> 16) as u8); }
+        if n >= 3 { out.push((acc >> 8) as u8); }
+        if n == 4 { out.push(acc as u8); }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base64_decode;
+
+    #[test]
+    fn base64_decode_known_vectors() {
+        assert_eq!(base64_decode("bWFu").unwrap(), b"man");
+        assert_eq!(base64_decode("bWE=").unwrap(), b"ma");
+        assert_eq!(base64_decode("bQ==").unwrap(), b"m");
+        assert_eq!(base64_decode("").unwrap(), b"");
+    }
+
+    #[test]
+    fn base64_decode_rejects_garbage() {
+        assert!(base64_decode("b?==").is_err());
+    }
 }
 
 /// JS that builds a compact, token-frugal snapshot (Browser Use style).

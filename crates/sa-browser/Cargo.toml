@@ -1,0 +1,10 @@
+[package]
+name = "sa-browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+browser = { path = "../browser" }
+httpc = { path = "../httpc" }
+semdb = { path = "../semdb" }

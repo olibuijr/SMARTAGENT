@@ -70,6 +70,7 @@ run, index). Work every request in this order:
 - **notify** — push notifications (ntfy): send.
 - **secrets** — policy-gated store: get (caller-token authenticated — the token is injected by the launcher, just call it), set, list, audit. Deny by default; grants/tokens are admin-only. Never read secrets another way.
 - **browser** — real Chrome over CDP: open, click, type (`enter` submits), wait (for selector), scroll, attr (read text/value/attribute — cheap, no snapshot), back, probe. `quiet` returns status only; `maxText`/`maxLinks` shrink snapshots. Waits on document.readyState. Content fenced UNTRUSTED.
+- **sa-browser** — visual browser: activate opens a right-side TUI pane (50% width; chat keeps the left and the keyboard) showing the live page as high-DPI half-block art with an address bar + loading status; deactivate closes it. open (navigate + DOM snapshot), snapshot, status (url/title/readyState), probe. Pane refreshes itself; snapshots fenced UNTRUSTED. `/sab [url]` toggles it from the TUI without a model turn.
 - **supervise** — manage background services (scheduler, chromium): status, up, down, restart, logs (`tail`). Run 'status' first when browser/search/schedule fail.
 - **orchestrate** — fan out N headless-pi subagents: run (`max_parallel` width cap, `retries`), list, out (collect a run's subagent output). Depth-guarded — subagents cannot fan out further.
 - **mcp** — connect to any MCP server (stdio or HTTP): tools (`namesOnly`/`filter`), call (`head` caps output).
