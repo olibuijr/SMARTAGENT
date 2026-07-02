@@ -27,7 +27,7 @@ pure-Rust binary the agent calls through a pi extension:
 | `semdb` | vector store | Semantic database: embed, search (HNSW/flat cosine), crash-safe append log |
 | `memory` | [mem0](https://github.com/mem0ai/mem0) | 3-tier memory (working/episodic/semantic): remember, recall, recent |
 | `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust code knowledge graph: defs/refs/callers + semantic symbol search |
-| `codeindex` | ripgrep | Fast literal/regex code search |
+| `codeindex` | ripgrep | Fast literal/regex code search + per-repo workspace project index |
 | `vault` | Obsidian | Markdown second brain: notes, wikilinks, backlinks, search |
 | `skills` | [Agent Skills](https://github.com/anthropics/skills) | SKILL.md loader: list/show/search |
 | `schedule` | [Temporal](https://github.com/temporalio/temporal) | Durable cron scheduler (a supervised daemon fires jobs) |
@@ -58,6 +58,17 @@ The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
 
 ### Features added
 
+- **Workspace project layer** — every repo under `workspaces/` is a first-class
+  project: `codeindex projects/index` builds a per-repo file inventory at
+  `<repo>/.smartagent/codeindex.semdb`, and a shared `--project <name>`
+  (traversal-guarded `semdb::workspace`) scopes tasks (per-repo kanban boards —
+  tasks never mix between repos), codegraph (per-repo graphs), memory, rag,
+  and workflow run state to `<repo>/.smartagent/`.
+- **Enforced operating loop** — the agent's order of work (skills match → tasks
+  pull → workflow → investigate → execute → verify → close) lives in
+  `AGENT_TOOLS.md` and is backed by hooks: file edits are BLOCKED while nothing
+  is in `doing` (block message = the unlock commands), agent start injects live
+  board/workflow/index state, agent end audits the board snapshot.
 - **Task management + process engine** — `tasks` (kanban board: backlog→ready→
   doing→review→done, WIP limits and criteria-gated done enforced in Rust,
   pull-based `next`, flow metrics) and `workflow` (markdown-defined phase loops
@@ -69,15 +80,18 @@ The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
   `config/hooks.conf` declares event/matcher/command; hook scripts get the
   payload as JSON on stdin and can block (exit 2), rewrite tool input, or
   inject context. Bridged to pi tool_call / user_prompt / session_start / stop;
-  every firing audited to a semdb table.
+  every firing audited to a semdb table. Seeded hooks: destructive-command
+  guard, the kanban edit gate, session state brief, stop board audit.
 
-- **TUI statusline widgets** — eleven crates gained a `statusline` verb emitting
+- **TUI statusline widgets** — twelve crates gained a `statusline` verb emitting
   a uniform `level|icon text` protocol (severity decided in Rust). The
-  `statusline` extension renders two ANSI-colored rows below the input —
-  infra `⛭` (services, sandbox capability, secrets auth, Chrome, SearXNG,
-  codegraph freshness) and data `▦` (memory tiers, rag corpus, next scheduled
-  job, evals pass ratio, orchestrate runs) — plus per-tool `⚙ running… → ✓ 142ms`
-  footer activity. Segments re-probe after related tool runs and every 30s.
+  `statusline` extension renders three column-aligned scope-grouped rows below
+  the input — workspace `⌂` (code graph, repos indexed + files, tasks board,
+  workflow run), data `▦` (memory tiers, rag corpus, next scheduled job, evals,
+  orchestrate runs), infra `⛭` (services, sandbox, secrets auth, Chrome,
+  SearXNG, hooks) — plus per-tool `⚙ running… → ✓ 142ms` footer activity.
+  Healthy segments collapse to `Name ✓`; detail appears on warn/err. Segments
+  re-probe after related tool runs and every 30s.
 - **Caller-token authentication for secrets** — `secrets get --as C` now
   requires a per-caller token (admin-minted via `issue-token`, 0600 on disk,
   constant-time verify, fail-closed, audited). The `./pi` launcher injects the
@@ -119,18 +133,20 @@ click/markdown/auth, search pagination, evals latency percentiles.
 
 ## Statusline
 
-Live health under the input, painted green/yellow/red by severity:
+Live health under the input — three scope-grouped, column-aligned rows,
+painted green/yellow/red by severity:
 
 ```
-⛭ SERVICES: scheduler:up chromium:up · 🧱 SANDBOX: ns✓ limits✓ · 🔑 SECRETS: pi✓ · 🌐 BROWSER: chrome✓ · 🔎 SEARCH: searx✓ · 🕸 CODE: 312sym · 🪝 HOOKS: 1 armed
-▦ 🧠 MEMORY: w:12 e:340 s:88 · 📚 RAG: 4d/842c · ⏰ SCHEDULE: backup in 13h · 📊 EVALS: 9/10 · 🤖 AGENTS: idle · ▣ TASKS: d:1/1 r:3 · ▶ WORKFLOW: task-run 2/5
+⌂ 🕸 Code 312sym ✓          · 🗃 Index 27/27 repos, 2.5k files ✓ · ▣ Tasks 1/1 doing · 3 ready ✓ · ▶ Workflow task-run 2/5 ✓
+▦ 🧠 Memory w:12 e:340 s:88 ✓ · 📚 Docs 4d/842c ✓               · ⏰ Schedule backup in 13h ✓  · 📊 Evals 9/10 ✓ · 🤖 Agents ✓
+⛭ ⛭ Services ✓              · 🧱 Sandbox ✓                      · 🔑 Secrets ✓ · 🌐 Browser ✓ · 🔎 Search: DOWN (searx unreachable) · 🪝 Hooks ✓
 ```
 
 Each segment is a Rust `<crate> statusline` verb (`ok|…`, `warn|…`, `err|…`) —
-the extension only maps level → color and places text, keeping all logic in
-Rust. Red means act now (service DOWN, token failing verify, SearXNG
-unreachable); yellow means attention (stale codegraph index, memory tier near
-its eviction cap, no jobs scheduled).
+the extension only maps level → color, collapses healthy infra segments to
+`Name ✓`, and pads columns (wcwidth-aware) so the grid aligns. Red means act
+now (service DOWN, token failing verify, SearXNG unreachable); yellow means
+attention (stale index, WIP full, blockers, memory tier near its eviction cap).
 
 ## Quick start
 
@@ -206,7 +222,7 @@ longer works. See the **Security posture** section in [AGENTS.md](AGENTS.md).
 - **Borrow, don't invent** — reference repos are shallow-cloned into `.refrepos/` (gitignored) and ported, never wrapped.
 
 The gate (`./build.sh`) enforces the line-count and zero-dep rules, lints
-extensions for the silent-registration-failure trap, and smoke-tests that all 18
+extensions for the silent-registration-failure trap, and smoke-tests that all 20
 active crate tools register in pi. Cut a release with `./build.sh minor "changelog line"`.
 
 ## Project layout

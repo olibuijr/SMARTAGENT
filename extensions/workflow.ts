@@ -14,12 +14,12 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, "target", "release", "workflow");
 const DB = join(ROOT, "data", "workflow.semdb");
 
-function run(args: string[], project?: string): string {
+function run(args: string[], project?: string, timeout = 30_000): string {
 	// --project = run state lives with that workspace repo (pairs with the
 	// repo's own tasks board); otherwise the root db. Defs always from ROOT.
 	const scope = project ? ["--project", project] : ["--db", DB];
 	try {
-		return execFileSync(BIN, [...args, "--root", ROOT, ...scope], { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim();
+		return execFileSync(BIN, [...args, "--root", ROOT, ...scope], { encoding: "utf8", timeout, cwd: ROOT }).trim();
 	} catch (e: any) {
 		return `error: ${e.stderr?.toString().trim() || e.message}`;
 	}
@@ -35,14 +35,17 @@ export default function (pi: ExtensionAPI) {
 			"Built-in workflows: task-run (observe→plan→execute→verify→learn for one kanban task), " +
 			"triage (backlog refinement), retro (flow retrospective). Actions: list (discover), " +
 			"show (outline), start (begin; link a board task with task_id), step (current instructions), " +
-			"advance (complete step with evidence), runs, abort. Follow the printed step instructions, " +
+			"advance (complete step with evidence), runs, abort, drive (ENGINE-DRIVEN: the harness runs " +
+			"every step in a fresh headless pi and validates each step's EVIDENCE line — use for well-" +
+			"defined multi-step work you want executed deterministically; NEVER call drive from within " +
+			"a driven step). Follow the printed step instructions, " +
 			"load the step's skill, verify, then advance. Set 'project' to keep run state with a workspace " +
 			"repo (workspaces/<project>/.smartagent/workflow.semdb) — use the SAME project as the tasks " +
 			"board the run's task lives on.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["list", "show", "start", "step", "advance", "runs", "abort"] },
+				action: { type: "string", enum: ["list", "show", "start", "step", "advance", "runs", "abort", "drive"] },
 				name: { type: "string", description: "workflow name for show/start (e.g. task-run)" },
 				run: { type: "string", description: "run id (W-1); defaults to latest running" },
 				task_id: { type: "string", description: "start: link a kanban task (T-n)" },
@@ -54,11 +57,13 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_id: string, p: any) {
 			const a: string[] = [p.action];
-			if ((p.action === "show" || p.action === "start") && p.name) a.push(p.name);
+			if ((p.action === "show" || p.action === "start" || p.action === "drive") && p.name) a.push(p.name);
 			if (p.task_id) a.push("--task", p.task_id);
 			if (p.run) a.push("--run", p.run);
 			if (p.evidence) a.push("--evidence", p.evidence);
-			return { content: [{ type: "text", text: run(a, p.project) }] };
+			// drive spawns one headless pi per step — needs a long leash.
+			const timeout = p.action === "drive" ? 1_800_000 : 30_000;
+			return { content: [{ type: "text", text: run(a, p.project, timeout) }] };
 		},
 	});
 }

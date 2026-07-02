@@ -122,6 +122,15 @@ Enforced operating loop (2026-07-02):
 - [x] ISC-64: Anti: read-only work (bash/grep/read, trivial Q&A) passes without a board entry — the gate never blocks non-mutating tools
 - [x] ISC-65: live `./pi` run followed the FULL loop unprompted — skills match → tasks todo+criteria → move doing → workflow task-run W-2 evidenced through all 5 steps → crit checks → memory remember → criteria-gated done (23 ordered tool calls)
 
+Engine-drives-pi (2026-07-02):
+- [x] ISC-66: `workflow drive <name>` runs a def step-by-step, one fresh headless pi per step, driver-side advancement only
+- [x] ISC-67: driver validates each step's final `EVIDENCE:` line via shared `valid_evidence` (trivial/missing → retry → abort)
+- [x] ISC-68: step transcripts persisted to `.scratch/workflow-drive/<run>/step*.log`
+- [x] ISC-69: Anti: nested drive refused (SMARTAGENT_DRIVE=1 guard) — a driven step cannot drive
+- [x] ISC-70: unit-tested end-to-end with fake agents (complete / trivial-evidence-abort / nested-guard)
+- [x] ISC-71: LIVE drive of `status-report` completes with real pi steps and recorded evidence
+- [x] ISC-72: README reflects 3-line statusline, workspace layer, operating loop, 20-tool gate (was 18/two-row)
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |

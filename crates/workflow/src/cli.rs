@@ -3,11 +3,13 @@
 //! judgment. `advance` refuses trivial evidence — the verification mandate.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use httpc::args::flag;
 
 use crate::def::{self, Def};
-use crate::run::{now, Run, Store};
+use crate::drive;
+use crate::run::{now, valid_evidence, Run, Store};
 
 fn db_path(args: &[String]) -> Result<PathBuf, String> {
     // --project <name>: run state lives with that workspace repo, matching the
@@ -100,12 +102,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if r.status != "running" { return Err(format!("{} is {}", r.id, r.status)); }
             let d = find_def(&root(args), &r.wf)?;
             // Verification mandate: no advance without real evidence.
-            let ev = flag(args, "--evidence").unwrap_or_default();
-            let trivial = ["done", "ok", "works", "finished", "complete"];
-            if ev.trim().chars().count() < 10 || trivial.contains(&ev.trim().to_lowercase().as_str()) {
-                return Err("evidence required: describe WHAT you verified and HOW (≥10 chars; 'done'/'ok' rejected)".into());
-            }
-            r.evidence.push(format!("{}: {}", d.steps[r.step].name, ev.trim()));
+            let ev = valid_evidence(&flag(args, "--evidence").unwrap_or_default())?;
+            r.evidence.push(format!("{}: {}", d.steps[r.step].name, ev));
             r.updated = now();
             if r.step + 1 >= d.steps.len() {
                 r.status = "done".into();
@@ -117,6 +115,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 store.put(&r)?;
                 Ok(render_step(&d, &r))
             }
+        }
+        Some("drive") => {
+            // Engine-drives-pi: the harness owns control flow; each step is a
+            // fresh headless pi run, evidence-gated in Rust between steps.
+            let name = args.get(1).filter(|a| !a.starts_with('-'))
+                .ok_or("usage: workflow drive <name> --task T-n [--project P] [--step-timeout 300] [--retries 1] [--pi ./pi]")?;
+            let d = find_def(&root(args), name)?;
+            let o = drive::DriveOpts {
+                pi_bin: flag(args, "--pi").unwrap_or_else(|| "./pi".into()),
+                step_timeout: Duration::from_secs(flag(args, "--step-timeout").and_then(|s| s.parse().ok()).unwrap_or(300)),
+                retries: flag(args, "--retries").and_then(|s| s.parse().ok()).unwrap_or(1),
+                task: flag(args, "--task").unwrap_or_default(),
+                project: flag(args, "--project"),
+            };
+            drive::drive(&store, &root(args), &d, &o)
         }
         Some("abort") => {
             let mut r = resolve_run(&store, args)?;
@@ -161,6 +174,11 @@ USAGE:
   workflow start <name> [--task T-1]     begin a run (prints step 1 instructions)
   workflow step [--run W-1]              current step (defaults to latest running)
   workflow advance --evidence '<proof>' [--run W-1]   complete step (evidence REQUIRED)
+  workflow drive <name> --task T-n [--project P] [--step-timeout 300] [--retries 1]
+                                         ENGINE-DRIVEN: each step runs in a fresh
+                                         headless pi; the driver validates each
+                                         step's final `EVIDENCE:` line and advances
+                                         (or aborts) — the model never self-advances
   workflow runs                          all runs + status
   workflow abort [--run W-1]
 

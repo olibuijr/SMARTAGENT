@@ -21,6 +21,17 @@ pub struct Run {
     pub evidence: Vec<String>, // evidence per completed step, in order
 }
 
+/// Verification mandate shared by `advance` and the drive engine: evidence
+/// must describe what was verified — trivial acknowledgments are refused.
+pub fn valid_evidence(ev: &str) -> Result<String, String> {
+    let t = ev.trim();
+    let trivial = ["done", "ok", "works", "finished", "complete"];
+    if t.chars().count() < 10 || trivial.contains(&t.to_lowercase().as_str()) {
+        return Err("evidence required: describe WHAT you verified and HOW (≥10 chars; 'done'/'ok' rejected)".into());
+    }
+    Ok(t.to_string())
+}
+
 pub fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
