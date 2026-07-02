@@ -122,7 +122,8 @@ fn statusline() -> Result<(), String> {
             let mut doing = String::new();
             for part in t.split(" | ") {
                 if let Some(rest) = part.strip_prefix("agent ") {
-                    state = rest.split(": ").nth(1).unwrap_or("?").to_string();
+                    // keep the full agent name visible: "main working"
+                    state = rest.replace(": ", " ");
                 } else if let Some(rest) = part.strip_prefix("last beat ") {
                     if let Some(time) = rest.split(' ').nth(1) {
                         beat = time.chars().take(5).collect();
