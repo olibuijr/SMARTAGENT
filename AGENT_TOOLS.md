@@ -20,7 +20,7 @@ instead of guessing or shelling out manually.
 - **sandbox** — run a shell command isolated in a scratch workspace (safe for untrusted/destructive commands): run, clean.
 - **context** — principal identity/context loader: compose, validate, stat.
 - **evals** — trace, score, and regression-diff runs: log, score, diff, runs.
-- **rag** — document ingestion + retrieval: ingest, ask, sources.
+- **rag** — document ingestion + cited retrieval: ingest, retrieve, stats.
 - **voice** — speech bridge: stt (WAV→text), tts (text→audio), probe.
 
 Prefer these tools for their domains. Endpoints/config come from
