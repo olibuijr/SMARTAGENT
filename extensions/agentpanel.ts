@@ -114,10 +114,11 @@ function render(width: number): string[] {
 	const lines: string[] = [];
 	const working = agents.filter((a) => a.state === "working");
 
-	// Header: name + live working count (green when active).
-	const count = `${working.length}/${agents.length} working`;
+	// Header: name + live status count — green when active, orange when the
+	// whole fleet idles (status colors, never gray: the panel must look alive).
+	const count = working.length ? `${working.length}/${agents.length} working` : "all idle";
 	const gap = " ".repeat(Math.max(1, inner - vlen("AGENT TEAM") - count.length));
-	lines.push(row(bold(fg("255", "AGENT TEAM")) + gap + (working.length ? fg("46", count) : dim(count)), w));
+	lines.push(row(bold(fg("255", "AGENT TEAM")) + gap + (working.length ? fg("46", count) : fg("208", count)), w));
 	lines.push(rule(w));
 
 	if (!gatewayUp) {
@@ -132,8 +133,12 @@ function render(width: number): string[] {
 		}
 		lines.push(row("", w));
 
+		// Stable accent per agent (by fleet position, not working-subset index)
+		// so each agent keeps its color identity whether working or idle.
+		const accentOf = (name: string) => ACCENTS[Math.max(0, agents.findIndex((x) => x.name === name)) % ACCENTS.length];
+
 		working.forEach((a, i) => {
-			const accent = ACCENTS[i % ACCENTS.length];
+			const accent = accentOf(a.name);
 			const spin = fg(accent, SPIN[(frame + i) % SPIN.length]);
 			const head = `${fg("46", "●")} ${spin} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
 			const tok = humanTokens(a.tokens);
@@ -148,12 +153,14 @@ function render(width: number): string[] {
 			}
 		});
 
-		// Idle agents: one dim line each — presence, not prominence.
+		// Idle agents: one line each — orange status dot with a slow breathing
+		// pulse, name in the agent's accent. Present but calm, never dead-gray.
 		agents
 			.filter((a) => a.state !== "working")
-			.forEach((a) => {
+			.forEach((a, i) => {
 				const tok = humanTokens(a.tokens);
-				const head = `${fg("242", "○")} ${fg("248", a.name)} ${dim("· " + a.role)}`;
+				const pulse = (frame + i * 2) % 6 < 3 ? fg("208", "●") : fg("130", "●");
+				const head = `${pulse} ${fg(accentOf(a.name), a.name)} ${dim("· " + a.role)}`;
 				const gapw = Math.max(1, inner - vlen(head) - tok.length);
 				lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
 			});
@@ -167,10 +174,11 @@ function render(width: number): string[] {
 	if (runs.length === 0) {
 		bottom.push(row(dim("no workflows running"), w));
 	} else {
-		bottom.push(row(bold(fg("117", "RUNNING")), w));
-		for (const r of runs) {
-			bottom.push(row(`${fg("117", r.id)} ${clip(r.def, 10)} ${dim("step")} ${fg("252", r.step)}${r.task ? dim(" → " + r.task) : ""}`, w));
-		}
+		bottom.push(row(bold(fg("117", "RUNNING")) + " " + fg("117", SPIN[frame % SPIN.length]), w));
+		runs.forEach((r, i) => {
+			const arrow = (frame + i) % 4 < 2 ? fg("46", "▶") : fg("29", "▶");
+			bottom.push(row(`${arrow} ${fg("117", r.id)} ${clip(r.def, 9)} ${dim("step")} ${fg("252", r.step)}${r.task ? dim(" → " + r.task) : ""}`, w));
+		});
 	}
 	bottom.push(rule(w));
 	bottom.push(row(dim("/team hide"), w));
@@ -225,11 +233,13 @@ export default function (pi: ExtensionAPI) {
 			refresh();
 			tuiRef?.requestRender();
 		}, REFRESH_MS);
-		// spinner/ticker frames: cheap (cache-only render), no process spawns
+		// animation frames: cheap (cache-only render + pi-tui diffing), no
+		// process spawns. Unconditional — the idle breathing pulse and the
+		// RUNNING ticker keep the panel alive even when no agent is mid-turn.
 		if (!spinTimer)
 			spinTimer = setInterval(() => {
 				frame++;
-				if (agents.some((a) => a.state === "working")) tuiRef?.requestRender();
+				tuiRef?.requestRender();
 			}, 350);
 		return "agent team sidebar on (right) — /team toggles";
 	}
