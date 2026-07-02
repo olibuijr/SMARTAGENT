@@ -121,7 +121,7 @@ fn skip_raw_string(chars: &[char], start: usize, line: &mut usize) -> usize {
         return start + 1; // not actually a raw string, back off
     }
     i += 1;
-    let closing: String = std::iter::once('"').chain(std::iter::repeat('#').take(hashes)).collect();
+    let closing: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
     let closing: Vec<char> = closing.chars().collect();
     while i < chars.len() {
         if chars[i] == '\n' {

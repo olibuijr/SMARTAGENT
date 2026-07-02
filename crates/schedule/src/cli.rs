@@ -84,7 +84,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                         j.id,
                         j.cron,
                         j.cmd,
-                        j.last_fire.map_or("never".into(), |t| fmt_time(t))
+                        j.last_fire.map_or("never".into(), fmt_time)
                     )
                 })
                 .collect();

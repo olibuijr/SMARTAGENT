@@ -223,6 +223,15 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unknown_tier_and_recent_empty() {
+        assert!(resolve_tiers("bogus").is_err());
+        assert!(resolve_tiers("episodic").is_ok());
+        // recent() on a never-written tier is empty, not an error.
+        let m = Memory::new(&scratch("mem-recent-empty"));
+        assert!(m.recent("episodic", 5).unwrap().is_empty());
+    }
+
+    #[test]
     fn working_cap_evicts_oldest() {
         let m = Memory::new(&scratch("mem-cap"));
         for i in 0..(WORKING_CAP + 5) {

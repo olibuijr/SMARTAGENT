@@ -68,6 +68,38 @@ impl Store {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn record_roundtrip_and_default() {
+        let s = Store::open(&scratch("sup-state")).unwrap();
+        assert_eq!(s.get("nope").pid, 0); // default for missing
+        let r = Record { desired_up: true, pid: 4242, cmd: "target/release/schedule run".into(), started_at: 1000, restarts: 3 };
+        s.put("scheduler", &r).unwrap();
+        let got = s.get("scheduler");
+        assert!(got.desired_up);
+        assert_eq!(got.pid, 4242);
+        assert_eq!(got.cmd, "target/release/schedule run");
+        assert_eq!(got.restarts, 3);
+        assert_eq!(s.names(), vec!["scheduler".to_string()]);
+    }
+
+    #[test]
+    fn desired_up_false_roundtrips() {
+        let s = Store::open(&scratch("sup-down")).unwrap();
+        s.put("chromium", &Record { desired_up: false, pid: 0, cmd: "chromium".into(), started_at: 0, restarts: 0 }).unwrap();
+        assert!(!s.get("chromium").desired_up);
+    }
+}
+
 fn parse(meta: &str) -> Record {
     let v = match json::parse(meta) {
         Ok(v) => v,

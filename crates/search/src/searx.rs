@@ -61,7 +61,7 @@ pub fn parse_results(json: &Value, limit: usize) -> Vec<Result> {
 }
 
 pub fn health(instance: &str) -> std::result::Result<u16, String> {
-    let resp = httpc::get(instance.trim_end_matches('/')).map_err(|e| e)?;
+    let resp = httpc::get(instance.trim_end_matches('/'))?;
     Ok(resp.status)
 }
 

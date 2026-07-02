@@ -69,3 +69,35 @@ pub fn start_ticks(pid: u32) -> Option<u64> {
     let rest = stat.rsplit_once(')')?.1;
     rest.split_whitespace().nth(19)?.parse().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_alive_true_for_self() {
+        // The test process itself is alive; its cmdline contains the test binary
+        // name. An empty needle just checks liveness.
+        let me = std::process::id();
+        assert!(is_alive(me, ""));
+    }
+
+    #[test]
+    fn is_alive_false_for_dead_and_pid_zero() {
+        assert!(!is_alive(0, ""));
+        // A pid that (almost certainly) does not exist.
+        assert!(!is_alive(4_000_000_000, ""));
+    }
+
+    #[test]
+    fn is_alive_needle_guards_against_reuse() {
+        // Live pid, but a needle that won't appear in this process's cmdline.
+        let me = std::process::id();
+        assert!(!is_alive(me, "definitely-not-in-this-cmdline-xyzzy"));
+    }
+
+    #[test]
+    fn terminate_pid_zero_is_noop() {
+        terminate(0); // must not panic or signal anything
+    }
+}

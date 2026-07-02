@@ -64,7 +64,7 @@ impl Request {
                     // (browser + RFC 9110 §15.4 behavior). 307/308 preserve
                     // method and body. Either way, drop Authorization when the
                     // host changes so credentials never leak cross-origin.
-                    if matches!(resp.status, 301 | 302 | 303)
+                    if matches!(resp.status, 301..=303)
                         && !matches!(req.method.as_str(), "GET" | "HEAD")
                     {
                         req.method = "GET".into();
@@ -77,7 +77,7 @@ impl Request {
                     let next_host = Url::parse(&next_url).map(|u| u.host).unwrap_or_default();
                     if next_host != prev_host {
                         req.headers
-                            .retain(|(k, _)| k.to_ascii_lowercase() != "authorization");
+                            .retain(|(k, _)| !k.eq_ignore_ascii_case("authorization"));
                     }
                     req.url = next_url;
                     continue;

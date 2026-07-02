@@ -120,7 +120,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 let health = match ctx.probe_ok(svc) {
                     Some(true) => "ok",
                     Some(false) => "PROBE-FAIL",
-                    None => if alive { "—" } else { "—" },
+                    None => "—", // no HTTP probe for this service; liveness shown in state
                 };
                 let state = if alive { "running" } else if rec.desired_up { "DOWN(want up)" } else { "stopped" };
                 out.push(format!("{:<10} {:<9} {:<8} {}", svc.name, state, if alive { rec.pid } else { 0 }, health));
@@ -142,8 +142,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 std::thread::sleep(std::time::Duration::from_secs(15));
                 for svc in ctx.registry.iter().filter(|s| s.enabled) {
                     let rec = ctx.store.get(svc.name);
-                    if rec.desired_up || !ctx.store.names().contains(&svc.name.to_string()) {
-                        if !ctx.alive(svc, &rec) {
+                    if (rec.desired_up || !ctx.store.names().contains(&svc.name.to_string()))
+                        && !ctx.alive(svc, &rec) {
                             if let Ok(r) = ctx.start(svc) {
                                 let mut bumped = r;
                                 bumped.restarts += 1;
@@ -151,7 +151,6 @@ pub fn run(args: &[String]) -> Result<String, String> {
                                 eprintln!("[supervise] restarted {} (pid {})", svc.name, bumped.pid);
                             }
                         }
-                    }
                 }
             }
         }
