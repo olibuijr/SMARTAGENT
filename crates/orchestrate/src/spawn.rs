@@ -27,6 +27,8 @@ pub struct Runner {
     pub timeout: Duration,
     /// When true, pass the prompt via `-c` (sh-style) — used with fake test bins.
     pub sh_mode: bool,
+    /// SMARTAGENT_DEPTH to set on each subagent (fork-bomb guard).
+    pub child_depth: u32,
 }
 
 impl Runner {
@@ -58,6 +60,7 @@ impl Runner {
             c.arg("--thinking").arg("low").arg("-p").arg(&spec.prompt);
             c
         };
+        cmd.env("SMARTAGENT_DEPTH", self.child_depth.to_string());
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let child = match cmd.spawn() {
@@ -125,7 +128,7 @@ mod tests {
     #[test]
     fn parallel_agents_capture_logs() {
         let root = scratch("orch-par");
-        let runner = Runner { agent_bin: "/bin/sh".into(), timeout: Duration::from_secs(10), sh_mode: true };
+        let runner = Runner { agent_bin: "/bin/sh".into(), timeout: Duration::from_secs(10), sh_mode: true, child_depth: 1 };
         let specs: Vec<AgentSpec> = (0..5)
             .map(|i| AgentSpec { n: i, prompt: format!("echo agent {i} ran"), workspace: root.join(format!("agent-{i}")) })
             .collect();
@@ -142,7 +145,7 @@ mod tests {
     #[test]
     fn timeout_kills_slow_agent() {
         let root = scratch("orch-timeout");
-        let runner = Runner { agent_bin: "/bin/sh".into(), timeout: Duration::from_secs(1), sh_mode: true };
+        let runner = Runner { agent_bin: "/bin/sh".into(), timeout: Duration::from_secs(1), sh_mode: true, child_depth: 1 };
         let specs = vec![AgentSpec { n: 0, prompt: "sleep 60".into(), workspace: root.join("agent-0") }];
         let start = Instant::now();
         let results = runner.run_all(specs);

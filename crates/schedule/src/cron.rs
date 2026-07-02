@@ -48,11 +48,15 @@ impl Cron {
         let limit = after + 5 * 366 * 86_400;
         while t < limit {
             let c = Civil::from_unix(t);
-            if self.months.contains(&c.month)
-                && self.day_matches(c.day, c.dow)
-                && self.hours.contains(&c.hour)
-                && self.minutes.contains(&c.minute)
-            {
+            // If the date (month/day) can't match, skip the whole rest of the
+            // day instead of stepping minute-by-minute — turns an impossible
+            // expression (e.g. Feb 30) from ~2.6M iterations into ~1830.
+            if !self.months.contains(&c.month) || !self.day_matches(c.day, c.dow) {
+                let into_day = c.hour as i64 * 3600 + c.minute as i64 * 60;
+                t = t - into_day + 86_400; // 00:00 next day (t is minute-aligned)
+                continue;
+            }
+            if self.hours.contains(&c.hour) && self.minutes.contains(&c.minute) {
                 return Some(t);
             }
             t += 60;
@@ -194,5 +198,22 @@ mod tests {
         let civ = Civil::from_unix(next);
         // 2026-07-03 is a Friday — OR semantics fire there, before the 13th.
         assert_eq!((civ.month, civ.day, civ.dow), (7, 3, 5));
+    }
+
+    #[test]
+    fn unsatisfiable_returns_none_without_hanging() {
+        // Feb 30 never exists — must return None, and (with the day-skip
+        // optimization) quickly rather than after ~2.6M minute steps.
+        let c = Cron::parse("0 0 30 2 *").unwrap();
+        assert_eq!(c.next_after(1_782_952_200), None);
+    }
+
+    #[test]
+    fn leap_day_fires() {
+        // Feb 29 exists in 2028 (a leap year); a job for it must fire.
+        let c = Cron::parse("0 0 29 2 *").unwrap();
+        let start = 1_782_952_200; // 2026-07-02
+        let civ = Civil::from_unix(c.next_after(start).unwrap());
+        assert_eq!((civ.year, civ.month, civ.day), (2028, 2, 29));
     }
 }

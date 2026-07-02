@@ -143,7 +143,13 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
     );
     let mut has_len = false;
     for (k, v) in &req.headers {
-        if k.to_ascii_lowercase() == "content-length" {
+        let kl = k.to_ascii_lowercase();
+        // Host and Connection are already written; skip caller copies so the
+        // request can't carry duplicate headers.
+        if kl == "host" || kl == "connection" {
+            continue;
+        }
+        if kl == "content-length" {
             has_len = true;
         }
         head.push_str(&format!("{k}: {v}\r\n"));
@@ -172,32 +178,66 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
 fn read_response_bytes(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
+    // Cache the header boundary + framing once found, so we don't re-scan the
+    // whole (growing) buffer on every socket read.
+    let mut framing: Option<(usize, Framing)> = None;
     loop {
         let n = stream.read(&mut buf).map_err(|e| format!("recv: {e}"))?;
         if n == 0 {
             return Ok(raw); // EOF — server closed
         }
         raw.extend_from_slice(&buf[..n]);
-        let Some(header_end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
-            continue;
-        };
-        let head = String::from_utf8_lossy(&raw[..header_end]).to_ascii_lowercase();
-        let body = &raw[header_end + 4..];
-        if head.contains("transfer-encoding") && head.contains("chunked") {
-            if dechunk(body).is_ok() {
-                return Ok(raw);
-            }
-        } else if let Some(len) = head
-            .lines()
-            .find_map(|l| l.strip_prefix("content-length:"))
-            .and_then(|v| v.trim().parse::<usize>().ok())
-        {
-            if body.len() >= len {
-                return Ok(raw);
+
+        if framing.is_none() {
+            if let Some(he) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = std::str::from_utf8(&raw[..he]).unwrap_or("");
+                framing = Some((he, detect_framing(head)));
             }
         }
-        // No length info: fall through and read until EOF.
+        let Some((header_end, ref f)) = framing else { continue };
+        let body = &raw[header_end + 4..];
+        match f {
+            // Chunked: done when the terminating 0-size chunk has arrived.
+            Framing::Chunked => {
+                if dechunk(body).is_ok() {
+                    return Ok(raw);
+                }
+            }
+            Framing::Length(len) => {
+                if body.len() >= *len {
+                    return Ok(raw);
+                }
+            }
+            // No length info: read until the server closes (EOF above).
+            Framing::UntilClose => {}
+        }
     }
+}
+
+enum Framing {
+    Chunked,
+    Length(usize),
+    UntilClose,
+}
+
+/// Determine body framing from a parsed header block, matching per-header (not a
+/// substring over the whole block, which could mix a `Transfer-Encoding` header
+/// with the word "chunked" appearing in some other header's value).
+fn detect_framing(head: &str) -> Framing {
+    for line in head.split("\r\n").skip(1) {
+        if let Some((k, v)) = line.split_once(':') {
+            let kl = k.trim().to_ascii_lowercase();
+            if kl == "transfer-encoding" && v.to_ascii_lowercase().contains("chunked") {
+                return Framing::Chunked;
+            }
+            if kl == "content-length" {
+                if let Ok(n) = v.trim().parse::<usize>() {
+                    return Framing::Length(n);
+                }
+            }
+        }
+    }
+    Framing::UntilClose
 }
 
 fn parse_response(raw: &[u8]) -> Result<Response, String> {
@@ -263,10 +303,15 @@ pub fn dechunk(data: &[u8]) -> Result<Vec<u8>, String> {
             return Ok(out);
         }
         let start = line_end + 2;
-        if start + size > data.len() {
+        if start + size + 2 > data.len() {
             return Err("truncated chunk".into());
         }
         out.extend_from_slice(&data[start..start + size]);
+        // A chunk's data MUST be followed by CRLF; verify rather than skip
+        // blindly, so a misframed stream errors instead of silently misaligning.
+        if &data[start + size..start + size + 2] != b"\r\n" {
+            return Err("missing CRLF after chunk data".into());
+        }
         pos = start + size + 2;
     }
 }
@@ -328,5 +373,41 @@ mod tests {
             .send()
             .unwrap_err();
         assert!(e.contains("proxy"), "{e}");
+    }
+
+    #[test]
+    fn dechunk_rejects_missing_crlf_after_data() {
+        // Chunk claims 4 bytes but data is not followed by CRLF.
+        assert!(dechunk(b"4\r\nWikiXX5\r\npedia\r\n0\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn dechunk_rejects_truncated_chunk() {
+        assert!(dechunk(b"9\r\nWiki\r\n0\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn dechunk_rejects_bad_size() {
+        assert!(dechunk(b"zz\r\ndata\r\n0\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_garbage_status_line() {
+        assert!(parse_response(b"NOT-HTTP\r\n\r\nbody").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_missing_header_terminator() {
+        assert!(parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 5").is_err());
+    }
+
+    #[test]
+    fn detect_framing_matches_per_header_not_substring() {
+        // "chunked" appears in a non-Transfer-Encoding header value; must NOT
+        // be treated as chunked framing.
+        let head = "HTTP/1.1 200 OK\r\nX-Note: this is chunked data\r\nContent-Length: 3";
+        assert!(matches!(detect_framing(head), Framing::Length(3)));
+        let head2 = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked";
+        assert!(matches!(detect_framing(head2), Framing::Chunked));
     }
 }

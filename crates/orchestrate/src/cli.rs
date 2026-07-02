@@ -10,6 +10,25 @@ fn run_id() -> String {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string()
 }
 
+/// Fan-out nesting depth from the environment. Each spawned subagent runs with
+/// SMARTAGENT_DEPTH one higher; beyond MAX_DEPTH we refuse — a subagent that
+/// itself fans out is a fork bomb (each level multiplies pi processes).
+const MAX_DEPTH: u32 = 1;
+
+fn current_depth() -> u32 {
+    std::env::var("SMARTAGENT_DEPTH").ok().and_then(|d| d.parse().ok()).unwrap_or(0)
+}
+
+fn guard_depth() -> Result<u32, String> {
+    let d = current_depth();
+    if d >= MAX_DEPTH {
+        return Err(format!(
+            "orchestrate refused: fan-out depth {d} ≥ max {MAX_DEPTH} (a subagent may not spawn more subagents)"
+        ));
+    }
+    Ok(d + 1)
+}
+
 fn workspaces_root() -> PathBuf {
     semdb::config::Config::load().workspaces_dir()
 }
@@ -51,10 +70,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
 fn fan_out(args: &[String], prompts: Vec<String>) -> Result<String, String> {
     let id = run_id();
     let base = workspaces_root().join(&id);
+    let child_depth = guard_depth()?;
     let agent_bin = flag(args, "--agent-bin").unwrap_or_else(|| "./pi".into());
     let sh_mode = agent_bin.ends_with("sh") || flag(args, "--agent-bin").map(|b| b == "/bin/echo").unwrap_or(false);
     let timeout = Duration::from_secs(flag(args, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(300));
-    let runner = Runner { agent_bin, timeout, sh_mode };
+    let runner = Runner { agent_bin, timeout, sh_mode, child_depth };
 
     let specs: Vec<AgentSpec> = prompts
         .into_iter()
