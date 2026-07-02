@@ -1,156 +1,258 @@
-// Claude Desktop clone — dark mode, 3-pane layout
+//! SMARTAGENT Desktop — Claude-Desktop-style GUI over the real `./pi` agent
+//! (RPC mode). Module map in desktop-agent/COMPONENTS.md.
 
-mod theme;
-mod sidebar;
+mod agent;
 mod chat;
+mod code;
+mod composer;
+mod conn;
+mod cowork;
+mod data;
+mod dialogs;
+mod emit;
 mod inspector;
+mod jsonw;
+mod root;
+mod rpc;
+mod sessions;
+mod sidebar;
+mod theme;
+mod transcript;
+
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 use eframe::egui;
 
+use conn::AgentConn;
+use emit::Emit;
+use root::Paths;
+use sessions::SessionMeta;
+
 fn main() -> eframe::Result {
     eframe::run_native(
-        "Claude",
+        "SMARTAGENT",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([1280.0, 860.0])
-                .with_min_inner_size([900.0, 600.0])
-                .with_maximized(true),
+                .with_min_inner_size([900.0, 600.0]),
             ..Default::default()
         },
-        Box::new(|_cc| Ok(Box::new(App::default()))),
+        Box::new(|cc| Ok(Box::new(App::new(&cc.egui_ctx)))),
     )
 }
 
-#[derive(Clone, PartialEq)]
-pub enum Tab { Chat, Code, Cowork }
-
-#[derive(Clone)]
-pub struct Session {
-    pub title: String,
-    pub pinned: bool,
-    pub scheduled: bool,
-    pub _time: String,
-}
-
-#[derive(Clone)]
-pub struct Message {
-    pub role: MessageRole,
-    pub text: String,
-    pub tool_cards: Vec<ToolCard>,
-}
-
-#[derive(Clone, PartialEq)]
-pub enum MessageRole { User, Claude }
-
-#[derive(Clone)]
-pub struct ToolCard {
-    pub label: String,
-    pub detail: String,
-}
-
-#[derive(Clone)]
-pub struct ProgressStep {
-    pub label: String,
-    pub done: bool,
+#[derive(Clone, Copy, PartialEq)]
+pub enum Tab {
+    Chat,
+    Cowork,
+    Code,
 }
 
 pub struct App {
+    pub paths: Paths,
     pub active_tab: Tab,
-    pub sessions: Vec<Session>,
-    pub selected_session: usize,
-    pub messages: Vec<Message>,
-    pub chat_input: String,
-    pub right_panel_open: bool,
-    pub progress_steps: Vec<ProgressStep>,
-    pub artifacts: Vec<String>,
-    pub working_files: Vec<String>,
+    pub chat: AgentConn,
+    pub cowork: AgentConn,
+    pub code: Option<AgentConn>,
+    pub sessions: Vec<SessionMeta>,
+    pub projects: Vec<PathBuf>,
+    pub selected_project: Option<usize>,
+    pub expanded_dirs: HashSet<PathBuf>,
+    pub open_file: Option<(PathBuf, String)>,
+    pub git_status: Vec<String>,
+    pub git_is_repo: bool,
+    pub tasks_board: Vec<String>,
+    pub inspector_open: bool,
+    startup_error: Option<String>,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self {
+impl App {
+    fn new(ctx: &egui::Context) -> Self {
+        let (paths, startup_error) = match Paths::discover() {
+            Some(p) => (p, None),
+            None => {
+                // Unusable-but-alive fallback (ISC-7): current dir, error banner.
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let msg = "SMARTAGENT repo not found (need ./pi and .pi/ in an ancestor directory)";
+                (
+                    Paths_fallback(cwd),
+                    Some(msg.to_string()),
+                )
+            }
+        };
+        let root_dir = paths.root.clone();
+        let mut app = Self {
+            paths,
             active_tab: Tab::Chat,
-            sessions: vec![
-                Session { title: "Add a dark mode toggle to settings".into(), pinned: true, scheduled: false, _time: "Today".into() },
-                Session { title: "Weekly dependency audit".into(), pinned: false, scheduled: true, _time: "Tomorrow".into() },
-                Session { title: "Fix the double-charge bug in checkout".into(), pinned: false, scheduled: false, _time: "2h ago".into() },
-                Session { title: "Write tests for the payments module".into(), pinned: false, scheduled: false, _time: "Yesterday".into() },
-                Session { title: "Explain what this repo does".into(), pinned: false, scheduled: false, _time: "2 days ago".into() },
-            ],
-            selected_session: 0,
-            messages: vec![
-                Message {
-                    role: MessageRole::User,
-                    text: "Add a dark mode toggle to the settings page".into(),
-                    tool_cards: vec![],
-                },
-                Message {
-                    role: MessageRole::Claude,
-                    text: "I'll add a dark mode toggle to the settings page. Let me first look at the current settings structure.".into(),
-                    tool_cards: vec![
-                        ToolCard { label: "Read".into(), detail: "src/components/Settings.tsx".into() },
-                        ToolCard { label: "Read".into(), detail: "src/theme/ThemeProvider.tsx".into() },
-                        ToolCard { label: "Edit".into(), detail: "src/theme/ThemeProvider.tsx  +18 −2".into() },
-                    ],
-                },
-                Message {
-                    role: MessageRole::Claude,
-                    text: "Done! I added a `useDarkMode` hook and a toggle switch to the settings page. The preference is persisted in localStorage and applies instantly.".into(),
-                    tool_cards: vec![],
-                },
-            ],
-            chat_input: String::new(),
-            right_panel_open: true,
-            progress_steps: vec![
-                ProgressStep { label: "Read settings files".into(), done: true },
-                ProgressStep { label: "Add dark mode hook".into(), done: true },
-                ProgressStep { label: "Create toggle component".into(), done: true },
-                ProgressStep { label: "Update components".into(), done: false },
-            ],
-            artifacts: vec!["dark-mode-toggle.tsx".into()],
-            working_files: vec![
-                "src/components/Settings.tsx".into(),
-                "src/theme/ThemeProvider.tsx".into(),
-                "src/hooks/useDarkMode.ts".into(),
-            ],
+            chat: AgentConn::new(root_dir.clone()),
+            cowork: AgentConn::new(root_dir),
+            code: None,
+            sessions: Vec::new(),
+            projects: Vec::new(),
+            selected_project: None,
+            expanded_dirs: HashSet::new(),
+            open_file: None,
+            git_status: Vec::new(),
+            git_is_repo: false,
+            tasks_board: Vec::new(),
+            inspector_open: true,
+            startup_error,
+        };
+        theme::start_watcher(ctx.clone());
+        if app.startup_error.is_none() {
+            app.refresh_sessions();
+            app.refresh_projects();
+            app.refresh_tasks();
+            // Boot the Chat agent immediately in the background (ISC-131):
+            // window appears now, child connects when ready.
+            app.chat.ensure(&app.paths.pi.clone(), ctx);
+        } else {
+            app.chat.state.error_banner = app.startup_error.clone();
         }
+        app
+    }
+
+    fn pump_all(&mut self, ctx: &egui::Context) {
+        let chat = self.chat.pump();
+        let cowork = self.cowork.pump();
+        let code = self.code.as_mut().map(|c| c.pump());
+
+        // After any turn ends: refresh sessions (titles/new files), board, git.
+        let turn_ended =
+            chat.turn_ended || cowork.turn_ended || code.as_ref().map(|p| p.turn_ended).unwrap_or(false);
+        if turn_ended {
+            self.refresh_sessions();
+            self.refresh_tasks();
+            if self.active_tab == Tab::Code {
+                self.refresh_git();
+            }
+        }
+
+        // Window title follows session name / extension setTitle (ISC-108/115).
+        if let Some(conn) = self.active_conn() {
+            let t = conn
+                .state
+                .window_title
+                .clone()
+                .or_else(|| {
+                    if conn.state.session_name.is_empty() {
+                        None
+                    } else {
+                        Some(conn.state.session_name.clone())
+                    }
+                })
+                .map(|s| format!("{s} — SMARTAGENT"))
+                .unwrap_or_else(|| "SMARTAGENT".to_string());
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(t));
+        }
+
+        // Streaming: keep elapsed timers/spinners moving (ISC-114: ≤4Hz, only
+        // while streaming; idle app repaints on events only).
+        let streaming = [Some(&self.chat), Some(&self.cowork), self.code.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|c| c.state.streaming);
+        if streaming {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+}
+
+/// Build a Paths value for the fallback case without repo discovery.
+#[allow(non_snake_case)]
+fn Paths_fallback(cwd: PathBuf) -> Paths {
+    Paths {
+        pi: cwd.join("pi"),
+        sessions_dir: cwd.join(".pi").join("sessions"),
+        workspaces_dir: cwd.join("workspaces"),
+        tasks_bin: cwd.join("target").join("release").join("tasks"),
+        root: cwd,
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         theme::apply(ctx);
+        self.pump_all(ctx);
+
+        let mut emits: Vec<Emit> = Vec::new();
 
         egui::SidePanel::left("sidebar")
             .resizable(false)
-            .min_width(260.0)
-            .max_width(260.0)
+            .min_width(250.0)
+            .max_width(250.0)
             .frame(egui::Frame {
-                fill: theme::SIDEBAR,
+                fill: theme::SIDEBAR(),
                 inner_margin: egui::Margin::same(0),
                 ..egui::Frame::NONE
             })
-            .show(ctx, |ui| sidebar::render(self, ui));
+            .show(ctx, |ui| sidebar::render(ui, self, &mut emits));
 
-        if self.right_panel_open {
+        if self.inspector_open {
             egui::SidePanel::right("inspector")
                 .resizable(false)
-                .min_width(300.0)
-                .max_width(300.0)
+                .min_width(290.0)
+                .max_width(290.0)
                 .frame(egui::Frame {
-                    fill: theme::SIDEBAR,
+                    fill: theme::SIDEBAR(),
                     inner_margin: egui::Margin::same(0),
                     ..egui::Frame::NONE
                 })
-                .show(ctx, |ui| inspector::render(self, ui));
+                .show(ctx, |ui| {
+                    let state = self.active_conn().map(|c| &c.state);
+                    inspector::render(ui, state, &mut emits);
+                });
         }
 
         egui::CentralPanel::default()
             .frame(egui::Frame {
-                fill: theme::PANEL,
+                fill: theme::PANEL(),
                 inner_margin: egui::Margin::same(0),
                 ..egui::Frame::NONE
             })
-            .show(ctx, |ui| chat::render(self, ui));
+            .show(ctx, |ui| {
+                if !self.inspector_open {
+                    reopen_inspector_button(ui, &mut emits);
+                }
+                match self.active_tab {
+                    Tab::Chat => {
+                        let user = root::username();
+                        chat::render(ui, &mut self.chat, &user, &mut emits);
+                    }
+                    Tab::Cowork => {
+                        let board = self.tasks_board.clone();
+                        cowork::render(ui, &mut self.cowork, &board, &mut emits);
+                    }
+                    Tab::Code => code::render(ui, self, &mut emits),
+                }
+            });
+
+        // Modal dialogs float above everything (active tab's agent).
+        if let Some(conn) = self.active_conn_mut() {
+            dialogs::render(ctx, &mut conn.state, &mut emits);
+        }
+
+        for e in emits {
+            self.execute(e, ctx);
+        }
     }
+}
+
+fn reopen_inspector_button(ui: &mut egui::Ui, emits: &mut Vec<Emit>) {
+    egui::Area::new(egui::Id::new("reopen-inspector"))
+        .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
+        .show(ui.ctx(), |ui| {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("☰").size(15.0).color(theme::TEXT_MUTED()))
+                        .fill(theme::CARD())
+                        .corner_radius(6),
+                )
+                .on_hover_text("Show session panel")
+                .clicked()
+            {
+                emits.push(Emit::ToggleInspector);
+            }
+        });
 }

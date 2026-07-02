@@ -11,7 +11,8 @@ run, index). Work every request in this order:
 
 1. **Route.** `skills match '<the request sentence>'` → load the winner with
    `skills show` before specialized work. Trivial Q&A (read/answer, no side
-   effects) needs no board entry — answer and stop.
+   effects) needs no board entry — route via `skills match` first, then
+   answer and stop. Platform/feature questions → the `platform` skill.
 2. **Pull before you touch files.** The edit/write tools are BLOCKED by a
    hook while nothing is in `doing`. Capture → pull: `tasks todo '<title>'`
    (or `add … --criteria 'a;b'`), then `tasks move T-n doing`. Work on a
@@ -58,7 +59,7 @@ run, index). Work every request in this order:
 
 - **tasks** — kanban board (backlog→ready→doing→review→done): board, add/todo (criteria as 'a;b;c'), next (pull-based), move, done, show, list, crit add/check/uncheck, block/unblock (reason required), wip, metrics (cycle time/throughput), rm. `project` = that workspace repo's OWN board — per-repo tasks never mix; omit for the root board.
 - **workflow** — process engine: list, show, start (`task_id` links a board task), step (current instructions), advance (`evidence` REQUIRED, ≥10 chars, 'done'/'ok' rejected), runs, abort, drive (ENGINE-DRIVEN: the harness executes every step in a fresh headless pi and validates each step's final `EVIDENCE:` line — use for well-defined multi-step work; never from within a driven step). `project` keeps run state on a workspace repo — use the SAME project as the tasks board the run's task lives on. Built-ins: task-run, triage (backlog hygiene), retro (flow improvement), status-report (drive smoke).
-- **skills** — SKILL.md loader: list, match (score against a whole prompt — best picker), search (single term), show (`head` for progressive disclosure).
+- **skills** — SKILL.md loader: list, match (score against a whole prompt — best picker), search (single term), show (`head` for progressive disclosure), validate.
 - **semdb** — vector store. embed, search (`idsOnly`, `metaChars` to shrink), get, del, count (`prefix`), ids (`prefix`), stats. Vector dims are enforced per db.
 - **memory** — 3-tier memory. remember, update (correct by id — prefer over remembering a contradiction), recall (`scope` to one tier), recent, forget, promote, stats. `project` = that workspace repo's own store — durable facts about a repo go THERE, not in the global store (memory policy). Past-session intents auto-recalled at launch.
 - **codegraph** — Rust code graph: index, defs, refs, callers, impls, path (BFS call-path between two fns), search (semantic symbol), stats. `limit` caps output. `project` = that workspace repo's own graph for indexing AND queries — per-repo graphs never clobber each other.
@@ -69,8 +70,8 @@ run, index). Work every request in this order:
 - **notify** — push notifications (ntfy): send.
 - **secrets** — policy-gated store: get (caller-token authenticated — the token is injected by the launcher, just call it), set, list, audit. Deny by default; grants/tokens are admin-only. Never read secrets another way.
 - **browser** — real Chrome over CDP: open, click, type (`enter` submits), wait (for selector), scroll, attr (read text/value/attribute — cheap, no snapshot), back, probe. `quiet` returns status only; `maxText`/`maxLinks` shrink snapshots. Waits on document.readyState. Content fenced UNTRUSTED.
-- **supervise** — manage background services (scheduler, chromium): status, up, down, restart. Run 'status' first when browser/search/schedule fail.
-- **orchestrate** — fan out N headless-pi subagents: run, list, out (collect a run's subagent output).
+- **supervise** — manage background services (scheduler, chromium): status, up, down, restart, logs (`tail`). Run 'status' first when browser/search/schedule fail.
+- **orchestrate** — fan out N headless-pi subagents: run (`max_parallel` width cap, `retries`), list, out (collect a run's subagent output). Depth-guarded — subagents cannot fan out further.
 - **mcp** — connect to any MCP server (stdio or HTTP): tools (`namesOnly`/`filter`), call (`head` caps output).
 - **sandbox** — isolated shell exec (secrets masked, env scrubbed, ulimit caps): run (`tail` keeps last output — right for build logs; default 16KB cap), clean. Warns if namespace isolation is unavailable.
 - **context** — principal identity/context loader: compose, validate, stat.
@@ -78,6 +79,12 @@ run, index). Work every request in this order:
 - **rag** — document RAG: ingest (file or `url`, http; re-ingest replaces old chunks), retrieve (`docId` scope, `snippetChars`, `idsOnly`), get (full chunk), delete-doc, stats. `project` = that workspace repo's own corpus.
 
 _(voice — STT/TTS — built but disabled: no titan speech server. See extensions/disabled/.)_
+
+The user also has instant slash commands (no model turn; output appears as a
+`[command]` message you can read in context): `/board [project]`, `/tasks`,
+`/skills [query]`, `/status`, `/index [project]`, `/projects`, `/runs`,
+`/audit`, `/memory <query>`. Don't re-run a tool to reproduce output the user
+just printed with one of these.
 
 Prefer these tools for their domains. Endpoints/config come from
 config/smartagent.conf; all persistent data lives in semdb tables.

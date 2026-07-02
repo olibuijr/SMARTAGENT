@@ -265,7 +265,8 @@ fn push_assistant_message(message: &Value, items: &mut Vec<ReplayItem>) {
 }
 
 fn push_tool_call(block: &Value, items: &mut Vec<ReplayItem>) {
-    let args = block.get("arguments").unwrap_or(&Value::Obj(Vec::new()));
+    let empty = Value::Obj(Vec::new());
+    let args = block.get("arguments").unwrap_or(&empty);
     items.push(ReplayItem::Tool {
         id: field_str(block, "id").unwrap_or("").to_string(),
         name: field_str(block, "name").unwrap_or("").to_string(),

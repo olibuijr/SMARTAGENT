@@ -64,6 +64,9 @@ pub struct Dialog {
     pub options: Vec<String>,
     pub input: String,
     pub selected: usize,
+    /// Local deadline: when the agent carries a `timeout`, drop the modal on
+    /// our side too so it can't linger after the agent auto-resolves (ISC-109).
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -96,9 +99,7 @@ pub struct AgentState {
 
 impl AgentState {
     pub fn fresh() -> Self {
-        let mut s = Self::default();
-        s.stick_to_bottom = true;
-        s
+        Self { stick_to_bottom: true, ..Self::default() }
     }
 
     /// Replace the transcript with items replayed from a session file on disk.
@@ -187,6 +188,16 @@ impl AgentState {
         None
     }
 
+    /// Drop dialogs whose local timeout elapsed — the agent auto-resolves its
+    /// side, so the stale modal must not linger (ISC-109). Returns true if any
+    /// dialog was dropped (caller repaints).
+    pub fn prune_dialogs(&mut self) -> bool {
+        let now = Instant::now();
+        let before = self.dialogs.len();
+        self.dialogs.retain(|d| d.deadline.map(|dl| now < dl).unwrap_or(true));
+        before != self.dialogs.len()
+    }
+
     /// Echo the user's message immediately, before the first event (ISC-74).
     pub fn echo_user(&mut self, text: &str) {
         self.items.push(Item::User(text.to_string()));
@@ -198,11 +209,18 @@ impl AgentState {
         match inc {
             Incoming::Response(v) => self.apply_response(&v),
             Incoming::Event(v) => self.apply_event(&v),
-            Incoming::ExtUi(v) => self.apply_ext_ui(&v, rpc),
+            Incoming::ExtUi(v) => {
+                // Unknown fire-and-forget methods are acked immediately so the
+                // agent never hangs (ISC-106); known methods are handled in-state.
+                if let Some(ack_id) = self.apply_ext_ui(&v) {
+                    rpc.ext_ui_reply(&ack_id, vec![("value", Value::Null)]);
+                }
+            }
         }
     }
 
     fn apply_response(&mut self, v: &Value) {
+        self.connected = true;
         let cmd = v.get("command").and_then(|c| c.as_str()).unwrap_or("");
         let data = v.get("data");
         match cmd {
@@ -224,10 +242,15 @@ impl AgentState {
             }
             "get_session_stats" => {
                 if let Some(d) = data {
-                    self.stats.input = d.get("input").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
+                    // Token totals are nested under `tokens`; tolerate flat too.
+                    let t = d.get("tokens").unwrap_or(d);
+                    self.stats.input = t.get("input").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
                     self.stats.output =
-                        d.get("output").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
-                    self.stats.cost = d.get("cost").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                        t.get("output").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
+                    self.stats.cost = d
+                        .get("cost")
+                        .and_then(|x| x.as_f64().or_else(|| x.get("total").and_then(|y| y.as_f64())))
+                        .unwrap_or(0.0);
                     if let Some(cu) = d.get("contextUsage") {
                         self.stats.ctx_tokens =
                             cu.get("tokens").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64;
@@ -315,6 +338,7 @@ impl AgentState {
     }
 
     fn apply_event(&mut self, v: &Value) {
+        self.connected = true;
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
             "message_start" => {
@@ -476,7 +500,9 @@ impl AgentState {
         }
     }
 
-    fn apply_ext_ui(&mut self, v: &Value, rpc: &RpcClient) {
+    /// Fold an extension_ui_request. Returns `Some(id)` when the method is
+    /// unhandled and the caller must send a default ack.
+    fn apply_ext_ui(&mut self, v: &Value) -> Option<String> {
         let id = v.get("id").and_then(|t| t.as_str()).unwrap_or("").to_string();
         let method = v.get("method").and_then(|t| t.as_str()).unwrap_or("").to_string();
         match method.as_str() {
@@ -500,6 +526,11 @@ impl AgentState {
                     }
                 }
                 let default = v.get("default").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                let deadline = v
+                    .get("timeout")
+                    .and_then(|t| t.as_f64())
+                    .filter(|ms| *ms > 0.0)
+                    .map(|ms| Instant::now() + std::time::Duration::from_millis(ms as u64));
                 self.dialogs.push(Dialog {
                     id,
                     method,
@@ -507,11 +538,14 @@ impl AgentState {
                     options,
                     input: default,
                     selected: 0,
+                    deadline,
                 });
+                None
             }
             "notify" => {
                 let m = v.get("message").and_then(|t| t.as_str()).unwrap_or("").to_string();
                 self.notice = Some(m);
+                None
             }
             "setStatus" => {
                 let name = v.get("name").and_then(|t| t.as_str()).unwrap_or("").to_string();
@@ -522,6 +556,7 @@ impl AgentState {
                         self.tool_status.push((name, st.to_string()));
                     }
                 }
+                None
             }
             "setWidget" => {
                 self.widget_lines.clear();
@@ -534,15 +569,15 @@ impl AgentState {
                 } else if let Some(s) = v.get("content").and_then(|c| c.as_str()) {
                     self.widget_lines.push(s.to_string());
                 }
+                None
             }
             "setTitle" => {
                 let t = v.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
                 self.window_title = Some(t);
+                None
             }
-            _ => {
-                // Unknown fire-and-forget method: acknowledge so agent never hangs.
-                rpc.ext_ui_reply(&id, vec![("value", jsonw::Value::Null)]);
-            }
+            // Unknown fire-and-forget method: caller acks so the agent never hangs.
+            _ => Some(id),
         }
     }
 
@@ -610,4 +645,125 @@ fn text_of_typed(content: Option<&Value>, field: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpc::json::parse;
+
+    fn ev(s: &mut AgentState, line: &str) {
+        s.apply_event(&parse(line).unwrap());
+    }
+
+    #[test]
+    fn streams_text_deltas_into_live_assistant() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"message_start","message":{"role":"assistant"}}"#);
+        ev(&mut s, r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"He"}}"#);
+        ev(&mut s, r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"llo"}}"#);
+        match s.items.last().unwrap() {
+            Item::Assistant(a) => assert_eq!(a.text, "Hello"),
+            _ => panic!("expected assistant item"),
+        }
+    }
+
+    #[test]
+    fn tool_card_lifecycle_by_call_id() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"message_start","message":{"role":"assistant"}}"#);
+        ev(&mut s, r#"{"type":"tool_execution_start","toolCallId":"c1","toolName":"tasks","args":{"action":"board"}}"#);
+        // running card exists with an args summary drawn from `action`.
+        let card = s.find_card("c1").unwrap();
+        assert!(card.running);
+        assert_eq!(card.name, "tasks");
+        assert_eq!(card.args_summary, "board");
+        ev(&mut s, r#"{"type":"tool_execution_end","toolCallId":"c1","toolName":"tasks","isError":false,"result":{"content":[{"type":"text","text":"BACKLOG (0)"}]}}"#);
+        let card = s.find_card("c1").unwrap();
+        assert!(!card.running);
+        assert_eq!(card.output, "BACKLOG (0)");
+        assert_eq!(s.activity.len(), 1);
+        assert!(!s.activity[0].is_error);
+    }
+
+    #[test]
+    fn agent_end_clears_streaming() {
+        let mut s = AgentState::fresh();
+        s.streaming = true;
+        ev(&mut s, r#"{"type":"agent_end","messages":[]}"#);
+        assert!(!s.streaming);
+    }
+
+    #[test]
+    fn stats_reads_nested_tokens() {
+        let mut s = AgentState::fresh();
+        let resp = parse(r#"{"type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":9236,"output":18},"cost":0,"contextUsage":{"tokens":13862,"contextWindow":400000,"percent":3.46}}}"#).unwrap();
+        s.apply_response(&resp);
+        assert_eq!(s.stats.input, 9236);
+        assert_eq!(s.stats.output, 18);
+        assert!((s.stats.ctx_percent - 3.46).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ext_ui_select_becomes_dialog_known_methods_need_no_ack() {
+        let mut s = AgentState::fresh();
+        let ack = s.apply_ext_ui(
+            &parse(r#"{"type":"extension_ui_request","id":"d1","method":"select","prompt":"Pick","options":["a","b"]}"#).unwrap(),
+        );
+        assert!(ack.is_none(), "known method must not need a default ack");
+        assert_eq!(s.dialogs.len(), 1);
+        assert_eq!(s.dialogs[0].method, "select");
+        assert_eq!(s.dialogs[0].options, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn dialog_timeout_prunes_locally() {
+        let mut s = AgentState::fresh();
+        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"d","method":"confirm","prompt":"ok?","timeout":1}"#).unwrap());
+        assert_eq!(s.dialogs.len(), 1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(s.prune_dialogs());
+        assert!(s.dialogs.is_empty());
+    }
+
+    #[test]
+    fn ext_ui_setwidget_and_unknown_ack() {
+        let mut s = AgentState::fresh();
+        s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"w","method":"setWidget","lines":["info ✓","data ▦"]}"#).unwrap());
+        assert_eq!(s.widget_lines, vec!["info ✓", "data ▦"]);
+        let ack = s.apply_ext_ui(&parse(r#"{"type":"extension_ui_request","id":"z","method":"mysteryMethod"}"#).unwrap());
+        assert_eq!(ack.as_deref(), Some("z"), "unknown method must be acked by id");
+    }
+
+    #[test]
+    fn queue_update_collects_steer_and_followup() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"queue_update","steering":[{"message":"steer me"}],"followUp":[{"message":"later"}]}"#);
+        assert_eq!(s.queued, vec!["steer me", "later"]);
+    }
+
+    #[test]
+    fn auto_retry_sets_and_clears_notice() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"auto_retry_start","attempt":2,"maxAttempts":5}"#);
+        assert_eq!(s.notice.as_deref(), Some("retrying (attempt 2/5)…"));
+        ev(&mut s, r#"{"type":"auto_retry_end","success":true}"#);
+        assert!(s.notice.is_none());
+    }
+
+    #[test]
+    fn compaction_pushes_system_notices() {
+        let mut s = AgentState::fresh();
+        ev(&mut s, r#"{"type":"compaction_start","reason":"threshold"}"#);
+        ev(&mut s, r#"{"type":"compaction_end","aborted":false}"#);
+        let sys: Vec<_> = s
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::System(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sys, vec!["compacting context…", "context compacted"]);
+    }
 }

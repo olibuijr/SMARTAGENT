@@ -50,9 +50,16 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     for e in entries {
         let e = e.map_err(|x| x.to_string())?;
         let p = e.path();
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if p.is_dir() {
+            // Skip infra + reference clones: a root of `.` must never surface
+            // .refrepos/ SKILL.md files (read-only reference material) or
+            // workspace repos' own skills as OUR skills.
+            if name.starts_with('.') || matches!(name, "target" | "node_modules" | "workspaces") {
+                continue;
+            }
             walk(&p, out)?;
-        } else if p.file_name().map(|n| n == "SKILL.md").unwrap_or(false) {
+        } else if name == "SKILL.md" {
             out.push(p);
         }
     }

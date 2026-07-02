@@ -131,6 +131,16 @@ Engine-drives-pi (2026-07-02):
 - [x] ISC-71: LIVE drive of `status-report` completes with real pi steps and recorded evidence
 - [x] ISC-72: README reflects 3-line statusline, workspace layer, operating loop, 20-tool gate (was 18/two-row)
 
+Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agents):
+- [x] ISC-73: every active tool covered by a matching skill (coverage table; skills validate 14/14)
+- [x] ISC-74: `platform` skill answers SMARTAGENT×pi questions, rank-1 on "what can this platform do" etc.
+- [x] ISC-75: new domain skills (code-nav, memory-recall, web-research, ops, orchestration) rank-1 on realistic trigger queries
+- [x] ISC-76: skills discovery skip-list — `.refrepos`/dot-dirs/target/node_modules/workspaces never surface as skills
+- [x] ISC-77: operating loop routes skills (step 1 incl. platform); triage/retro steps name the kanban skill
+- [x] ISC-78: slash commands registered via pi.registerCommand — /board /tasks /skills /status /index /projects /runs /audit /memory, verified emitting command messages
+- [x] ISC-79: live finale — pi creates workspaces/hello-loop through the loop, serves localhost:8377, marker text confirmed by external curl
+- [x] ISC-80: Anti: no skill body documents a command that doesn't exist (agents verified against binaries/extensions)
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |

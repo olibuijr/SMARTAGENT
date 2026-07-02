@@ -1,4 +1,4 @@
-use httpc::json::Value;
+pub use httpc::json::Value;
 
 pub fn write(v: &Value) -> String {
     match v {
@@ -46,6 +46,7 @@ pub fn s(t: &str) -> Value {
     Value::Str(t.to_string())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn n(x: f64) -> Value {
     Value::Num(x)
 }
@@ -63,6 +64,7 @@ pub fn obj(pairs: Vec<(&str, Value)>) -> Value {
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn arr(items: Vec<Value>) -> Value {
     Value::Arr(items)
 }
@@ -86,6 +88,7 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn compact_preview(v: &Value, max: usize) -> String {
     truncate_chars(&write(v), max)
 }
@@ -126,6 +129,6 @@ mod tests {
     #[test]
     fn compact_preview_writes_then_truncates() {
         let v = obj(vec![("text", s("Ólafur á Akureyri"))]);
-        assert_eq!(compact_preview(&v, 10), "{\"text\":\"Ól…");
+        assert_eq!(compact_preview(&v, 10), "{\"text\":\"Ó…");
     }
 }

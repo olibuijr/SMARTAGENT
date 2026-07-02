@@ -9,7 +9,7 @@ use_when: after every few completed tasks, end of a work session, cycle time ris
 Small, frequent, evidence-based. One improvement per retro beats ten ideas.
 
 ## measure
-skill: tasks
+skill: kanban
 expect: metrics read and the bottleneck named
 `tasks metrics`. Where does time pool — doing (tasks too big), review
 (verification debt), blocked (external waits)? Name ONE bottleneck with the

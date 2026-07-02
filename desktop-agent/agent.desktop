@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=SMARTAGENT
 Comment=AI Agent Desktop
-Exec=/home/olafurbui/Projects/SMARTAGENT/desktop-agent/target/release/desktop-agent
+Exec=/home/olafurbui/Projects/SMARTAGENT/target/release/desktop-agent
 Icon=utilities-terminal
 Type=Application
 Categories=Development;IDE;

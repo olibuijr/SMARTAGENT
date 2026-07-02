@@ -29,7 +29,7 @@ pure-Rust binary the agent calls through a pi extension:
 | `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust code knowledge graph: defs/refs/callers + semantic symbol search |
 | `codeindex` | ripgrep | Fast literal/regex code search + per-repo workspace project index |
 | `vault` | Obsidian | Markdown second brain: notes, wikilinks, backlinks, search |
-| `skills` | [Agent Skills](https://github.com/anthropics/skills) | SKILL.md loader: list/show/search |
+| `skills` | [Agent Skills](https://github.com/anthropics/skills) | SKILL.md loader: list/show/search/match (prompt-scored routing)/validate |
 | `schedule` | [Temporal](https://github.com/temporalio/temporal) | Durable cron scheduler (a supervised daemon fires jobs) |
 | `search` | [SearXNG](https://github.com/searxng/searxng) | Web metasearch client |
 | `notify` | [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications |
@@ -58,6 +58,16 @@ The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
 
 ### Features added
 
+- **Full skill library** — every tool and operation is covered by a matching
+  skill: `platform` (SMARTAGENT expertise — instant answers about the system's
+  architecture, features, and conventions), `code-nav`, `memory-recall`,
+  `web-research`, `ops`, `orchestration`, plus `kanban` and `self-test`.
+  `skills match '<request>'` routes any prompt to the right one (operating
+  loop step 1).
+- **Slash commands** — instant TUI commands with zero model round-trip:
+  `/board`, `/tasks`, `/skills [query]`, `/status`, `/index [project]`,
+  `/projects`, `/runs`, `/audit`, `/memory <query>` (`extensions/commands.ts`
+  via pi's `registerCommand`).
 - **Workspace project layer** — every repo under `workspaces/` is a first-class
   project: `codeindex projects/index` builds a per-repo file inventory at
   `<repo>/.smartagent/codeindex.semdb`, and a shared `--project <name>`

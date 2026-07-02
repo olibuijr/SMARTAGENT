@@ -13,6 +13,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use eframe::egui;
 use httpc::json::{parse, Value};
 
 use crate::jsonw;
