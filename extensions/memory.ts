@@ -17,23 +17,46 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "memory",
 		label: "Memory",
-		description: "Persistent 3-tier agent memory. Actions: 'remember' stores a fact in a tier (working=recent, episodic=events, semantic=durable facts); 'recall' semantically searches memories for a query; 'stats' shows counts. Use to retain and recall facts about the user and work across sessions.",
+		description: "Persistent 3-tier memory (working=recent, episodic=events, semantic=durable facts). Actions: 'remember' stores a fact; 'update' overwrites an existing fact by id (dedupe/correct — prefer over remembering a contradiction); 'recall' semantically searches (optionally scoped to one tier); 'recent' lists the newest N in a tier; 'forget' deletes by id; 'promote' moves a fact between tiers; 'stats' shows counts.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["remember", "recall", "stats"] },
-				tier: { type: "string", enum: ["working", "episodic", "semantic"], description: "tier for remember (default semantic)" },
-				text: { type: "string", description: "fact to store or query to recall" },
+				action: { type: "string", enum: ["remember", "update", "recall", "recent", "forget", "promote", "stats"] },
+				tier: { type: "string", enum: ["working", "episodic", "semantic"], description: "tier for remember/update/recent/forget (default semantic; recent defaults episodic)" },
+				text: { type: "string", description: "fact to store (remember/update) or query (recall)" },
 				k: { type: "number", description: "result count for recall (default 5)" },
+				n: { type: "number", description: "count for recent (default 5)" },
+				id: { type: "string", description: "memory id (update/forget; optional for remember)" },
+				scope: { type: "string", enum: ["all", "working", "episodic", "semantic"], description: "restrict recall to one tier (default all)" },
+				from: { type: "string", description: "source tier (promote)" },
+				to: { type: "string", description: "destination tier (promote)" },
 			},
 			required: ["action"],
 		} as any,
 		async execute(_id: string, p: any) {
-			const out = p.action === "remember"
-				? run(["remember", "--tier", p.tier ?? "semantic", "--text", p.text ?? ""])
-				: p.action === "recall"
-					? run(["recall", "--text", p.text ?? "", "--k", String(p.k ?? 5)])
-					: run(["stats"]);
+			let out: string;
+			switch (p.action) {
+				case "remember":
+					out = run(["remember", "--tier", p.tier ?? "semantic", "--text", p.text ?? "", ...(p.id ? ["--id", p.id] : [])]);
+					break;
+				case "update":
+					out = run(["remember", "--tier", p.tier ?? "semantic", "--id", p.id ?? "", "--text", p.text ?? ""]);
+					break;
+				case "recall":
+					out = run(["recall", "--text", p.text ?? "", "--k", String(p.k ?? 5), "--tier", p.scope ?? "all"]);
+					break;
+				case "recent":
+					out = run(["recent", "--tier", p.tier ?? "episodic", "--n", String(p.n ?? 5)]);
+					break;
+				case "forget":
+					out = run(["forget", "--tier", p.tier ?? "semantic", "--id", p.id ?? ""]);
+					break;
+				case "promote":
+					out = run(["promote", "--id", p.id ?? "", "--from", p.from ?? "", "--to", p.to ?? ""]);
+					break;
+				default:
+					out = run(["stats"]);
+			}
 			return { content: [{ type: "text", text: out }] };
 		},
 	});

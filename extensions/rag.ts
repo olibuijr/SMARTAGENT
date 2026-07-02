@@ -27,15 +27,17 @@ export default function (pi: ExtensionAPI) {
 		name: "rag",
 		label: "RAG",
 		description:
-			"Document RAG store. Actions: 'ingest' chunks and embeds a text/PDF-text file into semdb; " +
-			"'retrieve' semantically searches and returns cited chunks; 'stats' shows store counts.",
+			"Document RAG store. Actions: 'ingest' chunks/embeds a text/PDF-text file; 'retrieve' semantically " +
+			"searches and returns cited chunks (scope to one document with docId); 'get' fetches one chunk's full " +
+			"text by id; 'delete-doc' removes a document by docId; 'stats' shows counts.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["ingest", "retrieve", "stats"] },
+				action: { type: "string", enum: ["ingest", "retrieve", "get", "delete-doc", "stats"] },
 				path: { type: "string", description: "File path for ingest" },
 				query: { type: "string", description: "Retrieval query" },
-				docId: { type: "string", description: "Optional document id" },
+				docId: { type: "string", description: "Document id — scopes retrieve, or targets ingest/delete-doc" },
+				id: { type: "string", description: "Chunk id (get)" },
 				k: { type: "number", description: "Result count for retrieve (default 5)" },
 				db: { type: "string", description: "Database file (default data/rag.semdb)" },
 			},
@@ -49,9 +51,16 @@ export default function (pi: ExtensionAPI) {
 				if (p.docId) args.push("--doc-id", p.docId);
 				out = run(args);
 			} else if (p.action === "retrieve") {
-				out = existsSync(db)
-					? untrusted("RETRIEVED DOCUMENTS", run(["retrieve", db, "--text", p.query ?? "", "--k", String(p.k ?? 5)]))
-					: "no chunks";
+				if (!existsSync(db)) { out = "no chunks"; }
+				else {
+					const args = ["retrieve", db, "--text", p.query ?? "", "--k", String(p.k ?? 5)];
+					if (p.docId) args.push("--doc-id", p.docId); // scope to one document
+					out = untrusted("RETRIEVED DOCUMENTS", run(args));
+				}
+			} else if (p.action === "get") {
+				out = existsSync(db) ? untrusted("DOCUMENT CHUNK", run(["get", db, "--id", p.id ?? ""])) : "no chunks";
+			} else if (p.action === "delete-doc") {
+				out = existsSync(db) ? run(["delete-doc", db, "--doc-id", p.docId ?? ""]) : "no chunks";
 			} else {
 				out = existsSync(db) ? run(["stats", db]) : "chunks: 0\ndocuments: 0\nrecords: 0";
 			}
