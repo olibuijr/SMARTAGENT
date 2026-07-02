@@ -141,7 +141,7 @@ fn poly1305(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
 fn pad16(v: &mut Vec<u8>) {
     let rem = v.len() % 16;
     if rem != 0 {
-        v.extend(std::iter::repeat(0u8).take(16 - rem));
+        v.resize(v.len() + (16 - rem), 0u8);
     }
 }
 

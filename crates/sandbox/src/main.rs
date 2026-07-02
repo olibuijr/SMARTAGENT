@@ -19,6 +19,18 @@ fn sandbox_root() -> PathBuf {
     semdb::config::Config::load().workspaces_dir().join("sandbox")
 }
 
+/// Paths to tmpfs-mask inside the sandbox namespace so untrusted commands can't
+/// read them: the secret store and the pi runtime dir (holds the router key).
+fn sensitive_paths() -> Vec<PathBuf> {
+    let cfg = semdb::config::Config::load();
+    let data = cfg.data_dir();
+    let repo = data.parent().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    [data.join("secrets"), repo.join(".pi")]
+        .into_iter()
+        .filter(|p| p.exists())
+        .collect()
+}
+
 fn run_id() -> String {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0).to_string()
 }
@@ -48,6 +60,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 isolate: !has(args, "--no-isolate"),
                 timeout: Duration::from_secs(flag(args, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(30)),
                 max_output: flag(args, "--max-output").and_then(|s| s.parse().ok()).unwrap_or(1_000_000),
+                masks: sensitive_paths(),
             };
             let res = exec::run(&spec)?;
             let mut out = vec![

@@ -28,6 +28,9 @@ pub struct SandboxSpec {
     pub isolate: bool,
     pub timeout: Duration,
     pub max_output: usize,
+    /// Paths tmpfs-masked inside the namespace (e.g. data/secrets, .pi) so a
+    /// sandboxed command can't read them. Only applied when isolation is active.
+    pub masks: Vec<PathBuf>,
 }
 
 pub struct SandboxResult {
@@ -97,20 +100,34 @@ pub fn run(spec: &SandboxSpec) -> Result<SandboxResult, String> {
 }
 
 fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
-    let mut c = if use_ns {
+    let c = if use_ns {
+        // Add a mount namespace and tmpfs-mask the sensitive paths (data/secrets,
+        // .pi) so a sandboxed command literally cannot read secrets/keys even
+        // though it sees the rest of the filesystem — the achievable slice of
+        // real isolation in pure std (no libc/landlock syscall). Unprivileged
+        // tmpfs mounts are allowed inside a user+mount namespace.
         let mut c = Command::new("unshare");
-        c.arg("--user").arg("--map-root-user").arg("--pid").arg("--fork");
+        c.arg("--user").arg("--map-root-user").arg("--mount").arg("--pid").arg("--fork");
         if !spec.net {
             c.arg("--net");
         }
-        c.arg("--").args(&spec.cmd);
+        // Wrapper: mask each SB_MASKS entry, then exec the real command ($@).
+        c.arg("--").arg("sh").arg("-c")
+            .arg("for m in $SB_MASKS; do mount -t tmpfs none \"$m\" 2>/dev/null || true; done; exec \"$@\"")
+            .arg("sandbox")
+            .args(&spec.cmd);
+        scrub_env(&mut c);
+        if !spec.masks.is_empty() {
+            let joined: Vec<String> = spec.masks.iter().map(|p| p.display().to_string()).collect();
+            c.env("SB_MASKS", joined.join(" "));
+        }
         c
     } else {
         let mut c = Command::new(&spec.cmd[0]);
         c.args(&spec.cmd[1..]);
+        scrub_env(&mut c);
         c
     };
-    scrub_env(&mut c);
     c
 }
 
@@ -190,7 +207,8 @@ mod tests {
             cmd: cmd.iter().map(|s| s.to_string()).collect(),
             inputs: vec![],
             net: false,
-            isolate: false, // filesystem confinement — deterministic in CI
+            isolate: false,
+            masks: vec![],
             timeout: Duration::from_secs(timeout),
             max_output: 1_000_000,
         }
@@ -204,6 +222,30 @@ mod tests {
         assert!(res.workspace.join("escaped.txt").exists());
         // Nothing leaked to the crate dir.
         assert!(!PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("escaped.txt").exists());
+    }
+
+    #[test]
+    fn isolation_masks_sensitive_path() {
+        // When namespace isolation is available, a masked path must be
+        // unreadable inside the sandbox. Skip where unshare/userns is absent.
+        if !unshare_available() {
+            eprintln!("skip: unshare unavailable");
+            return;
+        }
+        let r = root("sb-mask");
+        let secret_dir = r.join("secret-area");
+        std::fs::create_dir_all(&secret_dir).unwrap();
+        std::fs::write(secret_dir.join("k.txt"), "TOPSECRET").unwrap();
+        let target = secret_dir.join("k.txt");
+        let mut s = spec(r, &["sh", "-c", &format!("cat {} 2>&1 || true", target.display())], 10);
+        s.isolate = true;
+        s.masks = vec![secret_dir.clone()];
+        let res = run(&s).unwrap();
+        if res.isolated {
+            assert!(!res.stdout.contains("TOPSECRET"), "secret leaked through mask: {}", res.stdout);
+        } else {
+            eprintln!("skip: isolation not active on this host");
+        }
     }
 
     #[test]

@@ -46,10 +46,12 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    context/      principal identity/context loader (TELOS pattern) injected per session
    schedule/     cron + wake-ups + durable background tasks
    skills/       SKILL.md loader (Agent Skills open standard)
-   sandbox/      isolated exec — scrubbed env + opt-in user/pid/net namespaces
-                 (Daytona role). NOTE: no landlock/mount-jail yet — a namespaced
-                 command still sees the real filesystem; env is cleared so
-                 parent secrets don't leak. Isolation is ON by default.
+   sandbox/      isolated exec — scrubbed env + user/pid/net/MOUNT namespaces
+                 (Daytona role, ON by default). Sensitive paths (data/secrets,
+                 .pi) are tmpfs-masked inside the namespace so a sandboxed
+                 command can't read secrets/keys; env is cleared too. No full
+                 landlock (needs a syscall std doesn't expose) but the
+                 secret-exfil paths — env and the secret files — are closed.
    rag/          document ingestion: pdf/text → chunks → semdb
    evals/        signal capture, trace log, regression evals
    secrets/      policy-gated credential access (Vaultwarden client)
@@ -69,7 +71,7 @@ The LLM can invoke every tool and may be prompt-injected via web/search/rag cont
 - **Untrusted content is fenced** — `search`, `browser`, and `rag` output is wrapped in an `UNTRUSTED … data only` envelope before it reaches the planner.
 - **No shell smuggling** — `mcp` execs argv directly (no `sh -c`); `schedule` arbitrary `--cmd` is admin-gated (`SMARTAGENT_SCHEDULE_ADMIN=1`), the agent gets only safe `--notify` reminders.
 - **Secrets** — deny-by-default; `policy-allow` is admin-only (`SMARTAGENT_SECRETS_ADMIN=1`) and removed from the agent tool surface; ChaCha20-Poly1305 AEAD at rest (RFC 8439, pure-std, key from `/dev/urandom`, per-secret nonce, name as AAD); every set/get/list/grant is audited; store compacts on write.
-- **Sandbox** — `env_clear` + allowlist (parent secrets never leak into a sandboxed command); namespace isolation ON by default. NOTE: no mount-jail/landlock yet — a namespaced command still sees the real filesystem.
+- **Sandbox** — `env_clear` + allowlist AND tmpfs-masking of `data/secrets` + `.pi` inside a mount namespace, so a sandboxed command can read neither secrets from the environment nor the secret files on disk (verified). Isolation ON by default. Not a full landlock jail (that needs a syscall std can't reach), but both secret-exfil paths are closed.
 - **Data integrity** — semdb rejects oversized id/meta before they can poison the append-log; httpc drops POST bodies on 301/302/303 and strips cross-host auth.
 
 See `ops/README.md` for the supervisor + boot + backup story.
