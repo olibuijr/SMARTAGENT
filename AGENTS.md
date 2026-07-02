@@ -18,6 +18,7 @@ Every feature follows the same loop: **Claude implements → codex CLI tests →
 4. **Lean.** Smallest correct implementation. No dead code, no speculative features. Port for correctness, then debloat.
 5. **Verify by using.** A capability is done when driven end-to-end from pi, not when it compiles.
 6. **NEVER use /tmp or any path outside the repo.** Scratch, probes, test databases, config — all inside the repo; throwaways go in `.scratch/` (gitignored).
+7. **All data lives in database tables.** `semdb` is the storage engine: every persistent collection is a table of rows (a `.semdb` file, or a named table within one). Any table whose rows need semantic recall gets a **vector column** (the row's embedding); tables that don't (journals, config, structural graphs) store rows with a zero/absent vector. Do NOT invent bespoke JSONL/JSON file formats for new data — put it in a semdb table. Vectors are added where meaning-based lookup is needed, not everywhere. (Existing JSONL journals in `schedule`/`evals` predate this rule and are migration targets.)
 
 ## Architecture
 

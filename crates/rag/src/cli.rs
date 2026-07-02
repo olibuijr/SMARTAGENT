@@ -1,0 +1,164 @@
+//! CLI: chunk / ingest / retrieve / get / delete-doc / stats.
+
+use std::path::{Path, PathBuf};
+
+use semdb::config::Config;
+use semdb::vector;
+
+use crate::chunk::{chunk_text, default_doc_id, ChunkConfig};
+use crate::embed::Embedder;
+use crate::pdftext::{self, Kind};
+use crate::store::{self, RetrievedChunk};
+
+pub fn run(args: &[String]) -> Result<String, String> {
+    match args.first().map(String::as_str) {
+        Some("chunk") => {
+            let path = path_arg(args, 1, "file")?;
+            let extracted = pdftext::read_document(&path, kind(args)?)?;
+            let doc_id = flag(args, "--doc-id").unwrap_or_else(|| default_doc_id(&path));
+            let cfg = chunk_config(args);
+            let chunks = chunk_text(&extracted.text, &doc_id, &path.display().to_string(), &extracted.kind, &cfg);
+            if chunks.is_empty() {
+                return Ok("no chunks".into());
+            }
+            Ok(chunks
+                .iter()
+                .map(|c| format!("{}\t{}:{}..{}\t{}", c.id, c.source, c.start, c.end, one_line(&c.text)))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        Some("ingest") => {
+            let db = path_arg(args, 1, "db")?;
+            let path = path_arg(args, 2, "file")?;
+            let extracted = pdftext::read_document(&path, kind(args)?)?;
+            let doc_id = flag(args, "--doc-id").unwrap_or_else(|| default_doc_id(&path));
+            let cfg = chunk_config(args);
+            let chunks = chunk_text(&extracted.text, &doc_id, &path.display().to_string(), &extracted.kind, &cfg);
+            if chunks.is_empty() {
+                return Ok("no chunks".into());
+            }
+            let vectors = if let Some(v) = flag(args, "--vector") {
+                let vec = vector::parse_vec(&v)?;
+                vec![vec; chunks.len()]
+            } else {
+                let embedder = embedder(args)?;
+                let mut vectors = Vec::with_capacity(chunks.len());
+                for chunk in &chunks {
+                    vectors.push(embedder.embed(&chunk.text)?);
+                }
+                vectors
+            };
+            let n = store::put_chunks(&db, &chunks, &vectors)?;
+            Ok(format!("ingested {n} chunks from {} as {doc_id}", path.display()))
+        }
+        Some("retrieve") | Some("search") => {
+            let db = path_arg(args, 1, "db")?;
+            let k = flag(args, "--k").and_then(|s| s.parse().ok()).unwrap_or(5);
+            let exact = args.iter().any(|a| a == "--exact");
+            let qv = if let Some(v) = flag(args, "--vector") {
+                vector::parse_vec(&v)?
+            } else if let Some(text) = flag(args, "--text") {
+                embedder(args)?.embed(&text)?
+            } else {
+                return Err("--text or --vector required".into());
+            };
+            let hits = store::retrieve(&db, &qv, k, exact, flag(args, "--doc-id").as_deref())?;
+            Ok(format_hits(&hits))
+        }
+        Some("get") => {
+            let db = path_arg(args, 1, "db")?;
+            let id = flag(args, "--id").ok_or("--id required")?;
+            Ok(format_hit(&store::get(&db, &id)?))
+        }
+        Some("delete-doc") => {
+            let db = path_arg(args, 1, "db")?;
+            let doc_id = flag(args, "--doc-id").ok_or("--doc-id required")?;
+            let n = store::delete_doc(&db, &doc_id)?;
+            Ok(format!("deleted {n} chunks for {doc_id}"))
+        }
+        Some("stats") => {
+            let db = path_arg(args, 1, "db")?;
+            let (chunks, docs, records) = store::stats(&db)?;
+            Ok(format!("chunks: {chunks}\ndocuments: {docs}\nrecords: {records}"))
+        }
+        _ => Ok(HELP.trim().into()),
+    }
+}
+
+fn embedder(args: &[String]) -> Result<Embedder, String> {
+    let cfg = Config::load();
+    let endpoint = cfg
+        .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", flag(args, "--endpoint").as_deref())
+        .ok_or("no embeddings endpoint: set embeddings_endpoint in config/smartagent.conf, $SEMDB_ENDPOINT, or --endpoint")?;
+    let model = cfg
+        .resolve("embeddings_model", "SEMDB_MODEL", flag(args, "--model").as_deref())
+        .unwrap_or_else(|| "embeddinggemma".into());
+    Ok(Embedder::new(endpoint, model))
+}
+
+fn kind(args: &[String]) -> Result<Kind, String> {
+    match flag(args, "--kind").as_deref().unwrap_or("auto") {
+        "auto" => Ok(Kind::Auto),
+        "text" => Ok(Kind::Text),
+        "pdf" => Ok(Kind::Pdf),
+        other => Err(format!("unknown --kind '{other}' (auto|text|pdf)")),
+    }
+}
+
+fn chunk_config(args: &[String]) -> ChunkConfig {
+    ChunkConfig {
+        max_tokens: flag(args, "--chunk-tokens").and_then(|s| s.parse().ok()).unwrap_or(512),
+        overlap_tokens: flag(args, "--overlap").and_then(|s| s.parse().ok()).unwrap_or(0),
+    }
+}
+
+fn path_arg(args: &[String], idx: usize, what: &str) -> Result<PathBuf, String> {
+    args.get(idx).map(Path::new).map(Path::to_path_buf).ok_or_else(|| format!("{what} required"))
+}
+
+fn flag(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
+}
+
+fn format_hits(hits: &[RetrievedChunk]) -> String {
+    if hits.is_empty() {
+        "no chunks".into()
+    } else {
+        hits.iter().map(format_hit).collect::<Vec<_>>().join("\n")
+    }
+}
+
+fn format_hit(h: &RetrievedChunk) -> String {
+    format!(
+        "{:.4}\t{}\t{}:{}..{}\t{}\t{}",
+        h.score,
+        h.citation(),
+        h.source,
+        h.start,
+        h.end,
+        h.doc_id,
+        one_line(&h.text)
+    )
+}
+
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+const HELP: &str = r#"
+rag — text/PDF-text ingestion into semdb with cited retrieval
+
+USAGE:
+  rag chunk      <file> [--kind auto|text|pdf] [--doc-id ID]
+                 [--chunk-tokens 512] [--overlap 0]
+  rag ingest     <db> <file> [--kind auto|text|pdf] [--doc-id ID]
+                 [--chunk-tokens 512] [--overlap 0]
+                 [--endpoint host:port] [--model name] [--vector '0.1,0.2']
+  rag retrieve   <db> (--text QUERY | --vector '0.1,0.2') [--k 5]
+                 [--endpoint host:port] [--model name] [--exact] [--doc-id ID]
+  rag get        <db> --id CHUNK_ID
+  rag delete-doc <db> --doc-id ID
+  rag stats      <db>
+
+Embedding config: config/smartagent.conf (embeddings_endpoint, embeddings_model)
+"#;

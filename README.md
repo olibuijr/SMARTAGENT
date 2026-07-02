@@ -13,6 +13,7 @@ Each capability is ported from the most popular tool in its category (researched
 | `vault` | markdown second brain (Obsidian pattern) | scaffold |
 | `skills` | SKILL.md loader (Agent Skills standard) | scaffold |
 | `schedule` | durable cron (Temporal concepts) | scaffold |
+| `rag` | RAGFlow-pattern ingestion/retrieval | working |
 | wave 2 | memory, codegraph, search, notify, secrets, rag, browser | planned |
 | wave 3 | orchestrate, mcp, context, sandbox, voice, evals | planned |
 

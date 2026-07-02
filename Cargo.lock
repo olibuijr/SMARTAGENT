@@ -9,6 +9,9 @@ version = "0.1.0"
 [[package]]
 name = "codegraph"
 version = "0.1.0"
+dependencies = [
+ "semdb",
+]
 
 [[package]]
 name = "codeindex"
@@ -52,6 +55,10 @@ version = "0.1.0"
 [[package]]
 name = "rag"
 version = "0.1.0"
+dependencies = [
+ "httpc",
+ "semdb",
+]
 
 [[package]]
 name = "sandbox"

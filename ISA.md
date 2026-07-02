@@ -73,7 +73,7 @@ Capability crates (each: binary runs, core verbs work, pi extension drives it):
 - [ ] ISC-23: schedule: cron-expression parser + durable task file + daemon fires a test job (Temporal durability concept: at-least-once, journal replay)
 - [ ] ISC-24: skills: loads SKILL.md (frontmatter + body) per Agent Skills spec, lists/injects on demand
 - [ ] ISC-25: sandbox: runs a command isolated (namespaces/landlock + temp worktree), writes can't escape
-- [ ] ISC-26: rag: text/PDF-text ingestion → chunks → semdb, retrieval returns cited chunks (RAGFlow pipeline concept)
+- [x] ISC-26: rag: text/PDF-text ingestion → chunks → semdb, retrieval returns cited chunks (RAGFlow pipeline concept)
 - [ ] ISC-27: evals: JSONL trace log + scoring run + regression diff between two runs (Langfuse concept)
 - [ ] ISC-28: secrets: policy-gated get from Vaultwarden/Infisical-pattern store; deny-by-default policy file
 - [ ] ISC-29: voice: STT and TTS round-trip via external endpoints (Pipecat pipeline concept)
