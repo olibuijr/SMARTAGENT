@@ -17,11 +17,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = (name: string) => join(ROOT, "target", "release", name);
+import { join } from "node:path";
+import { BIN, ROOT, layout } from "./lib/statusline-common.ts";
 const REFRESH_MS = 5000;
 const PANE_WIDTH = 47; // +30% for readability
 
@@ -242,6 +239,7 @@ export default function (pi: ExtensionAPI) {
 		if (ctx.mode !== "tui") return "agent panel needs the interactive TUI";
 		if (active) return "agent panel already active";
 		active = true;
+		layout.sidebarCols = PANE_WIDTH; // statusline lays out around the sidebar
 		ctx.ui
 			.custom(
 				(tui: any, _theme: any, _kb: any, done: (r: unknown) => void) => {
@@ -297,6 +295,7 @@ export default function (pi: ExtensionAPI) {
 		finish?.(undefined);
 		finish = undefined;
 		active = false;
+		layout.sidebarCols = 0;
 		return "agent team sidebar off";
 	}
 

@@ -24,7 +24,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync, watch } from "node:fs";
 import { join } from "node:path";
-import { BIN, ROOT, STATUS_SEGMENTS, parseLevel } from "./lib/statusline-common.ts";
+import { BIN, ROOT, STATUS_SEGMENTS, parseLevel, availableColumns } from "./lib/statusline-common.ts";
 
 const SEGMENTS = STATUS_SEGMENTS;
 
@@ -212,7 +212,7 @@ export default function (pi: ExtensionAPI) {
 				.map((s) => painted.get(s.key))
 				.filter(Boolean) as string[],
 		);
-		ui.setWidget("smartagent-statusline", fitRows(cells, process.stdout.columns || 120), {
+		ui.setWidget("smartagent-statusline", fitRows(cells, availableColumns()), {
 			placement: "belowEditor",
 		});
 	}

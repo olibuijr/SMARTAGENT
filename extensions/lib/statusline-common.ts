@@ -34,3 +34,10 @@ export function parseLevel(raw: string): { level: string; text: string } {
 }
 
 export const statusTag = (level: string) => (level === "ok" ? "✓" : level === "warn" ? "⚠" : "✗");
+
+// Live layout state shared between extensions in-process: overlays that
+// reserve horizontal space (the agentpanel sidebar) register their width here
+// so width-aware widgets (statusline) lay out for the REMAINING columns
+// instead of the full terminal.
+export const layout = { sidebarCols: 0 };
+export const availableColumns = (): number => Math.max(40, (process.stdout.columns || 120) - layout.sidebarCols);
