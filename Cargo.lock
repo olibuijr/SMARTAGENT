@@ -3,11 +3,66 @@
 version = 4
 
 [[package]]
+name = "browser"
+version = "0.1.0"
+
+[[package]]
+name = "codegraph"
+version = "0.1.0"
+
+[[package]]
+name = "codeindex"
+version = "0.1.0"
+
+[[package]]
+name = "context"
+version = "0.1.0"
+
+[[package]]
+name = "evals"
+version = "0.1.0"
+
+[[package]]
 name = "httpc"
 version = "0.1.0"
 
 [[package]]
+name = "mcp"
+version = "0.1.0"
+
+[[package]]
+name = "memory"
+version = "0.1.0"
+
+[[package]]
+name = "notify"
+version = "0.1.0"
+dependencies = [
+ "httpc",
+]
+
+[[package]]
+name = "orchestrate"
+version = "0.1.0"
+
+[[package]]
+name = "rag"
+version = "0.1.0"
+
+[[package]]
+name = "sandbox"
+version = "0.1.0"
+
+[[package]]
 name = "schedule"
+version = "0.1.0"
+
+[[package]]
+name = "search"
+version = "0.1.0"
+
+[[package]]
+name = "secrets"
 version = "0.1.0"
 
 [[package]]
@@ -20,4 +75,8 @@ version = "0.1.0"
 
 [[package]]
 name = "vault"
+version = "0.1.0"
+
+[[package]]
+name = "voice"
 version = "0.1.0"

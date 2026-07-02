@@ -6,6 +6,20 @@ members = [
     "crates/skills",
     "crates/schedule",
     "crates/vault",
+    "crates/notify",
+    "crates/memory",
+    "crates/codegraph",
+    "crates/search",
+    "crates/secrets",
+    "crates/rag",
+    "crates/browser",
+    "crates/codeindex",
+    "crates/orchestrate",
+    "crates/mcp",
+    "crates/context",
+    "crates/sandbox",
+    "crates/voice",
+    "crates/evals",
 ]
 
 [workspace.package]
