@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI) {
 			properties: {
 				action: { type: "string", enum: ["add", "list", "next", "rm", "tick"] },
 				cron: { type: "string", description: "5-field cron expression (add)" },
-				cmd: { type: "string", description: "Shell command to run (add)" },
+				notify: { type: "string", description: "Reminder message to push when the job fires (add). This is the only job type the agent can create." },
 				id: { type: "string", description: "Job id (add optional, rm required)" },
 			},
 			required: ["action"],
@@ -41,7 +41,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id: string, p: any) {
 			const out =
 				p.action === "add"
-					? run(["add", "--cron", p.cron ?? "", "--cmd", p.cmd ?? "", ...(p.id ? ["--id", p.id] : [])])
+					? run(["add", "--cron", p.cron ?? "", "--notify", p.notify ?? "", ...(p.id ? ["--id", p.id] : [])])
 					: p.action === "rm"
 						? run(["rm", "--id", p.id ?? ""])
 						: p.action === "tick"

@@ -6,6 +6,21 @@ use crate::cron::{Civil, Cron};
 use crate::journal::{Event, Journal};
 use crate::runner;
 
+/// Build a fixed, safe shell command for a reminder: invoke the notify binary
+/// with the message single-quote-escaped so it cannot break out into other
+/// shell commands. This is the only job form the agent can create unprivileged.
+fn build_notify_cmd(msg: &str) -> String {
+    let topic = semdb::config::Config::load()
+        .resolve("ntfy_topic", "NTFY_TOPIC", None)
+        .unwrap_or_else(|| "smartagent".into());
+    let esc = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    format!(
+        "target/release/notify send --topic {} --message {}",
+        esc(&topic),
+        esc(msg)
+    )
+}
+
 fn journal_path(args: &[String]) -> PathBuf {
     flag(args, "--journal")
         .map(PathBuf::from)
@@ -23,7 +38,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
     match cmd {
         "add" => {
             let cron_expr = flag(args, "--cron").ok_or("--cron required")?;
-            let cmd_str = flag(args, "--cmd").ok_or("--cmd required")?;
+            // A scheduled job runs a shell command on a recurring timer — the
+            // highest-value persistence primitive for a prompt-injected agent.
+            // The safe, agent-facing path is `--notify <msg>`, which can only
+            // fire a notification. Arbitrary `--cmd` is admin-only (out-of-band
+            // SMARTAGENT_SCHEDULE_ADMIN=1), so injection can't plant a backdoor.
+            let cmd_str = match flag(args, "--notify") {
+                Some(msg) => build_notify_cmd(&msg),
+                None => {
+                    let raw = flag(args, "--cmd").ok_or("--cmd or --notify required")?;
+                    if std::env::var("SMARTAGENT_SCHEDULE_ADMIN").as_deref() != Ok("1") {
+                        return Err("arbitrary --cmd is admin-only (set SMARTAGENT_SCHEDULE_ADMIN=1); use --notify <message> for reminders".into());
+                    }
+                    raw
+                }
+            };
             Cron::parse(&cron_expr)?; // validate before journaling
             let id = flag(args, "--id").unwrap_or_else(|| {
                 // Deterministic id from content + count.
