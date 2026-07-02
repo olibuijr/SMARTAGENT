@@ -1,0 +1,44 @@
+#!/bin/sh
+# tui — SMARTAGENT 2x2 tmux cockpit.
+#
+#   ┌─────────────┬──────────────┐
+#   │ q  ./pi TUI │ w  DA attach │   Ctrl+Alt+q → top-left
+#   ├─────────────┼──────────────┤   Ctrl+Alt+w → top-right
+#   │ e  board    │ r  transcript│   Ctrl+Alt+e → bottom-left
+#   └─────────────┴──────────────┘   Ctrl+Alt+r → bottom-right
+#   Alt+Enter → fullscreen the selected pane; Alt+Enter again → back to grid
+#
+# Own tmux server socket (-L smartagent) so the root-table C-M-* bindings
+# never leak into the user's normal tmux sessions. Re-running attaches.
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+SOCK="${SMARTAGENT_TUI_SOCKET:-smartagent}"
+SES=cockpit
+T() { tmux -L "$SOCK" "$@"; }
+
+if T has-session -t "$SES" 2>/dev/null; then
+    exec tmux -L "$SOCK" attach -t "$SES"
+fi
+
+command -v tmux >/dev/null || { echo "error: tmux not installed" >&2; exit 1; }
+
+# 2x2 grid: pi / gateway attach / live board / meðvitund transcript.
+T new-session -d -s "$SES" -c "$ROOT" -x 220 -y 60 "$ROOT/pi"
+T split-window -h -t "$SES:0" -c "$ROOT" \
+    "$ROOT/target/release/gateway attach || { echo 'gateway down — retry: ./target/release/gateway attach'; exec sh; }"
+T split-window -v -t "$SES:0.0" -c "$ROOT" \
+    "watch -c -n 5 $ROOT/target/release/tasks board --dir $ROOT"
+T split-window -v -t "$SES:0.1" -c "$ROOT" \
+    "tail -F $ROOT/data/gateway/main.log"
+T select-layout -t "$SES:0" tiled
+
+# Pane hotkeys — root table (no prefix), Ctrl+Alt + q/w/e/r by position.
+T bind-key -n C-M-q select-pane -t '{top-left}'
+T bind-key -n C-M-w select-pane -t '{top-right}'
+T bind-key -n C-M-e select-pane -t '{bottom-left}'
+T bind-key -n C-M-r select-pane -t '{bottom-right}'
+# Alt+Enter: zoom toggle — fullscreen the active pane / restore the 2x2 grid.
+T bind-key -n M-Enter resize-pane -Z
+
+T select-pane -t "$SES:0.0"
+exec tmux -L "$SOCK" attach -t "$SES"
