@@ -533,10 +533,12 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
 /// Role by agent name — mirrors MULTIROLE.md's default team.
 fn role_of(name: &str) -> &'static str {
     match name {
-        "main" => "Coordinator",
-        "builder" => "Builder",
-        "qa" => "QA",
-        "ops" => "Ops",
+        // Fleet roster: famous developers/geeks (distinct initials — the
+        // sidebar avatars are circled first letters).
+        "linus" | "main" => "Coordinator",
+        "ada" | "dennis" | "woz" | "builder" => "Builder",
+        "grace" | "turing" | "qa" => "QA",
+        "ken" | "margaret" | "ops" => "Ops",
         _ => "Agent",
     }
 }

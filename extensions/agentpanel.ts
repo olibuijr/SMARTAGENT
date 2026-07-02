@@ -34,11 +34,22 @@ const dim = (s: string) => fg("244", s);
 const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 const ACCENTS = ["212", "80", "150", "215", "141", "117"];
 
-// Circular avatar per agent: circled initial (Ⓑ Ⓜ Ⓞ Ⓠ …) in the agent's accent.
-const avatar = (name: string): string => {
-	const c = (name[0] ?? "?").toUpperCase().charCodeAt(0);
-	return c >= 65 && c <= 90 ? String.fromCodePoint(0x24b6 + c - 65) : "◉";
+// Pixar-style mini ASCII avatars: 3-row cute faces, distinct per agent
+// (eyes/mouth carry the identity; rendered in the agent's accent color).
+// Safe width-1 glyphs only — kitty renders ambiguous-width as 1 cell.
+const FACES: Record<string, [string, string, string]> = {
+	linus: [" ╭─╮ ", "(◕‿◕)", " ╰─╯ "],
+	ada: [" ╭✿╮ ", "(◠‿◠)", " ╰─╯ "],
+	grace: [" ╭─╮ ", "(■‿■)", " ╰─╯ "],
+	ken: [" ╭─╮ ", "(•‿•)", " ╰─╯ "],
+	dennis: [" ╭─╮ ", "(◔‿◔)", " ╰─╯ "],
+	margaret: [" ╭≡╮ ", "(☉‿☉)", " ╰─╯ "],
+	turing: [" ╭─╮ ", "(¬‿¬)", " ╰─╯ "],
+	woz: [" ╭─╮ ", "(^ω^)", " ╰─╯ "],
 };
+const FACE_W = 5;
+const faceOf = (name: string): [string, string, string] =>
+	FACES[name] ?? [" ╭─╮ ", "(◉‿◉)", " ╰─╯ "];
 
 // Captured extension context — lets the panel read live session state
 // (context-window usage) without owning any logic.
@@ -188,33 +199,40 @@ function render(width: number): string[] {
 		working.forEach((a, i) => {
 			const accent = accentOf(a.name);
 			const spin = fg(accent, SPIN[(frame + i) % SPIN.length]);
-			const head = `${fg(accent, avatar(a.name))} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
+			const textw = cardw - FACE_W - 1; // face column + gap
+			const head = `${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
 			const state = fg("46", "● working ") + spin;
-			const gap1 = Math.max(1, cardw - vlen(head) - vlen(state));
+			const gap1 = Math.max(1, textw - vlen(head) - vlen(state));
 			const tok = humanTokens(a.tokens);
 			const body: string[] = [head + " ".repeat(gap1) + state];
 			const own = doingByOwner[a.name];
 			if (own) {
 				// task sub-card: boxed row inside the agent card
-				body.push(fg("239", "┌" + "─".repeat(Math.max(4, cardw - 6)) + "┐"));
-				body.push(fg("239", "│") + fg("222", " ▣ " + clip(own, cardw - 10)) + " " + fg("239", "│"));
-				body.push(fg("239", "└" + "─".repeat(Math.max(4, cardw - 6)) + "┘"));
+				body.push(fg("239", "┌" + "─".repeat(Math.max(4, textw - 6)) + "┐"));
+				body.push(fg("239", "│") + fg("222", " ▣ " + clip(own, textw - 10)) + " " + fg("239", "│"));
+				body.push(fg("239", "└" + "─".repeat(Math.max(4, textw - 6)) + "┘"));
 			}
 			if (a.tools) {
 				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
-				body.push(dim("⚙ ") + fg("253", clip(a.tools, cardw - 12)) + " " + tick + " ".repeat(Math.max(0, cardw - vlen(dim("⚙ ")) - Math.min(vlen(a.tools), cardw - 12) - 5 - tok.length)) + dim(tok));
+				body.push(dim("⚙ ") + fg("253", clip(a.tools, textw - 12)) + " " + tick + " ".repeat(Math.max(0, cardw - vlen(dim("⚙ ")) - Math.min(vlen(a.tools), textw - 12) - 5 - tok.length - FACE_W - 1)) + dim(tok));
 			}
 			if (a.words) {
 				// Two readable lines, bright — this is "what is it doing" for the
 				// user; a dim clipped fragment defeated the panel's purpose.
-				const max = (cardw - 4) * 2;
+				const max = (textw - 4) * 2;
 				const wtext = clip(a.words, max);
-				const l1 = wtext.slice(0, cardw - 4);
-				const l2 = wtext.slice(cardw - 4);
+				const l1 = wtext.slice(0, textw - 4);
+				const l2 = wtext.slice(textw - 4);
 				body.push(fg("250", "“" + l1 + (l2 ? "" : "”")));
 				if (l2) body.push(fg("250", " " + l2 + "”"));
 			}
-			lines.push(...card(body, accent, w));
+			// Zip the face column (3 rows, accent) beside the body rows.
+			const face = faceOf(a.name);
+			const zipped = body.map((rowText, ri) => {
+				const f = ri < 3 ? face[ri] : " ".repeat(FACE_W);
+				return fg(accent, f) + " " + rowText;
+			});
+			lines.push(...card(zipped, accent, w));
 		});
 
 		// Idle agents: one line each — orange status dot with a slow breathing
@@ -224,7 +242,7 @@ function render(width: number): string[] {
 			.forEach((a, i) => {
 				const tok = humanTokens(a.tokens);
 				const pulse = (frame + i * 2) % 6 < 3 ? fg("208", "● idle") : fg("130", "● idle");
-				const head = `${fg(accentOf(a.name), avatar(a.name))} ${fg("250", a.name)} ${dim("· " + a.role)}`;
+				const head = `${fg(accentOf(a.name), faceOf(a.name)[1])} ${fg("250", a.name)} ${dim("· " + a.role)}`;
 				const right = pulse + " " + dim(tok);
 				const gapw = Math.max(1, cardw - vlen(head) - vlen(right));
 				lines.push(...card([head + " ".repeat(gapw) + right], "238", w));
