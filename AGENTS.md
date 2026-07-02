@@ -10,6 +10,8 @@ Every feature follows the same loop: **Claude implements → codex CLI tests →
 
 **Always store durable project facts in the SMARTAGENT-scoped semantic DB** for the project root or workspace root (not raw `cwd`) under `workspaces/`. A repo/workspace-local `.smartagent/semdb` at the project root is the default convention. **Do not rely on Claude/Codex CLI integrated memory or any other global agent memory** for project facts. Keep memory local to SMARTAGENT and its workspaces so facts do not bleed across repositories.
 
+When asked for workspace contents, list the folders/projects and files under `workspaces/`, not the repository root.
+
 ## The one rule set
 
 1. **Pure Rust, `std` only.** No crates.io dependencies in any tool. No TypeScript logic — pi extensions are thin glue that shell out to Rust binaries.
@@ -44,7 +46,10 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    context/      principal identity/context loader (TELOS pattern) injected per session
    schedule/     cron + wake-ups + durable background tasks
    skills/       SKILL.md loader (Agent Skills open standard)
-   sandbox/      isolated exec — worktrees + landlock/namespaces (Daytona role)
+   sandbox/      isolated exec — scrubbed env + opt-in user/pid/net namespaces
+                 (Daytona role). NOTE: no landlock/mount-jail yet — a namespaced
+                 command still sees the real filesystem; env is cleared so
+                 parent secrets don't leak. Isolation is ON by default.
    rag/          document ingestion: pdf/text → chunks → semdb
    evals/        signal capture, trace log, regression evals
    secrets/      policy-gated credential access (Vaultwarden client)
