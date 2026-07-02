@@ -71,6 +71,7 @@ const LABEL: Record<string, string> = {
 	codeindex: "Index",
 	orchestrate: "Agents",
 	rag: "Docs",
+	gateway: "DA",
 };
 const label = (key: string) => LABEL[key] ?? key[0].toUpperCase() + key.slice(1);
 // Infra segments are pure health checks — when ok, their detail ("chrome✓",

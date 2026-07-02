@@ -113,24 +113,28 @@ fn statusline() -> Result<(), String> {
     for l in reader.lines() {
         let Ok(l) = l else { break };
         if let server::LineKind::Info(t) = server::client_line_kind(&l) {
-            // "agent main: working | last beat 2026-07-02 18:36:47Z | queued beat: false | doing: T-45 …"
-            let mut state = t.replace("agent ", "");
-            if let Some(p) = state.find(" | queued") {
-                let tail = state[p..].find("doing: ").map(|i| {
-                    let d: String = state[p + i + 7..].chars().take(28).collect();
-                    format!(" · {d}")
-                });
-                state.truncate(p);
-                if let Some(d) = tail {
-                    state.push_str(&d);
+            // "agent main: working | last beat 2026-07-02 18:36:47Z | queued beat: false | doing: T-45 p2 …"
+            // Compact hard: the TUI grid pads every line's column to this
+            // segment's width, so long text here skews the whole statusline.
+            let mut state = "?".to_string();
+            let mut beat = "—".to_string();
+            let mut doing = String::new();
+            for part in t.split(" | ") {
+                if let Some(rest) = part.strip_prefix("agent ") {
+                    state = rest.split(": ").nth(1).unwrap_or("?").to_string();
+                } else if let Some(rest) = part.strip_prefix("last beat ") {
+                    if let Some(time) = rest.split(' ').nth(1) {
+                        beat = time.chars().take(5).collect();
+                    }
+                } else if let Some(rest) = part.strip_prefix("doing: ") {
+                    doing = rest.split(' ').next().unwrap_or("").to_string();
                 }
             }
-            let state = state
-                .replace(" | last beat 2026-", " · beat ")
-                .replace(" | last beat ", " · beat ")
-                .replace("Z", "")
-                .replace("never", "—");
-            println!("ok|⏲ {state}");
+            if doing.is_empty() || doing == "nothing" {
+                println!("ok|⏲ {state} · {beat}");
+            } else {
+                println!("ok|⏲ {state} · {beat} · {doing}");
+            }
             return Ok(());
         }
     }
