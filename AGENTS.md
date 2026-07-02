@@ -58,8 +58,9 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    secrets/      policy-gated credential access (Vaultwarden client)
    voice/        STT/TTS bridge (titan-hosted models)
    notify/       notifications (ntfy-style push)
+   telegram/     Telegram Bot API bridge (send/poll/listen, token via secrets)
    supervise/    internal process manager for long-running services (scheduler,
-                 gateway, chromium): spawn detached, track pid/uptime in a semdb table,
+                 gateway, telegram listener, chromium): spawn detached, track pid/uptime in a semdb table,
                  health-check, self-heal. Replaces per-service systemd.
    tasks/        kanban board (semdb table): WIP limits, criteria-gated done,
                  pull-based next, flow metrics — policies enforced in Rust
@@ -105,6 +106,7 @@ Popularity winners researched 2026-07-02; we clone the *pattern*, in Rust:
 | Secrets | [Infisical/infisical](https://github.com/Infisical/infisical) | `crates/secrets` |
 | Voice | [pipecat-ai/pipecat](https://github.com/pipecat-ai/pipecat) (whisper.cpp STT + Kokoro TTS) | `crates/voice` |
 | Notifications | [binwiederhier/ntfy](https://github.com/binwiederhier/ntfy) | `crates/notify` |
+| Telegram | Telegram Bot API | `crates/telegram` |
 
 Reference clones live in `.refrepos/` (shallow, gitignored). **Borrow and port**: read the reference implementation, port the concept into pure Rust — never invent an API the reference doesn't justify, never copy license-incompatible code verbatim wholesale.
 
