@@ -69,24 +69,70 @@ fn poll(args: &[String]) -> Result<String, String> {
 fn listen(args: &[String]) -> Result<String, String> {
     let sleep: u64 = flag(args, "--sleep").and_then(|s| s.parse().ok()).unwrap_or(2);
     let gateway_agent = flag(args, "--gateway");
+    eprintln!("[tg] listen up (gateway={:?}, poll=short, sleep={sleep}s)", gateway_agent);
+    let mut backoff = sleep;
     loop {
-        let out = poll(&["poll".into(), "--timeout".into(), "25".into()])?;
-        for line in out.lines().filter(|l| !l.trim().is_empty()) {
-            if let Some(agent) = gateway_agent.as_deref() {
-                gateway_send(agent, line)?;
-            } else {
-                println!("{line}");
+        // Short-poll (timeout=0): the httpc openssl transport kills long-poll
+        // connections (exit 124) — getUpdates returns immediately instead.
+        // A bridge must SURVIVE transient errors: log + backoff, never exit
+        // (exiting is what showed as DOWN in supervise).
+        match poll(&["poll".into(), "--timeout".into(), "0".into()]) {
+            Ok(out) => {
+                backoff = sleep;
+                for line in out.lines().filter(|l| !l.trim().is_empty()) {
+                    handle_inbound(gateway_agent.as_deref(), line);
+                }
+            }
+            Err(e) => {
+                eprintln!("[tg] poll error: {e} — retrying in {backoff}s");
+                std::thread::sleep(std::time::Duration::from_secs(backoff));
+                backoff = (backoff * 2).min(30);
+                continue;
             }
         }
         std::thread::sleep(std::time::Duration::from_secs(sleep));
     }
 }
 
-fn gateway_send(agent: &str, msg: &str) -> Result<(), String> {
-    let st = Command::new("target/release/gateway")
+/// One inbound update: relay to the gateway agent, send its reply back to the
+/// chat. Every step logged to stderr → `supervise logs telegram`.
+fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
+    let v = match json::parse(line) { Ok(v) => v, Err(_) => return };
+    let chat = v.get("chat").and_then(Value::as_str).unwrap_or("").to_string();
+    let from = v.get("from").and_then(Value::as_str).unwrap_or("?").to_string();
+    let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+    eprintln!("[tg] inbound from @{from} ({chat}): {}", &text.chars().take(60).collect::<String>());
+    let Some(agent) = gateway_agent else { println!("{line}"); return };
+    let prompt = format!(
+        "Telegram message from @{from}: {text}\n(Reply concisely — your reply text is relayed straight back to Telegram.)"
+    );
+    match gateway_send(agent, &prompt) {
+        Ok(reply) => {
+            let reply = reply.trim();
+            eprintln!("[tg] gateway reply: {} chars", reply.len());
+            let out = if reply.is_empty() { "(the agent had no reply)" } else { reply };
+            match send(&["send".into(), "--chat".into(), chat.clone(), "--text".into(), out.to_string()]) {
+                Ok(r) => eprintln!("[tg] relayed to {chat}: {r}"),
+                Err(e) => eprintln!("[tg] sendMessage FAILED for {chat}: {e}"),
+            }
+        }
+        Err(e) => {
+            eprintln!("[tg] gateway send FAILED: {e}");
+            let _ = send(&["send".into(), "--chat".into(), chat, "--text".into(), format!("⚠ agent unavailable: {e}")]);
+        }
+    }
+}
+
+fn gateway_send(agent: &str, msg: &str) -> Result<String, String> {
+    // Capture stdout — it IS the agent's reply (one-shot send since T-52).
+    let out = Command::new("target/release/gateway")
         .args(["send", "--agent", agent, msg])
-        .status().map_err(|e| format!("run gateway send: {e}"))?;
-    if st.success() { Ok(()) } else { Err(format!("gateway send failed with status {st}")) }
+        .output().map_err(|e| format!("run gateway send: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(format!("gateway send failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+    }
 }
 
 fn bot_token() -> Result<String, String> {
