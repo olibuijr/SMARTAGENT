@@ -21,7 +21,9 @@ gate() {
     if [ -n "$BIG" ]; then echo "FAIL: files over 1000 lines:"; echo "$BIG"; exit 1; fi
     echo "ok"
     echo "── audit: zero crates.io deps ─────────"
-    DEP=$(grep -rEl '^[a-z0-9_-]+ = "' crates/*/Cargo.toml 2>/dev/null || true)
+    # A crates.io dep is `name = "<version>"` (version starts with a digit or ^~*).
+    # Path deps `name = { path = ... }` and the [package] name/edition are exempt.
+    DEP=$(grep -rEl '^[a-z0-9_-]+ = "[0-9^~*<>=]' crates/*/Cargo.toml 2>/dev/null || true)
     if [ -n "$DEP" ]; then echo "FAIL: crates.io deps found in:"; echo "$DEP"; exit 1; fi
     echo "ok (path deps only)"
 }
