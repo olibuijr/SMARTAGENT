@@ -53,7 +53,7 @@ pub fn registry(chromium_bin: &str, chrome_profile: &str) -> Vec<Service> {
                 "target/release/telegram",
                 "listen",
                 "--gateway",
-                "main",
+                "linus",
             ]),
             needle: "telegram listen",
             probe: None,
