@@ -150,6 +150,8 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 
 ## Gotchas (learned the hard way — read before building/testing)
 
+- **`session_shutdown` fires in headless `./pi -p` mode too**, not just interactive quit — so the `session-memory.ts` extension captures the session intent to episodic memory on every run, including one-shot `-p` invocations. Verified end-to-end 2026-07-02: a unique-marker prompt round-tripped intent-capture → episodic store (count +1) → recall-injection into the next session's context.
+- **`.gitignore` inline comments do NOT work.** `.refrepos/ # note` makes the whole line (spaces + `#…`) the pattern, so the dir is NOT ignored — this nearly committed `.pi/agent/auth.json`. Keep comments on their own lines.
 - **`./pi -p '<prompt>' < /dev/null`** — the stdin redirect is MANDATORY; without it pi hangs. Same for **`codex exec … < /dev/null`** (blocks on "Reading additional input from stdin…").
 - **pi extensions fail SILENTLY on runtime imports.** Type-only imports from `@earendil-works/pi-*` + `node:` builtins ONLY. `import { defineTool } from …` or `typebox` at runtime → the extension never registers, and the model hallucinates tool output instead of erroring. Use `pi.registerTool({...})` with a plain JSON-schema `parameters` object. The `extensions/` dir symlinks/uses `.pi/runtime/node_modules` for type resolution.
 - **Mock TCP servers in tests must drain the FULL request before responding.** If the server closes with unread bytes in its receive buffer, the client gets `Connection reset by peer (os error 104)` instead of a clean response. Read until you've seen `\r\n\r\n` + the `Content-Length` body, THEN write the reply. (Bit notify, mcp, voice.)
