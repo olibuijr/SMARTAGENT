@@ -42,6 +42,7 @@ const SEGMENTS: { key: string; args: string[]; line: Line }[] = [
 	{ key: "schedule", args: ["statusline"], line: "data" },
 	{ key: "evals", args: ["statusline", "--db", join(ROOT, "data", "evals.jsonl")], line: "data" },
 	{ key: "orchestrate", args: ["statusline"], line: "data" },
+	{ key: "gateway", args: ["statusline"], line: "workspace" },
 	{ key: "supervise", args: ["statusline"], line: "infra" },
 	{ key: "sandbox", args: ["statusline"], line: "infra" },
 	{ key: "secrets", args: ["statusline", "--store", join(ROOT, "data", "secrets")], line: "infra" },

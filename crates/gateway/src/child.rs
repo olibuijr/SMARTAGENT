@@ -21,6 +21,8 @@ pub enum Event {
     Text(String),
     /// A turn finished; payload is the full assistant text of that turn.
     TurnEnd(String),
+    /// A tool call started (payload: tool name) — visibility while "quiet".
+    Tool(String),
     /// Child exited.
     Exited(i32),
 }
@@ -110,6 +112,14 @@ fn reader_loop(
                 *busy.lock().unwrap() = false;
                 let _ = tx.send(Event::State(false));
                 let _ = tx.send(Event::TurnEnd(std::mem::take(&mut turn_text)));
+            }
+            "tool_execution_start" => {
+                let name = v
+                    .get("toolName")
+                    .or_else(|| v.get("tool"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool");
+                let _ = tx.send(Event::Tool(name.to_string()));
             }
             "message_update" => {
                 if let Some(ev) = v.get("assistantMessageEvent") {

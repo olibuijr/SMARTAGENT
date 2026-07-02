@@ -116,6 +116,10 @@ pub fn serve(args: &[String]) -> Result<(), String> {
                         append(&tpath, "\n---\n");
                         beat.lock().unwrap().log(&agent, "turn", "idle", &text);
                     }
+                    Event::Tool(name) => {
+                        append(&tpath, &format!("\n⚙ {name}\n"));
+                        broadcast(&clients, &format!("{{\"ev\":\"info\",\"data\":\"⚙ {}\"}}\n", json::escape(&name)));
+                    }
                     Event::Exited(code) => {
                         broadcast(
                             &clients,
@@ -230,12 +234,16 @@ fn handle_client(
             }
             "status" => {
                 let busy = child.lock().unwrap().is_busy();
-                let last = beat.lock().unwrap().last_beat.clone().unwrap_or_else(|| "never".into());
+                let (last, doing) = {
+                    let b = beat.lock().unwrap();
+                    (b.last_beat.clone().unwrap_or_else(|| "never".into()), b.doing_short())
+                };
                 let queued = queued_beat.lock().unwrap().is_some();
                 let _ = write_side.write_all(
                     format!(
-                        "{{\"ev\":\"info\",\"data\":\"agent {agent}: {} | last beat {last} | queued beat: {queued}\"}}\n{{\"ev\":\"done\"}}\n",
-                        if busy { "working" } else { "idle" }
+                        "{{\"ev\":\"info\",\"data\":\"agent {agent}: {} | last beat {last} | queued beat: {queued} | doing: {}\"}}\n{{\"ev\":\"done\"}}\n",
+                        if busy { "working" } else { "idle" },
+                        json::escape(&doing)
                     )
                     .as_bytes(),
                 );

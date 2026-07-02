@@ -41,6 +41,7 @@ fn main() {
         "steer" => client_send("steer", &rest.join(" ")),
         "attach" => client_attach(),
         "status" => client_send("status", ""),
+        "statusline" => statusline(),
         "stop" => client_send("stop", ""),
         _ => usage(),
     };
@@ -84,13 +85,56 @@ fn client_send(op: &str, message: &str) -> Result<(), String> {
         let l = l.map_err(|e| e.to_string())?;
         match server::client_line_kind(&l) {
             server::LineKind::Text(t) => print!("{t}"),
-            server::LineKind::Info(t) => eprintln!("{t}"),
+            // one-shot ops: info lines (status payload, delivery mode) are the
+            // useful output — stdout, so pipelines and monitors can read them
+            server::LineKind::Info(t) => println!("{t}"),
             server::LineKind::Done => {
                 println!();
                 return Ok(());
             }
         }
     }
+    Ok(())
+}
+
+/// One-line `level|icon text` for the TUI statusline: agent state, current
+/// task, last beat — the real-time meðvitund pulse. Never blocks the TUI.
+fn statusline() -> Result<(), String> {
+    let Ok(mut stream) = UnixStream::connect(socket_path()) else {
+        println!("warn|⏲ gateway down");
+        return Ok(());
+    };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+    if stream.write_all(b"{\"op\":\"status\"}\n").is_err() {
+        println!("warn|⏲ gateway unreachable");
+        return Ok(());
+    }
+    let reader = BufReader::new(stream);
+    for l in reader.lines() {
+        let Ok(l) = l else { break };
+        if let server::LineKind::Info(t) = server::client_line_kind(&l) {
+            // "agent main: working | last beat 2026-07-02 18:36:47Z | queued beat: false | doing: T-45 …"
+            let mut state = t.replace("agent ", "");
+            if let Some(p) = state.find(" | queued") {
+                let tail = state[p..].find("doing: ").map(|i| {
+                    let d: String = state[p + i + 7..].chars().take(28).collect();
+                    format!(" · {d}")
+                });
+                state.truncate(p);
+                if let Some(d) = tail {
+                    state.push_str(&d);
+                }
+            }
+            let state = state
+                .replace(" | last beat 2026-", " · beat ")
+                .replace(" | last beat ", " · beat ")
+                .replace("Z", "")
+                .replace("never", "—");
+            println!("ok|⏲ {state}");
+            return Ok(());
+        }
+    }
+    println!("warn|⏲ gateway no answer");
     Ok(())
 }
 

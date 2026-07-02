@@ -44,10 +44,32 @@ impl Beat {
             .unwrap_or_default();
         let state = if busy { "working" } else { "idle" };
         let beat = format!(
-            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULE: one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task. If doing holds more than one, park the extras back to ready and keep exactly one."
+            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol."
         );
         self.last_beat = Some(now);
         beat
+    }
+
+    /// First task in the DOING column, shortened — "what am I on right now".
+    pub fn doing_short(&self) -> String {
+        run_local(&self.repo_root, "tasks", &["board", "--dir", "."], 5)
+            .and_then(|out| {
+                let mut in_doing = false;
+                for l in out.lines() {
+                    if l.starts_with("DOING") {
+                        in_doing = true;
+                        continue;
+                    }
+                    if in_doing {
+                        if !l.starts_with(' ') {
+                            break;
+                        }
+                        return Some(l.trim().chars().take(40).collect());
+                    }
+                }
+                None
+            })
+            .unwrap_or_else(|| "nothing".into())
     }
 
     /// Append a row to the medvitund table. Row without meaning-vector (v1).
