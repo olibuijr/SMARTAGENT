@@ -102,8 +102,12 @@ pub fn socket_path() -> std::path::PathBuf {
 
 fn connect() -> Result<UnixStream, String> {
     let path = socket_path();
-    UnixStream::connect(&path)
-        .map_err(|e| format!("gateway not running at {}: {e} (start: gateway serve)", path.display()))
+    UnixStream::connect(&path).map_err(|e| {
+        format!(
+            "gateway not running at {}: {e} (start: gateway serve)",
+            path.display()
+        )
+    })
 }
 
 /// One-shot op: send a line, print response lines until `done` marker.
@@ -115,7 +119,9 @@ fn client_send(op: &str, agent: &str, message: &str) -> Result<(), String> {
         httpc::json::escape(agent),
         httpc::json::escape(message)
     );
-    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
     let reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     for l in reader.lines() {
         let l = l.map_err(|e| e.to_string())?;
@@ -139,7 +145,10 @@ fn statusline() -> Result<(), String> {
     };
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
     let agent = default_agent();
-    let line = format!("{{\"op\":\"status\",\"agent\":\"{}\"}}\n", httpc::json::escape(&agent));
+    let line = format!(
+        "{{\"op\":\"status\",\"agent\":\"{}\"}}\n",
+        httpc::json::escape(&agent)
+    );
     if stream.write_all(line.as_bytes()).is_err() {
         println!("warn|⏲ gateway unreachable");
         return Ok(());
@@ -165,7 +174,11 @@ fn statusline() -> Result<(), String> {
                     tokens = rest.to_string();
                 }
             }
-            let tok = if tokens.is_empty() { String::new() } else { format!(" · {tokens}tok") };
+            let tok = if tokens.is_empty() {
+                String::new()
+            } else {
+                format!(" · {tokens}tok")
+            };
             if doing.is_empty() || doing == "nothing" {
                 println!("ok|⏲ {state} · {beat}{tok}");
             } else {
@@ -181,8 +194,13 @@ fn statusline() -> Result<(), String> {
 /// Interactive attach: stream events; forward stdin lines.
 fn client_attach(agent: &str) -> Result<(), String> {
     let mut stream = connect()?;
-    let line = format!("{{\"op\":\"attach\",\"agent\":\"{}\"}}\n", httpc::json::escape(agent));
-    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    let line = format!(
+        "{{\"op\":\"attach\",\"agent\":\"{}\"}}\n",
+        httpc::json::escape(agent)
+    );
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
     let read_side = stream.try_clone().map_err(|e| e.to_string())?;
     let printer = std::thread::spawn(move || {
         for l in BufReader::new(read_side).lines() {

@@ -7,6 +7,7 @@
 //! channel; consumers use recv_timeout.
 
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,10 @@ pub struct Usage {
 pub struct PiChild {
     child: Child,
     stdin: Arc<Mutex<std::process::ChildStdin>>,
+    tx: Sender<Event>,
+    repo_root: PathBuf,
+    agent: String,
+    generation: u64,
     pub events: Receiver<Event>,
     pub busy: Arc<Mutex<bool>>,
 }
@@ -45,27 +50,36 @@ pub struct PiChild {
 impl PiChild {
     /// Spawn `<repo>/pi --mode rpc --session-id gw-<agent>` from the repo root.
     pub fn spawn(repo_root: &std::path::Path, agent: &str) -> Result<PiChild, String> {
-        let launcher = repo_root.join("pi");
-        let mut child = Command::new(&launcher)
-            .args(["--mode", "rpc", "--session-id", &format!("gw-{agent}")])
-            .current_dir(repo_root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("spawn {}: {e}", launcher.display()))?;
-        let stdin = child.stdin.take().ok_or("no child stdin")?;
-        let stdout = child.stdout.take().ok_or("no child stdout")?;
         let (tx, rx) = std::sync::mpsc::channel();
         let busy = Arc::new(Mutex::new(false));
-        let busy_r = busy.clone();
-        std::thread::spawn(move || reader_loop(stdout, tx, busy_r));
+        let (child, stdin) = spawn_process(repo_root, agent, 0, &tx, busy.clone())?;
         Ok(PiChild {
             child,
             stdin: Arc::new(Mutex::new(stdin)),
+            tx,
+            repo_root: repo_root.to_path_buf(),
+            agent: agent.to_string(),
+            generation: 0,
             events: rx,
             busy,
         })
+    }
+
+    /// Archive the wedged session by leaving its session id behind, then start
+    /// a fresh gw-<agent>-recovered-* session with a continuity note.
+    pub fn rotate_fresh(&mut self, note: &str) -> Result<(), String> {
+        self.kill();
+        self.generation = now_millis();
+        let (child, stdin) = spawn_process(
+            &self.repo_root,
+            &self.agent,
+            self.generation,
+            &self.tx,
+            self.busy.clone(),
+        )?;
+        self.child = child;
+        self.stdin = Arc::new(Mutex::new(stdin));
+        self.command("prompt", Some(note))
     }
 
     pub fn is_busy(&self) -> bool {
@@ -83,7 +97,9 @@ impl PiChild {
             None => format!("{{\"type\":\"{}\"}}\n", cmd_type),
         };
         let mut stdin = self.stdin.lock().unwrap();
-        stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+        stdin
+            .write_all(line.as_bytes())
+            .map_err(|e| e.to_string())?;
         stdin.flush().map_err(|e| e.to_string())
     }
 
@@ -100,12 +116,43 @@ impl PiChild {
     }
 }
 
-/// Parse the child's stdout lines into distilled events.
-fn reader_loop(
-    stdout: std::process::ChildStdout,
-    tx: Sender<Event>,
+fn spawn_process(
+    repo_root: &std::path::Path,
+    agent: &str,
+    generation: u64,
+    tx: &Sender<Event>,
     busy: Arc<Mutex<bool>>,
-) {
+) -> Result<(Child, std::process::ChildStdin), String> {
+    let launcher = repo_root.join("pi");
+    let session = if generation == 0 {
+        format!("gw-{agent}")
+    } else {
+        format!("gw-{agent}-recovered-{generation}")
+    };
+    let mut child = Command::new(&launcher)
+        .args(["--mode", "rpc", "--session-id", &session])
+        .current_dir(repo_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("spawn {}: {e}", launcher.display()))?;
+    let stdin = child.stdin.take().ok_or("no child stdin")?;
+    let stdout = child.stdout.take().ok_or("no child stdout")?;
+    let tx = tx.clone();
+    std::thread::spawn(move || reader_loop(stdout, tx, busy));
+    Ok((child, stdin))
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Parse the child's stdout lines into distilled events.
+fn reader_loop(stdout: std::process::ChildStdout, tx: Sender<Event>, busy: Arc<Mutex<bool>>) {
     let mut turn_text = String::new();
     let mut usage = Usage::default();
     for line in BufReader::new(stdout).lines() {
@@ -179,5 +226,11 @@ mod tests {
         assert_eq!(u.output, 4);
         assert_eq!(u.cache_read, 20);
         assert_eq!(u.cache_write, 2);
+    }
+
+    #[test]
+    fn zero_usage_total_marks_mute_signal() {
+        let u = Usage::default();
+        assert_eq!(u.input + u.output + u.cache_read + u.cache_write, 0);
     }
 }

@@ -94,14 +94,26 @@ impl Beat {
         self.log_with_usage(agent, "turn", "idle", text, Some(usage));
     }
 
-    fn log_with_usage(&self, agent: &str, kind: &str, state: &str, text: &str, usage: Option<Usage>) {
+    fn log_with_usage(
+        &self,
+        agent: &str,
+        kind: &str,
+        state: &str,
+        text: &str,
+        usage: Option<Usage>,
+    ) {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let excerpt: String = text.chars().take(400).collect();
         let tokens = usage
-            .map(|u| format!(",\"input\":{},\"output\":{},\"cacheRead\":{},\"cacheWrite\":{}", u.input, u.output, u.cache_read, u.cache_write))
+            .map(|u| {
+                format!(
+                    ",\"input\":{},\"output\":{},\"cacheRead\":{},\"cacheWrite\":{}",
+                    u.input, u.output, u.cache_read, u.cache_write
+                )
+            })
             .unwrap_or_default();
         let day = human_day_prefix();
         let meta = format!(
@@ -264,8 +276,14 @@ mod tests {
 
     #[test]
     fn autonomous_work_sees_backlog_ready_or_doing() {
-        assert!(board_has_autonomous_work("BACKLOG (1)\n  T-1 x\nREADY (0)\nDOING (0/4)\n"));
-        assert!(board_has_autonomous_work("BACKLOG (0)\nREADY (1)\n  T-2 y\nDOING (0/4)\n"));
-        assert!(board_has_autonomous_work("BACKLOG (0)\nREADY (0)\nDOING (1/4)\n  T-3 z\n"));
+        assert!(board_has_autonomous_work(
+            "BACKLOG (1)\n  T-1 x\nREADY (0)\nDOING (0/4)\n"
+        ));
+        assert!(board_has_autonomous_work(
+            "BACKLOG (0)\nREADY (1)\n  T-2 y\nDOING (0/4)\n"
+        ));
+        assert!(board_has_autonomous_work(
+            "BACKLOG (0)\nREADY (0)\nDOING (1/4)\n  T-3 z\n"
+        ));
     }
 }

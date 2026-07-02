@@ -66,7 +66,10 @@ fn parse_flags(args: &[String]) -> Flags {
                 }
             }
             "--heartbeat-secs" => {
-                f.heartbeat_secs = it.next().and_then(|v| v.parse().ok()).unwrap_or(f.heartbeat_secs)
+                f.heartbeat_secs = it
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(f.heartbeat_secs)
             }
             "--autonomous" => f.autonomous = true,
             _ => {}
@@ -119,13 +122,20 @@ pub fn serve(args: &[String]) -> Result<(), String> {
     if let Some(dir) = sock.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let listener = UnixListener::bind(&sock).map_err(|e| format!("bind {}: {e}", sock.display()))?;
+    let listener =
+        UnixListener::bind(&sock).map_err(|e| format!("bind {}: {e}", sock.display()))?;
 
     let mut map = BTreeMap::new();
     for name in &flags.agents {
         map.insert(
             name.clone(),
-            Arc::new(spawn_agent(name, &repo_root, &data_dir, flags.heartbeat_secs, flags.autonomous)?),
+            Arc::new(spawn_agent(
+                name,
+                &repo_root,
+                &data_dir,
+                flags.heartbeat_secs,
+                flags.autonomous,
+            )?),
         );
     }
     let agents: Agents = Arc::new(map);
@@ -172,8 +182,23 @@ fn spawn_agent(
         beat: beat.clone(),
         queued_beat: queued_beat.clone(),
     };
-    start_event_pump(name.to_string(), clients, data_dir.to_path_buf(), transcript, events, beat.clone());
-    start_heartbeat(name.to_string(), child, beat, queued_beat, heartbeat_secs, autonomous);
+    start_event_pump(
+        name.to_string(),
+        clients,
+        data_dir.to_path_buf(),
+        transcript,
+        events,
+        beat.clone(),
+        child.clone(),
+    );
+    start_heartbeat(
+        name.to_string(),
+        child,
+        beat,
+        queued_beat,
+        heartbeat_secs,
+        autonomous,
+    );
     Ok(runtime)
 }
 
@@ -184,18 +209,26 @@ fn start_event_pump(
     tpath: std::path::PathBuf,
     events: std::sync::mpsc::Receiver<Event>,
     beat: Arc<Mutex<Beat>>,
+    child: Arc<Mutex<PiChild>>,
 ) {
     std::thread::spawn(move || {
+        let mut empty_turns = 0u32;
         for ev in events.iter() {
             match ev {
                 Event::Text(t) => {
                     append(&tpath, &t);
-                    broadcast(&clients, &format!("{{\"ev\":\"text\",\"data\":\"{}\"}}\n", json::escape(&t)));
+                    broadcast(
+                        &clients,
+                        &format!("{{\"ev\":\"text\",\"data\":\"{}\"}}\n", json::escape(&t)),
+                    );
                 }
                 Event::State(b) => {
                     broadcast(
                         &clients,
-                        &format!("{{\"ev\":\"info\",\"data\":\"agent {}\"}}\n", if b { "working…" } else { "idle" }),
+                        &format!(
+                            "{{\"ev\":\"info\",\"data\":\"agent {}\"}}\n",
+                            if b { "working…" } else { "idle" }
+                        ),
                     );
                     if !b {
                         broadcast(&clients, "{\"ev\":\"done\"}\n");
@@ -203,11 +236,38 @@ fn start_event_pump(
                 }
                 Event::TurnEnd(text, usage) => {
                     append(&tpath, "\n---\n");
+                    let action = mute_action(empty_turns, &text, usage);
+                    if action == MuteAction::Clear {
+                        empty_turns = 0;
+                    } else {
+                        empty_turns += 1;
+                    }
                     beat.lock().unwrap().log_turn(&agent, &text, usage);
+                    match action {
+                        MuteAction::Clear => {}
+                        MuteAction::Observe => {}
+                        MuteAction::CompactRetry => {
+                            beat.lock().unwrap().log(&agent, "incident", "compact-retry", "mute turn: empty content and zero token usage; compacting session then retrying next beat");
+                            let _ = child.lock().unwrap().command("compact", None);
+                            broadcast(&clients, "{\"ev\":\"info\",\"data\":\"mute session detected — compact retry\"}\n");
+                        }
+                        MuteAction::Rotate => {
+                            let note = "Continuity note: the previous gateway RPC session went mute (consecutive empty turns with 0 token usage), likely from rejected resume state or context ceiling. Continue the current board task using the live board/workflow state; one task at a time.";
+                            beat.lock().unwrap().log(&agent, "incident", "rotate-session", "mute persisted after compact retry; archived old rpc session and started fresh session with continuity note");
+                            broadcast(&clients, "{\"ev\":\"info\",\"data\":\"mute session persisted — rotating session\"}\n");
+                            let _ = child.lock().unwrap().rotate_fresh(note);
+                        }
+                    }
                 }
                 Event::Tool(name) => {
                     append(&tpath, &format!("\n⚙ {name}\n"));
-                    broadcast(&clients, &format!("{{\"ev\":\"info\",\"data\":\"⚙ {}\"}}\n", json::escape(&name)));
+                    broadcast(
+                        &clients,
+                        &format!(
+                            "{{\"ev\":\"info\",\"data\":\"⚙ {}\"}}\n",
+                            json::escape(&name)
+                        ),
+                    );
                 }
                 Event::Exited(code) => {
                     broadcast(
@@ -234,25 +294,25 @@ fn start_heartbeat(
         // full period of dead air before in-doing work resumes.
         let mut next = Duration::from_secs(10);
         loop {
-        std::thread::sleep(next);
-        next = period;
-        let busy = child.lock().unwrap().is_busy();
-        let text = beat.lock().unwrap().compose(busy);
-        beat.lock()
-            .unwrap()
-            .log(&agent, "beat", if busy { "busy" } else { "idle" }, &text);
-        match heartbeat_action(busy, autonomous, beat.lock().unwrap().has_autonomous_work()) {
-            HeartbeatAction::Steer => {
-                let _ = child.lock().unwrap().command("steer", Some(&text));
-            }
-            HeartbeatAction::Prompt => {
-                let auto = format!(
+            std::thread::sleep(next);
+            next = period;
+            let busy = child.lock().unwrap().is_busy();
+            let text = beat.lock().unwrap().compose(busy);
+            beat.lock()
+                .unwrap()
+                .log(&agent, "beat", if busy { "busy" } else { "idle" }, &text);
+            match heartbeat_action(busy, autonomous, beat.lock().unwrap().has_autonomous_work()) {
+                HeartbeatAction::Steer => {
+                    let _ = child.lock().unwrap().command("steer", Some(&text));
+                }
+                HeartbeatAction::Prompt => {
+                    let auto = format!(
                     "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task YOU pulled earlier is in doing → continue it; (b) otherwise, ready has an unclaimed item → pull the highest-priority one; (c) otherwise → load the Triage skill and promote exactly one UNCLAIMED backlog task by p1→p2→p3, oldest, then smallest id, and pull it. Tasks in doing/review that belong to OTHER agents are never a reason to stay idle — skip them and take unclaimed backlog work. If the backlog is truly empty of unclaimed tasks, say so in one sentence — never answer with an empty turn. One task in your doing, maximum."
                 );
-                let _ = child.lock().unwrap().command("prompt", Some(&auto));
+                    let _ = child.lock().unwrap().command("prompt", Some(&auto));
+                }
+                HeartbeatAction::Queue => *queued.lock().unwrap() = Some(text),
             }
-            HeartbeatAction::Queue => *queued.lock().unwrap() = Some(text),
-        }
         }
     });
 }
@@ -271,6 +331,30 @@ fn heartbeat_action(busy: bool, autonomous: bool, has_work: bool) -> HeartbeatAc
         HeartbeatAction::Prompt
     } else {
         HeartbeatAction::Queue
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MuteAction {
+    Clear,
+    Observe,
+    CompactRetry,
+    Rotate,
+}
+
+fn mute_action(previous_empty_turns: u32, text: &str, usage: crate::child::Usage) -> MuteAction {
+    let empty = text.trim().is_empty()
+        && usage.input == 0
+        && usage.output == 0
+        && usage.cache_read == 0
+        && usage.cache_write == 0;
+    if !empty {
+        return MuteAction::Clear;
+    }
+    match previous_empty_turns + 1 {
+        0 | 1 => MuteAction::Observe,
+        2 => MuteAction::CompactRetry,
+        _ => MuteAction::Rotate,
     }
 }
 
@@ -320,20 +404,35 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
             }
             full.push_str(msg);
             let sent = if op == "steer" {
-                agent.child.lock().unwrap().command("steer", Some(&full)).map(|_| "steer")
+                agent
+                    .child
+                    .lock()
+                    .unwrap()
+                    .command("steer", Some(&full))
+                    .map(|_| "steer")
             } else {
                 agent.child.lock().unwrap().send_auto(&full)
             };
             match sent {
                 Ok(mode) => {
-                    agent.beat.lock().unwrap().log(&agent.name, "user", mode, msg);
+                    agent
+                        .beat
+                        .lock()
+                        .unwrap()
+                        .log(&agent.name, "user", mode, msg);
                     write_info_done(write_side, &format!("{} delivered as {mode}", agent.name));
                 }
                 Err(e) => write_info_done(write_side, &format!("{} error: {e}", agent.name)),
             }
         }
         "attach" => {
-            let _ = write_side.write_all(format!("{{\"ev\":\"info\",\"data\":\"attached to {}\"}}\n", agent.name).as_bytes());
+            let _ = write_side.write_all(
+                format!(
+                    "{{\"ev\":\"info\",\"data\":\"attached to {}\"}}\n",
+                    agent.name
+                )
+                .as_bytes(),
+            );
             if let Ok(s) = write_side.try_clone() {
                 agent.clients.lock().unwrap().push(s);
             }
@@ -342,7 +441,10 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
             let busy = agent.child.lock().unwrap().is_busy();
             let (last, doing) = {
                 let b = agent.beat.lock().unwrap();
-                (b.last_beat.clone().unwrap_or_else(|| "never".into()), b.doing_short())
+                (
+                    b.last_beat.clone().unwrap_or_else(|| "never".into()),
+                    b.doing_short(),
+                )
             };
             let queued = agent.queued_beat.lock().unwrap().is_some();
             let fleet_tokens = tokens_today(None).total();
@@ -386,7 +488,14 @@ fn last_activity(name: &str) -> (String, String) {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return (String::new(), String::new());
     };
-    let tail: String = text.chars().rev().take(1500).collect::<String>().chars().rev().collect();
+    let tail: String = text
+        .chars()
+        .rev()
+        .take(1500)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
     let tools: Vec<&str> = tail
         .lines()
         .filter_map(|l| l.trim().strip_prefix("⚙ "))
@@ -436,17 +545,29 @@ impl TokenTotals {
 }
 
 fn tokens_today(agent: Option<&str>) -> TokenTotals {
-    let path = semdb::config::Config::load().data_dir().join("medvitund.semdb");
-    let Ok(db) = semdb::storage::Db::open(&path) else { return TokenTotals::default(); };
+    let path = semdb::config::Config::load()
+        .data_dir()
+        .join("medvitund.semdb");
+    let Ok(db) = semdb::storage::Db::open(&path) else {
+        return TokenTotals::default();
+    };
     let today = crate::beat::human_day_prefix();
     let mut out = TokenTotals::default();
     for entry in db.index.values() {
-        let Ok(v) = json::parse(&entry.meta) else { continue };
-        if v.get("kind").and_then(Value::as_str) != Some("turn") { continue; }
-        if let Some(a) = agent {
-            if v.get("agent").and_then(Value::as_str) != Some(a) { continue; }
+        let Ok(v) = json::parse(&entry.meta) else {
+            continue;
+        };
+        if v.get("kind").and_then(Value::as_str) != Some("turn") {
+            continue;
         }
-        if v.get("day").and_then(Value::as_str) != Some(today.as_str()) { continue; }
+        if let Some(a) = agent {
+            if v.get("agent").and_then(Value::as_str) != Some(a) {
+                continue;
+            }
+        }
+        if v.get("day").and_then(Value::as_str) != Some(today.as_str()) {
+            continue;
+        }
         out.input += meta_u64(&v, "input");
         out.output += meta_u64(&v, "output");
         out.cache_read += meta_u64(&v, "cacheRead");
@@ -483,7 +604,11 @@ fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
 
 fn write_info_done(write_side: &mut UnixStream, text: &str) {
     let _ = write_side.write_all(
-        format!("{{\"ev\":\"info\",\"data\":\"{}\"}}\n{{\"ev\":\"done\"}}\n", json::escape(text)).as_bytes(),
+        format!(
+            "{{\"ev\":\"info\",\"data\":\"{}\"}}\n{{\"ev\":\"done\"}}\n",
+            json::escape(text)
+        )
+        .as_bytes(),
     );
 }
 
@@ -494,7 +619,11 @@ fn broadcast(clients: &Clients, line: &str) {
 
 fn append(path: &std::path::Path, text: &str) {
     use std::io::Write as _;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = f.write_all(text.as_bytes());
     }
 }
@@ -508,7 +637,11 @@ pub enum LineKind {
 
 pub fn client_line_kind(line: &str) -> LineKind {
     if let Ok(v) = json::parse(line) {
-        let data = v.get("data").and_then(Value::as_str).unwrap_or("").to_string();
+        let data = v
+            .get("data")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         match v.get("ev").and_then(Value::as_str) {
             Some("text") => return LineKind::Text(data),
             Some("done") => return LineKind::Done,
@@ -524,13 +657,55 @@ mod tests {
 
     #[test]
     fn line_kinds_parse() {
-        assert!(matches!(client_line_kind("{\"ev\":\"text\",\"data\":\"hi\"}"), LineKind::Text(t) if t == "hi"));
-        assert!(matches!(client_line_kind("{\"ev\":\"done\"}"), LineKind::Done));
-        assert!(matches!(client_line_kind("{\"ev\":\"info\",\"data\":\"x\"}"), LineKind::Info(_)));
+        assert!(
+            matches!(client_line_kind("{\"ev\":\"text\",\"data\":\"hi\"}"), LineKind::Text(t) if t == "hi")
+        );
+        assert!(matches!(
+            client_line_kind("{\"ev\":\"done\"}"),
+            LineKind::Done
+        ));
+        assert!(matches!(
+            client_line_kind("{\"ev\":\"info\",\"data\":\"x\"}"),
+            LineKind::Info(_)
+        ));
     }
 
     #[test]
     fn agent_list_dedupes() {
-        assert_eq!(dedupe_agents(vec!["main".into(), "qa".into(), "main".into()]), vec!["main", "qa"]);
+        assert_eq!(
+            dedupe_agents(vec!["main".into(), "qa".into(), "main".into()]),
+            vec!["main", "qa"]
+        );
+    }
+
+    #[test]
+    fn mute_detection_uses_zero_tokens_and_escalates() {
+        let zero = crate::child::Usage::default();
+        assert_eq!(mute_action(0, "", zero), MuteAction::Observe);
+        assert_eq!(mute_action(1, "   ", zero), MuteAction::CompactRetry);
+        assert_eq!(mute_action(2, "", zero), MuteAction::Rotate);
+        assert_eq!(mute_action(2, "real text", zero), MuteAction::Clear);
+        assert_eq!(
+            mute_action(2, "", crate::child::Usage { input: 1, ..zero }),
+            MuteAction::Clear
+        );
+    }
+
+    #[test]
+    fn cross_model_resume_reject_regression_recovers() {
+        // A 5.4-mini session resumed under a future/different model can reject
+        // old reasoning signatures by producing empty content and zero metered
+        // tokens. Recovery is model-agnostic: observe once, compact+retry once,
+        // then rotate to a fresh session if silence persists.
+        let zero = crate::child::Usage::default();
+        let actions = [
+            mute_action(0, "", zero),
+            mute_action(1, "", zero),
+            mute_action(2, "", zero),
+        ];
+        assert_eq!(
+            actions,
+            [MuteAction::Observe, MuteAction::CompactRetry, MuteAction::Rotate]
+        );
     }
 }
