@@ -90,9 +90,18 @@ fn gateway_send(agent: &str, msg: &str) -> Result<(), String> {
 }
 
 fn bot_token() -> Result<String, String> {
-    let out = Command::new("target/release/secrets")
-        .args(["get", "--store", "data/secrets", "--name", "telegram_bot_token", "--as", "pi"])
-        .output().map_err(|e| format!("run secrets get: {e}"))?;
+    // Caller auth: the ./pi launcher injects SMARTAGENT_CALLER_TOKEN, but the
+    // supervised listener is spawned by supervise WITHOUT it — fall back to
+    // the token file (same trust domain; tmpfs-masked inside the sandbox, so
+    // sandboxed commands still can't present it).
+    let mut cmd = Command::new("target/release/secrets");
+    cmd.args(["get", "--store", "data/secrets", "--name", "telegram_bot_token", "--as", "pi"]);
+    if std::env::var("SMARTAGENT_CALLER_TOKEN").is_err() {
+        if let Ok(tok) = std::fs::read_to_string("data/secrets/tokens/pi.token") {
+            cmd.env("SMARTAGENT_CALLER_TOKEN", tok.trim());
+        }
+    }
+    let out = cmd.output().map_err(|e| format!("run secrets get: {e}"))?;
     if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
