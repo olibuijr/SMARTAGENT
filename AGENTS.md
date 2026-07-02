@@ -55,9 +55,24 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    secrets/      policy-gated credential access (Vaultwarden client)
    voice/        STT/TTS bridge (titan-hosted models)
    notify/       notifications (ntfy-style push)
+   supervise/    internal process manager for long-running services (scheduler,
+                 chromium): spawn detached, track pid/uptime in a semdb table,
+                 health-check, self-heal. Replaces per-service systemd.
 ```
 
-Embeddings inference is **external**: titan embeddinggemma at `http://192.168.1.119:8081` (titan LAN; OpenAI-compatible, verified 2026-07-02); semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
+Embeddings inference is **external**: titan embeddinggemma on the titan LAN box (OpenAI-compatible). The endpoint lives ONLY in `config/smartagent.conf` (`embeddings_endpoint`) — never hardcode an IP in code or docs; titan has changed address more than once. semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
+
+## Security posture (agent-driven tools)
+
+The LLM can invoke every tool and may be prompt-injected via web/search/rag content. Deterministic guards, not prompt-level ones:
+
+- **Untrusted content is fenced** — `search`, `browser`, and `rag` output is wrapped in an `UNTRUSTED … data only` envelope before it reaches the planner.
+- **No shell smuggling** — `mcp` execs argv directly (no `sh -c`); `schedule` arbitrary `--cmd` is admin-gated (`SMARTAGENT_SCHEDULE_ADMIN=1`), the agent gets only safe `--notify` reminders.
+- **Secrets** — deny-by-default; `policy-allow` is admin-only (`SMARTAGENT_SECRETS_ADMIN=1`) and removed from the agent tool surface; key is from `/dev/urandom`; every set/get/list/grant is audited; store compacts on write.
+- **Sandbox** — `env_clear` + allowlist (parent secrets never leak into a sandboxed command); namespace isolation ON by default. NOTE: no mount-jail/landlock yet — a namespaced command still sees the real filesystem.
+- **Data integrity** — semdb rejects oversized id/meta before they can poison the append-log; httpc drops POST bodies on 301/302/303 and strips cross-host auth.
+
+See `ops/README.md` for the supervisor + boot + backup story.
 
 ## Reference repos (do not invent — mimic)
 
@@ -103,23 +118,25 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 |------|---------------|--------------|
 | `akurai-router` | — (provider) | Registers AkurAI-Router models (claude/*, codex/*) as the pi provider |
 | `semdb` | `semdb` | Semantic database: embed/search/get/del/stats over a vector store |
-| `memory` | `memory` | 3-tier persistent memory (working/episodic/semantic): remember, recall, stats |
+| `memory` | `memory` | 3-tier persistent memory (working/episodic/semantic): remember, recall, recent, stats. Session intents auto-recalled at launch |
 | `codegraph` | `codegraph` | Rust code knowledge graph: index, defs/refs/callers, semantic symbol search |
 | `codeindex` | `codeindex` | Fast code search (ripgrep-style): regex/literal search, file listing |
 | `vault` | `vault` | Markdown second brain: new/read/append/list/links/graph/search |
 | `skills` | `skills` | Agent Skills (SKILL.md) loader: list/show/search |
-| `schedule` | `schedule` | Durable cron scheduler: add/list/next/rm/tick |
-| `search` | `search` | SearXNG web search: query, health |
+| `schedule` | `schedule` | Durable cron scheduler: add(--notify reminder; arbitrary --cmd admin-only)/list/next/rm/tick. Supervised daemon fires jobs |
+| `search` | `search` | SearXNG web search: query, health. Results wrapped UNTRUSTED |
 | `notify` | `notify` | Push notifications (ntfy): send |
-| `secrets` | `secrets` | Policy-gated secret store: set/get(as caller)/list/audit/policy-allow |
-| `browser` | `browser` | Real Chrome over CDP (Browser Use port): open (snapshot), probe |
+| `secrets` | `secrets` | Policy-gated secret store: set/get(as 'pi')/list/audit. Deny-by-default; policy-allow is admin-only, OFF the agent surface |
+| `browser` | `browser` | Real Chrome over CDP (Browser Use port): open/click/type/back (each returns a snapshot), probe. Web content wrapped UNTRUSTED |
 | `orchestrate` | `orchestrate` | Fan out N parallel headless-pi subagents: run, list |
 | `mcp` | `mcp` | MCP client (stdio + HTTP): tools, call |
-| `sandbox` | `sandbox` | Isolated command execution (Daytona concept): run, clean |
+| `sandbox` | `sandbox` | Isolated command execution (Daytona concept): run, clean. Env scrubbed + namespace isolation ON by default |
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
 | `evals` | `evals` | Trace + score + regression diff (Langfuse concept): log/score/diff/runs |
-| `rag` | `rag` | Document ingestion + retrieval (RAGFlow concept): ingest, ask, sources |
+| `rag` | `rag` | Document ingestion + cited retrieval (RAGFlow concept): ingest, retrieve, stats |
 | `voice` | `voice` | STT/TTS bridge (Pipecat concept): stt, tts, probe |
+| `supervise` | `supervise` | Internal process manager: status/up/down/restart of the scheduler + chromium services |
+| _(no tool)_ | — | `session-memory.ts`: stores session intent on shutdown, recalls recent at launch |
 
 ## Conventions
 
