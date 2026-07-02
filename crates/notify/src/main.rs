@@ -23,8 +23,11 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("send") => {
+            let server = semdb::config::Config::load()
+                .resolve("ntfy_server", "NTFY_SERVER", flag(args, "--server").as_deref())
+                .ok_or("no ntfy server: set ntfy_server in config/smartagent.conf, $NTFY_SERVER, or --server")?;
             let msg = ntfy::Message {
-                server: flag(args, "--server").unwrap_or_else(|| "http://ntfy.sh".into()),
+                server,
                 topic: flag(args, "--topic").ok_or("--topic required")?,
                 message: flag(args, "--message").ok_or("--message required")?,
                 title: flag(args, "--title"),

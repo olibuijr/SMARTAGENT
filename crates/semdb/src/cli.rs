@@ -2,13 +2,11 @@
 
 use std::path::Path;
 
+use crate::config::Config;
 use crate::hnsw::Hnsw;
 use crate::http;
 use crate::storage::Db;
 use crate::vector;
-
-const DEFAULT_ENDPOINT: &str = "100.88.0.2:8081";
-const DEFAULT_MODEL: &str = "embeddinggemma";
 
 pub fn run(args: &[String]) -> Result<String, String> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
@@ -146,13 +144,18 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 }
 
 fn endpoint(args: &[String]) -> Result<(String, u16), String> {
-    let ep = flag(args, "--endpoint").unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+    let cfg = Config::load();
+    let ep = cfg
+        .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", flag(args, "--endpoint").as_deref())
+        .ok_or("no embeddings endpoint: set embeddings_endpoint in config/smartagent.conf, $SEMDB_ENDPOINT, or --endpoint")?;
     let (host, port) = ep.rsplit_once(':').ok_or("endpoint must be host:port")?;
     Ok((host.to_string(), port.parse().map_err(|_| "bad port")?))
 }
 
 fn model(args: &[String]) -> String {
-    flag(args, "--model").unwrap_or_else(|| DEFAULT_MODEL.to_string())
+    Config::load()
+        .resolve("embeddings_model", "SEMDB_MODEL", flag(args, "--model").as_deref())
+        .unwrap_or_else(|| "embeddinggemma".to_string())
 }
 
 const HELP: &str = r#"
@@ -168,6 +171,6 @@ USAGE:
   semdb stats   <db>
   semdb compact <db>
 
-Embedding flags: [--endpoint host:port] (default 100.88.0.2:8081)
-                 [--model name]         (default embeddinggemma)
+Embedding config: config/smartagent.conf (embeddings_endpoint, embeddings_model)
+Override with --endpoint host:port / --model name or $SEMDB_ENDPOINT / $SEMDB_MODEL
 "#;

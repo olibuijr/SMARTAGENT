@@ -1,0 +1,51 @@
+//! CLI: query / health
+
+use crate::searx::{self, Query};
+
+pub fn run(args: &[String]) -> Result<String, String> {
+    match args.first().map(String::as_str) {
+        Some("query") => {
+            let terms = args.get(1).ok_or("usage: search query '<terms>' --instance URL")?;
+            let instance = flag(args, "--instance").ok_or("--instance required")?;
+            let limit = flag(args, "--k").and_then(|s| s.parse().ok()).unwrap_or(10);
+            let engines = flag(args, "--engines");
+            let category = flag(args, "--category");
+            let q = Query {
+                instance: &instance,
+                terms,
+                engines: engines.as_deref(),
+                category: category.as_deref(),
+                limit,
+            };
+            let results = searx::search(&q)?;
+            if results.is_empty() {
+                return Ok("no results".into());
+            }
+            Ok(results
+                .iter()
+                .enumerate()
+                .map(|(i, r)| format!("{}\t{}\t{}\t{}", i + 1, r.title, r.url, r.snippet))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        Some("health") => {
+            let instance = flag(args, "--instance").ok_or("--instance required")?;
+            let status = searx::health(&instance)?;
+            Ok(format!("instance {instance} → HTTP {status}"))
+        }
+        _ => Ok(HELP.trim().into()),
+    }
+}
+
+fn flag(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
+}
+
+const HELP: &str = r#"
+search — SearXNG metasearch client
+
+USAGE:
+  search query '<terms>' --instance http://host:port [--k 10]
+                          [--engines e1,e2] [--category general|news|it]
+  search health --instance http://host:port
+"#;

@@ -2,6 +2,7 @@
 //! Log-structured single-file store + in-memory HNSW, external embeddings.
 
 pub mod cli;
+pub mod config;
 pub mod hnsw;
 pub mod http;
 pub mod json;
