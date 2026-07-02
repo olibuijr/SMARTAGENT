@@ -57,7 +57,7 @@ export default function (pi: ExtensionAPI) {
 					out = run(["embed", db, "--id", p.id ?? "", "--text", p.text ?? ""]);
 					break;
 				case "search":
-					out = run(["search", db, "--text", p.text ?? "", "--k", String(p.k ?? 5)]);
+					{ const a=["search", db, "--text", p.text ?? "", "--k", String(p.k ?? 5)]; if (p.idsOnly) a.push("--ids-only"); if (p.metaChars!=null) a.push("--meta-chars", String(p.metaChars)); out = run(a); }
 					break;
 				case "get":
 					out = run(["get", db, "--id", p.id ?? ""]);

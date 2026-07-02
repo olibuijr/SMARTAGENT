@@ -2,6 +2,7 @@
 
 use std::process::ExitCode;
 use browser::cdp::Cdp;
+use httpc::args::{flag, has};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -13,35 +14,41 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> Result<String, String> {
     let base = devtools_base(args);
+    // Snapshot size caps (fewer tokens); `--quiet` on click/type returns only
+    // the status line (no page dump) — right for intermediate steps of a flow.
+    let mt = flag(args, "--max-text").and_then(|s| s.parse().ok()).unwrap_or(4000usize);
+    let ml = flag(args, "--max-links").and_then(|s| s.parse().ok()).unwrap_or(40usize);
+    let quiet = has(args, "--quiet");
     match args.first().map(String::as_str) {
         Some("open") => {
             let url = args.get(1).ok_or("usage: browser open <url> [--devtools http://127.0.0.1:9222]")?;
             let mut cdp = Cdp::connect(&base)?;
             cdp.navigate(url)?;
-            cdp.snapshot()
+            cdp.snapshot_capped(mt, ml)
         }
         Some("click") => {
             let sel = args.get(1).ok_or("usage: browser click <css-selector>")?;
             let mut cdp = Cdp::connect(&base)?;
             let status = cdp.click(sel)?;
-            Ok(format!("[{status}]\n{}", cdp.snapshot()?))
+            if quiet { Ok(format!("[{status}]")) } else { Ok(format!("[{status}]\n{}", cdp.snapshot_capped(mt, ml)?)) }
         }
         Some("type") => {
             let sel = args.get(1).ok_or("usage: browser type <css-selector> <text>")?;
             let text = args.get(2).ok_or("usage: browser type <css-selector> <text>")?;
             let mut cdp = Cdp::connect(&base)?;
             let status = cdp.type_text(sel, text)?;
-            Ok(format!("[{status}]\n{}", cdp.snapshot()?))
+            if quiet { Ok(format!("[{status}]")) } else { Ok(format!("[{status}]\n{}", cdp.snapshot_capped(mt, ml)?)) }
         }
         Some("back") => {
             let mut cdp = Cdp::connect(&base)?;
             cdp.history(-1)?;
-            cdp.snapshot()
+            cdp.snapshot_capped(mt, ml)
         }
         Some("probe") => {
             let v = httpc::get(&format!("{}/json/version", base.trim_end_matches('/')))
                 .map_err(|e| format!("devtools unreachable at {base}: {e}"))?;
-            if v.ok() { Ok(format!("Chrome DevTools OK at {base}\n{}", v.text().unwrap_or_default())) }
+            // Terse: one line, not the whole /json/version body.
+            if v.ok() { Ok(format!("Chrome DevTools OK at {base}")) }
             else { Err(format!("devtools returned HTTP {}", v.status)) }
         }
         _ => Ok(HELP.trim().into()),

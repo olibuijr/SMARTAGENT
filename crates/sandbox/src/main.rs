@@ -59,15 +59,20 @@ fn run(args: &[String]) -> Result<String, String> {
                 // filesystem-only confinement. Safe default for untrusted cmds.
                 isolate: !has(args, "--no-isolate"),
                 timeout: Duration::from_secs(flag(args, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(30)),
-                max_output: flag(args, "--max-output").and_then(|s| s.parse().ok()).unwrap_or(1_000_000),
+                // Default 16KB (was 1MB): a chatty command shouldn't be able to
+                // flood the agent's context. Raise with --max-output when needed.
+                max_output: flag(args, "--max-output").and_then(|s| s.parse().ok()).unwrap_or(16_384),
+                tail: has(args, "--tail"),
                 masks: sensitive_paths(),
             };
             let res = exec::run(&spec)?;
-            let mut out = vec![
-                format!("exit: {}{}", res.exit, if res.timed_out { " (TIMEOUT)" } else { "" }),
-                format!("isolated: {}", if res.isolated { "namespaces" } else { "filesystem-only (unshare not available)" }),
-                format!("workspace: {}", res.workspace.display()),
-            ];
+            let mut out = vec![format!("exit: {}{}", res.exit, if res.timed_out { " (TIMEOUT)" } else { "" })];
+            // The isolated/workspace preamble is diagnostics; only the agent
+            // debugging isolation needs it, so gate it behind --verbose.
+            if has(args, "--verbose") {
+                out.push(format!("isolated: {}", if res.isolated { "namespaces" } else { "filesystem-only (unshare not available)" }));
+                out.push(format!("workspace: {}", res.workspace.display()));
+            }
             if !res.stdout.is_empty() { out.push(format!("--- stdout ---\n{}", res.stdout)); }
             if !res.stderr.is_empty() { out.push(format!("--- stderr ---\n{}", res.stderr)); }
             Ok(out.join("\n"))

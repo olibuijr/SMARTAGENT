@@ -69,10 +69,19 @@ impl Cdp {
             .to_string())
     }
 
-    /// Compact snapshot: page title, visible text (trimmed), and links.
-    pub fn snapshot(&mut self) -> Result<String, String> {
+    /// Compact snapshot: page title, visible text (trimmed to `max_text` chars),
+    /// and up to `max_links` links. Smaller caps = fewer tokens.
+    pub fn snapshot_capped(&mut self, max_text: usize, max_links: usize) -> Result<String, String> {
         self.call("Runtime.enable", "{}")?;
-        self.eval(SNAPSHOT_JS)
+        let js = SNAPSHOT_JS
+            .replace("__MAXTEXT__", &max_text.to_string())
+            .replace("__MAXLINKS__", &max_links.to_string());
+        self.eval(&js)
+    }
+
+    /// Default snapshot (4000 chars / 40 links).
+    pub fn snapshot(&mut self) -> Result<String, String> {
+        self.snapshot_capped(4000, 40)
     }
 
     /// Click the first element matching a CSS selector. Returns a status line.
@@ -113,10 +122,10 @@ impl Cdp {
 /// JS that builds a compact, token-frugal snapshot (Browser Use style).
 const SNAPSHOT_JS: &str = r#"(function(){
   var title = document.title || '';
-  var text = (document.body ? document.body.innerText : '').replace(/\s+/g,' ').trim().slice(0, 4000);
+  var text = (document.body ? document.body.innerText : '').replace(/\s+/g,' ').trim().slice(0, __MAXTEXT__);
   var links = [];
   var as = document.querySelectorAll('a[href]');
-  for (var i=0; i<as.length && links.length<40; i++){
+  for (var i=0; i<as.length && links.length<__MAXLINKS__; i++){
     var t = as[i].innerText.replace(/\s+/g,' ').trim();
     if (t) links.push('- ' + t + ' -> ' + as[i].href);
   }

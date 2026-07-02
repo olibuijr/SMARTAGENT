@@ -88,12 +88,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 return Err("--text or --vector required".into());
             };
             let hits = store::retrieve(&db, &qv, k, exact, flag(args, "--doc-id").as_deref())?;
-            Ok(format_hits(&hits))
+            if args.iter().any(|a| a == "--ids-only") {
+                // Just citations + scores — the agent fetches full text via `get`
+                // for the chunks it actually wants.
+                return Ok(hits.iter().map(|h| format!("{:.4}\t{}", h.score, h.citation())).collect::<Vec<_>>().join("\n"));
+            }
+            let snip = flag(args, "--snippet-chars").and_then(|s| s.parse().ok()).unwrap_or(240usize);
+            Ok(format_hits(&hits, snip))
         }
         Some("get") => {
             let db = path_arg(args, 1, "db")?;
             let id = flag(args, "--id").ok_or("--id required")?;
-            Ok(format_hit(&store::get(&db, &id)?))
+            // `get` returns the full chunk text (that's the point of fetching one).
+            Ok(format_hit(&store::get(&db, &id)?, usize::MAX))
         }
         Some("delete-doc") => {
             let db = path_arg(args, 1, "db")?;
@@ -155,29 +162,39 @@ fn path_arg(args: &[String], idx: usize, what: &str) -> Result<PathBuf, String> 
 }
 
 
-fn format_hits(hits: &[RetrievedChunk]) -> String {
+fn format_hits(hits: &[RetrievedChunk], snippet_chars: usize) -> String {
     if hits.is_empty() {
         "no chunks".into()
     } else {
-        hits.iter().map(format_hit).collect::<Vec<_>>().join("\n")
+        hits.iter().map(|h| format_hit(h, snippet_chars)).collect::<Vec<_>>().join("\n")
     }
 }
 
-fn format_hit(h: &RetrievedChunk) -> String {
+fn format_hit(h: &RetrievedChunk, snippet_chars: usize) -> String {
+    // Drop the redundant doc_id column (the citation already carries the id);
+    // truncate the chunk body to snippet_chars so retrieval doesn't dump full
+    // 512-token chunks × k into context.
     format!(
-        "{:.4}\t{}\t{}:{}..{}\t{}\t{}",
+        "{:.4}\t{}\t{}:{}..{}\t{}",
         h.score,
         h.citation(),
         h.source,
         h.start,
         h.end,
-        h.doc_id,
-        one_line(&h.text)
+        truncate_chars(&one_line(&h.text), snippet_chars)
     )
 }
 
 fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let cut: String = s.chars().take(max).collect();
+    format!("{cut}…")
 }
 
 const HELP: &str = r#"

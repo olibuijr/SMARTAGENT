@@ -28,6 +28,9 @@ pub struct SandboxSpec {
     pub isolate: bool,
     pub timeout: Duration,
     pub max_output: usize,
+    /// Keep the LAST `max_output` bytes instead of the first — right for build
+    /// logs where the tail (errors/summary) matters, not the head.
+    pub tail: bool,
     /// Paths tmpfs-masked inside the namespace (e.g. data/secrets, .pi) so a
     /// sandboxed command can't read them. Only applied when isolation is active.
     pub masks: Vec<PathBuf>,
@@ -94,8 +97,8 @@ pub fn run(spec: &SandboxSpec) -> Result<SandboxResult, String> {
         }
     };
 
-    let stdout = read_capped(&out_path, spec.max_output);
-    let stderr = read_capped(&err_path, spec.max_output);
+    let stdout = read_capped(&out_path, spec.max_output, spec.tail);
+    let stderr = read_capped(&err_path, spec.max_output, spec.tail);
     Ok(SandboxResult { exit, timed_out, workspace, stdout, stderr, isolated: use_ns })
 }
 
@@ -144,11 +147,20 @@ fn scrub_env(c: &mut Command) {
     }
 }
 
-fn read_capped(path: &Path, cap: usize) -> String {
+fn read_capped(path: &Path, cap: usize, tail: bool) -> String {
     let mut f = match File::open(path) {
         Ok(f) => f,
         Err(_) => return String::new(),
     };
+    if tail {
+        // Read the whole file and keep the last `cap` bytes.
+        let mut buf = Vec::new();
+        let _ = f.read_to_end(&mut buf);
+        let truncated = buf.len() > cap;
+        let start = buf.len().saturating_sub(cap);
+        let s = String::from_utf8_lossy(&buf[start..]).to_string();
+        return if truncated { format!("…[head truncated]\n{s}") } else { s };
+    }
     let mut buf = Vec::new();
     let _ = f.by_ref().take(cap as u64 + 1).read_to_end(&mut buf);
     let truncated = buf.len() > cap;
@@ -208,6 +220,7 @@ mod tests {
             inputs: vec![],
             net: false,
             isolate: false,
+            tail: false,
             masks: vec![],
             timeout: Duration::from_secs(timeout),
             max_output: 1_000_000,

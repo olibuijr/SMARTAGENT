@@ -34,8 +34,22 @@ fn run(args: &[String]) -> Result<String, String> {
             if hits.is_empty() {
                 return Ok("no matches".into());
             }
+            // -c count-only: just "<N> matches in <M> files". -l files-only:
+            // distinct file list. Otherwise lines, capped by -m (default 50) so
+            // a loose pattern can't flood the agent's context.
+            if has(args, "-c") || has(args, "--count") {
+                let files_n = hits.iter().map(|h| &h.file).collect::<std::collections::BTreeSet<_>>().len();
+                return Ok(format!("{} matches in {} files", hits.len(), files_n));
+            }
+            if has(args, "-l") || has(args, "--files-with-matches") {
+                let mut fs: Vec<String> = hits.iter().map(|h| h.file.display().to_string()).collect();
+                fs.sort(); fs.dedup();
+                return Ok(fs.join("\n"));
+            }
+            let max = flag(args, "-m").or_else(|| flag(args, "--max-count")).and_then(|s| s.parse().ok()).unwrap_or(50usize);
+            let shown = hits.len().min(max);
             let mut out = String::new();
-            for h in &hits {
+            for h in hits.iter().take(max) {
                 for (k, b) in h.before.iter().enumerate() {
                     out.push_str(&format!("{}:{}-{}\n", h.file.display(), h.line_no - h.before.len() + k, b));
                 }
@@ -44,13 +58,17 @@ fn run(args: &[String]) -> Result<String, String> {
                     out.push_str(&format!("{}:{}-{}\n", h.file.display(), h.line_no + 1 + k, a));
                 }
             }
+            if hits.len() > max {
+                out.push_str(&format!("…[{} of {} matches shown; raise -m or use -l/-c]\n", shown, hits.len()));
+            }
             Ok(out.trim_end().to_string())
         }
         Some("files") => {
             let dir = positional_dir(args);
             let rules = Rules::load(&dir);
             let files = walk::walk(&dir, &rules, flag(args, "-t").as_deref());
-            Ok(files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join("\n"))
+            let max = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(usize::MAX);
+            Ok(files.iter().take(max).map(|f| f.display().to_string()).collect::<Vec<_>>().join("\n"))
         }
         _ => Ok(HELP.trim().into()),
     }

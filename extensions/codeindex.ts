@@ -21,6 +21,8 @@ export default function (pi: ExtensionAPI) {
 			type: "object",
 			properties: {
 				action: { type: "string", enum: ["search", "files"], description: "Operation to perform" },
+					mode: { type: "string", enum: ["lines", "files", "count"], description: "search output: lines (default), files (names), count (totals only) — use count/files to gauge breadth cheaply" },
+					max: { type: "number", description: "cap matched lines (default 50)" },
 				pattern: { type: "string", description: "text or regex pattern (search action)" },
 				dir: { type: "string", description: "directory to search (default .)" },
 				ext: { type: "string", description: "restrict to files with this extension" },
@@ -37,13 +39,19 @@ export default function (pi: ExtensionAPI) {
 			if (p.action === "files") {
 				const args = ["files", dir];
 				if (p.ext) args.push("-t", p.ext);
+				if (p.max) args.push("--limit", String(p.max));
 				out = run(args);
 			} else {
 				const args = ["search", p.pattern ?? "", dir];
 				if (p.ignore_case) args.push("-i");
 				if (p.regex) args.push("-e");
-				if (p.before != null) args.push("-B", String(p.before));
-				if (p.after != null) args.push("-A", String(p.after));
+				if (p.mode === "count") args.push("-c");
+				else if (p.mode === "files") args.push("-l");
+				else {
+					if (p.before != null) args.push("-B", String(p.before));
+					if (p.after != null) args.push("-A", String(p.after));
+					if (p.max != null) args.push("-m", String(p.max));
+				}
 				if (p.ext) args.push("-t", p.ext);
 				out = run(args);
 			}

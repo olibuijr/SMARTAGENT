@@ -67,9 +67,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if results.is_empty() {
                 return Ok("no results".into());
             }
+            // --ids-only: score+id only (meta often embeds the full source text).
+            // --meta-chars N: truncate the meta blob. Defaults to full meta.
+            let ids_only = args.iter().any(|a| a == "--ids-only");
+            let meta_cap = flag(args, "--meta-chars").and_then(|s| s.parse().ok());
             Ok(results
                 .into_iter()
-                .map(|(id, score, meta)| format!("{score:.4}\t{id}\t{meta}"))
+                .map(|(id, score, meta)| {
+                    if ids_only {
+                        format!("{score:.4}\t{id}")
+                    } else if let Some(n) = meta_cap {
+                        format!("{score:.4}\t{id}\t{}", truncate_chars(&meta, n))
+                    } else {
+                        format!("{score:.4}\t{id}\t{meta}")
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
@@ -138,6 +150,11 @@ pub fn search(db: &Db, query: &[f32], k: usize, exact: bool) -> Vec<(String, f32
 
 fn required(args: &[String], idx: usize, what: &str) -> Result<String, String> {
     args.get(idx).cloned().ok_or_else(|| format!("{what} required"))
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { return s.to_string(); }
+    format!("{}…", s.chars().take(max).collect::<String>())
 }
 
 
