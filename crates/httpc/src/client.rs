@@ -2,7 +2,7 @@
 //! Content-Length and chunked bodies, redirects (limit 5). Plain HTTP only.
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use crate::json::{self, Value};
@@ -124,7 +124,18 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
         return Err("https not supported directly — route via local proxy".into());
     }
     let addr = format!("{}:{}", u.host, u.port);
-    let mut stream = TcpStream::connect(&addr).map_err(|e| format!("connect {addr}: {e}"))?;
+    // connect_timeout: a blackholed address (e.g. VPN peer down) must fail fast,
+    // not block the tool indefinitely — capped at 10s regardless of read timeout.
+    let connect_deadline = Duration::from_secs(req.timeout_secs.min(10).max(1));
+    let sock_addrs: Vec<std::net::SocketAddr> = (u.host.as_str(), u.port)
+        .to_socket_addrs()
+        .map_err(|e| format!("resolve {addr}: {e}"))?
+        .collect();
+    let mut stream = sock_addrs
+        .iter()
+        .map(|sa| TcpStream::connect_timeout(sa, connect_deadline))
+        .find_map(Result::ok)
+        .ok_or_else(|| format!("connect {addr}: unreachable within {}s", connect_deadline.as_secs()))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(req.timeout_secs)))
         .map_err(|e| e.to_string())?;
