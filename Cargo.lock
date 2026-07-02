@@ -73,6 +73,9 @@ dependencies = [
 [[package]]
 name = "sandbox"
 version = "0.1.0"
+dependencies = [
+ "semdb",
+]
 
 [[package]]
 name = "schedule"
