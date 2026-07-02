@@ -248,6 +248,21 @@ fn handle_client(
                     .as_bytes(),
                 );
             }
+            "agents" => {
+                // TSV one line per agent for the agentpanel: name\tstate\ttask\trole
+                let busy = child.lock().unwrap().is_busy();
+                let doing = beat.lock().unwrap().doing_short();
+                let state = if busy { "working" } else { "idle" };
+                let _ = write_side.write_all(
+                    format!(
+                        "{{\"ev\":\"info\",\"data\":\"{}\\t{}\\t{}\\tDA\"}}\n{{\"ev\":\"done\"}}\n",
+                        json::escape(&agent),
+                        state,
+                        json::escape(&doing)
+                    )
+                    .as_bytes(),
+                );
+            }
             "stop" => {
                 let _ = write_side.write_all(b"{\"ev\":\"info\",\"data\":\"stopping\"}\n{\"ev\":\"done\"}\n");
                 child.lock().unwrap().kill();

@@ -41,6 +41,7 @@ fn main() {
         "steer" => client_send("steer", &rest.join(" ")),
         "attach" => client_attach(),
         "status" => client_send("status", ""),
+        "agents" => client_send("agents", ""),
         "statusline" => statusline(),
         "stop" => client_send("stop", ""),
         _ => usage(),
