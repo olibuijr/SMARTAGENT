@@ -1,0 +1,47 @@
+#!/bin/sh
+# Project-scoped pi launcher for SMARTAGENT.
+# - Config/extensions/sessions live under this repo (.pi/), not ~/.pi
+# - Auto-loads every pi extension in extensions/*.ts
+# - Pins the real pi binary; the PATH `pi` is never consulted
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+PI_BIN="${SMARTAGENT_PI_BIN:-$ROOT/.pi/runtime/node_modules/.bin/pi}"
+
+if [ ! -x "$PI_BIN" ]; then
+    echo "error: vendored pi not found at $PI_BIN" >&2
+    echo "bootstrap: cd .pi/runtime && bun add @earendil-works/pi-coding-agent" >&2
+    exit 1
+fi
+
+export PI_CODING_AGENT_DIR="$ROOT/.pi/agent"
+export PI_CODING_AGENT_SESSION_DIR="$ROOT/.pi/sessions"
+mkdir -p "$PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_SESSION_DIR"
+
+# ── Auto-update (once a day, with the mandatory funny progress bar) ─────────
+STAMP="$ROOT/.pi/.last-update-check"
+if [ ! -f "$STAMP" ] || [ -n "$(find "$STAMP" -mtime +0 2>/dev/null)" ]; then
+    touch "$STAMP"
+    ( cd "$ROOT/.pi/runtime" && bun update @earendil-works/pi-coding-agent >"$ROOT/.pi/update.log" 2>&1 ) &
+    UPD_PID=$!
+    MSGS="feeding the hamsters|winding the flux capacitor|negotiating with npm|polishing neurons|untangling spaghetti|bribing the linter|reticulating splines|asking pi nicely"
+    i=0
+    printf 'pi self-update: '
+    while kill -0 $UPD_PID 2>/dev/null; do
+        i=$(( (i % 8) + 1 ))
+        msg=$(echo "$MSGS" | cut -d'|' -f$i)
+        bar=$(printf '%*s' $i '' | tr ' ' '█')
+        printf '\r\033[Kpi self-update: [%-8s] %s…' "$bar" "$msg"
+        sleep 0.4
+    done
+    wait $UPD_PID 2>/dev/null
+    printf '\r\033[Kpi self-update: [████████] up to date ✔\n'
+fi
+
+# Load project extensions (thin glue over crates/ binaries).
+set --  "$@"
+for ext in "$ROOT"/extensions/*.ts; do
+    [ -e "$ext" ] && set -- -e "$ext" "$@"
+done
+
+cd "$ROOT"
+exec "$PI_BIN" "$@"

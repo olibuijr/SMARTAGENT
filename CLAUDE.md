@@ -11,3 +11,5 @@ Hard rules (repeated here because they bite):
 - Embeddings/LLM inference is external (OpenAI-compatible HTTP); semdb stores/searches vectors itself.
 - Worktree agents: branch from a committed base, commit in-worktree; orchestrator merges, re-verifies, pushes.
 - Never touch `.refrepos/` contents (read-only references, gitignored).
+- Router/model failures: you MAY edit `../AkurAI-Router` and deploy to prod via its `./deploy.sh`, then verify and continue.
+- **NEVER use /tmp** (or any path outside the repo) for scratch, probes, test dbs, or config — everything lives inside the repo; use `.scratch/` (gitignored) for throwaways.

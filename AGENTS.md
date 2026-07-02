@@ -9,6 +9,7 @@ Frontier-level personal AI agent, rebuilt lean: **pi as the spine, every capabil
 3. **Small focused crates.** One capability = one crate under `crates/`. Thin `main.rs`, logic in scoped modules.
 4. **Lean.** Smallest correct implementation. No dead code, no speculative features. Port for correctness, then debloat.
 5. **Verify by using.** A capability is done when driven end-to-end from pi, not when it compiles.
+6. **NEVER use /tmp or any path outside the repo.** Scratch, probes, test databases, config — all inside the repo; throwaways go in `.scratch/` (gitignored).
 
 ## Architecture
 
@@ -66,6 +67,18 @@ Popularity winners researched 2026-07-02; we clone the *pattern*, in Rust:
 | Notifications | [binwiederhier/ntfy](https://github.com/binwiederhier/ntfy) | `crates/notify` |
 
 Reference clones live in `.refrepos/` (shallow, gitignored). **Borrow and port**: read the reference implementation, port the concept into pure Rust — never invent an API the reference doesn't justify, never copy license-incompatible code verbatim wholesale.
+
+## Router failures
+
+Models are served via **AkurAI-Router** (`../AkurAI-Router`). If pi model calls or router behavior fail because of a router bug, you are **allowed to edit `../AkurAI-Router` and deploy to prod with its `./deploy.sh`**. Fix, deploy, verify, then continue.
+
+## Project pi (`./pi`)
+
+- Launch pi ONLY via `./pi` from the repo root — fully self-contained: vendored binary in `.pi/runtime/` (bun package `@earendil-works/pi-coding-agent`), config+router key in `.pi/agent/`, sessions in `.pi/sessions/`. The PATH/global pi is never used. Auto-updates daily (funny progress bar included).
+- Models via AkurAI-Router (extension `extensions/akurai-router.ts`). **Default/test model: `codex/gpt-5.4-mini` with `--thinking low`.** Use bigger claude/* models only when explicitly needed.
+- Headless testing: `./pi -p '<prompt>' < /dev/null` — the stdin redirect is MANDATORY or pi hangs.
+- **Extension pattern (hard rule):** extensions in `extensions/*.ts` are auto-loaded by the launcher. They must use ONLY type-only imports from pi packages plus `node:` builtins — runtime imports (`defineTool`, `typebox`) fail silently and the tool never registers. Use `pi.registerTool({...})` with a plain JSON-schema `parameters` object, and shell out to `target/release/<crate>` via `execFileSync`. No logic in TS.
+- Every crate gets an extension; every crate's acceptance test is a natural-language `./pi -p` prompt exercising the tool.
 
 ## Conventions
 
