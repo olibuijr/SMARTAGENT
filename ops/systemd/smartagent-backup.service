@@ -1,0 +1,6 @@
+[Unit]
+Description=SMARTAGENT nightly data backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/SMARTAGENT/ops/backup.sh

@@ -17,24 +17,34 @@ export PI_CODING_AGENT_DIR="$ROOT/.pi/agent"
 export PI_CODING_AGENT_SESSION_DIR="$ROOT/.pi/sessions"
 mkdir -p "$PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_SESSION_DIR"
 
-# ── Auto-update (once a day, with the mandatory funny progress bar) ─────────
-STAMP="$ROOT/.pi/.last-update-check"
-if [ ! -f "$STAMP" ] || [ -n "$(find "$STAMP" -mtime +0 2>/dev/null)" ]; then
-    touch "$STAMP"
-    ( cd "$ROOT/.pi/runtime" && bun update @earendil-works/pi-coding-agent >"$ROOT/.pi/update.log" 2>&1 ) &
-    UPD_PID=$!
-    MSGS="feeding the hamsters|winding the flux capacitor|negotiating with npm|polishing neurons|untangling spaghetti|bribing the linter|reticulating splines|asking pi nicely"
-    i=0
-    printf 'pi self-update: '
-    while kill -0 $UPD_PID 2>/dev/null; do
-        i=$(( (i % 8) + 1 ))
-        msg=$(echo "$MSGS" | cut -d'|' -f$i)
-        bar=$(printf '%*s' $i '' | tr ' ' '█')
-        printf '\r\033[Kpi self-update: [%-8s] %s…' "$bar" "$msg"
-        sleep 0.4
-    done
-    wait $UPD_PID 2>/dev/null
-    printf '\r\033[Kpi self-update: [████████] up to date ✔\n'
+# ── Self-update (EXPLICIT only: `./pi --self-update`) ──────────────────────
+# Normal launches never touch the network or mutate the pinned runtime — the
+# old unpinned daily `bun update` silently jumped versions and blocked startup
+# when offline. Update is now opt-in, verified with a smoke test, and rolls
+# back on failure. The exact version lives in .pi/runtime/package.json (pinned).
+if [ "$1" = "--self-update" ]; then
+    cd "$ROOT/.pi/runtime" || exit 1
+    cp package.json package.json.bak 2>/dev/null
+    cp bun.lock bun.lock.bak 2>/dev/null
+    OLD_VER="$("$PI_BIN" --version 2>/dev/null)"
+    printf 'pi self-update: fetching latest…\n'
+    if ! bun update @earendil-works/pi-coding-agent >"$ROOT/.pi/update.log" 2>&1; then
+        echo "self-update: bun update failed (see .pi/update.log); keeping $OLD_VER" >&2
+        mv package.json.bak package.json 2>/dev/null; mv bun.lock.bak bun.lock 2>/dev/null
+        exit 1
+    fi
+    NEW_VER="$("$PI_BIN" --version 2>/dev/null)"
+    printf 'pi self-update: smoke-testing %s…\n' "$NEW_VER"
+    if printf '' | "$PI_BIN" -p 'reply with the single word OK' </dev/null >/dev/null 2>&1; then
+        rm -f package.json.bak bun.lock.bak
+        echo "self-update: $OLD_VER → $NEW_VER ✔"
+    else
+        echo "self-update: smoke test FAILED on $NEW_VER — rolling back to $OLD_VER" >&2
+        mv package.json.bak package.json 2>/dev/null; mv bun.lock.bak bun.lock 2>/dev/null
+        bun install >>"$ROOT/.pi/update.log" 2>&1
+        exit 1
+    fi
+    exit 0
 fi
 
 # Load project extensions (thin glue over crates/ binaries).
