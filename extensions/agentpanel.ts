@@ -61,7 +61,8 @@ function render(width: number): string[] {
 	list.forEach((a, i) => {
 		const accent = ACCENTS[i % ACCENTS.length];
 		const working = a.state === "working";
-		const icon = working ? color(accent, "◉") : dim("○");
+		// state dot: green = working, orange = idle
+		const icon = working ? color("46", "●") : color("208", "●");
 		const name = working ? bold(color(accent, a.name)) : color("252", a.name);
 		lines.push(` ${icon} ${name} ${dim("· " + a.role)}`);
 		const task = a.task && a.task !== "nothing" ? clip(a.task, w - 4) : "idle";
