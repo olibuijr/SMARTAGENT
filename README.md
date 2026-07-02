@@ -19,8 +19,8 @@ produces the whole fleet, and one launcher (`./pi`) wires it into the agent.
 
 ## Capabilities
 
-Twenty crates — eighteen agent tools plus shared libraries — each a pure-Rust
-binary the agent calls through a pi extension:
+Twenty-three crates — twenty agent tools plus shared libraries — each a
+pure-Rust binary the agent calls through a pi extension:
 
 | Tool | Ported from | What it does |
 |------|-------------|--------------|
@@ -43,6 +43,9 @@ binary the agent calls through a pi extension:
 | `rag` | [RAGFlow](https://github.com/infiniflow/ragflow) | Document ingestion + cited retrieval |
 | `voice` | [Pipecat](https://github.com/pipecat-ai/pipecat) | STT/TTS bridge |
 | `supervise` | — | Internal process manager for the long-running services |
+| `tasks` | kanban | Task board with WIP limits + criteria-gated done, enforced in Rust |
+| `workflow` | PAI Algorithm | Markdown-defined process engine: a skill per step, evidence-gated |
+| `hooks` | Claude Code hooks | User-configurable lifecycle hooks (block/rewrite/inject), exit-2 contract |
 
 Plus `httpc` (shared HTTP/1.1 + JSON library), `session-memory` (a hookless
 extension that gives the agent continuity across sessions), and `statusline`
@@ -54,6 +57,19 @@ extension that gives the agent continuity across sessions), and `statusline`
 The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
 
 ### Features added
+
+- **Task management + process engine** — `tasks` (kanban board: backlog→ready→
+  doing→review→done, WIP limits and criteria-gated done enforced in Rust,
+  pull-based `next`, flow metrics) and `workflow` (markdown-defined phase loops
+  where each step names the skill to use and advancing requires evidence —
+  the PAI Algorithm pattern as data). The `skills/Kanban` skill ships the
+  methodology plus runnable task-run / triage / retro workflows, and
+  `skills match` picks the right skill for a prompt.
+- **Hooks system** — Claude-Code-style lifecycle hooks in pure Rust:
+  `config/hooks.conf` declares event/matcher/command; hook scripts get the
+  payload as JSON on stdin and can block (exit 2), rewrite tool input, or
+  inject context. Bridged to pi tool_call / user_prompt / session_start / stop;
+  every firing audited to a semdb table.
 
 - **TUI statusline widgets** — eleven crates gained a `statusline` verb emitting
   a uniform `level|icon text` protocol (severity decided in Rust). The
@@ -76,6 +92,16 @@ The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
   gained one-shot `--at` + pause/resume, rag gained URL ingest and doc-scoped
   retrieval, and every CLI gained scope/limit/terse flags for token discipline.
 
+### Improvements (ranked P1 backlog, all top items closed)
+
+Batch embeddings everywhere (one POST instead of per-chunk), semdb auto-exact
+search below 10k rows + `del --prefix`, memory dedup-on-write with
+relevance-based eviction, codegraph dead-code query, vault orphans/tags/robust
+rename, orchestrate concurrency cap + retries + persisted results, schedule
+last-run exit codes + tick lock, supervise log tailing + crash-loop backoff,
+skills validate, context freshness, mcp stdio timeouts + bearer auth, notify
+click/markdown/auth, search pagination, evals latency percentiles.
+
 ### Fixes (12-subagent review, all 10 P0s closed)
 
 - **Injection**: mcp JSON-RPC injection (tool name/args), notify CR/LF header
@@ -96,8 +122,8 @@ The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
 Live health under the input, painted green/yellow/red by severity:
 
 ```
-⛭ scheduler:up chromium:up · 🧱 ns✓ limits✓ · 🔑 pi✓ · 🌐 chrome✓ · 🔎 searx✓ · 🕸 312sym
-▦ 🧠 w:12 e:340 s:88 · 📚 4d/842c · ⏰ nightly-backup in 13h · 📊 9/10 run-7 · 🤖 idle
+⛭ SERVICES: scheduler:up chromium:up · 🧱 SANDBOX: ns✓ limits✓ · 🔑 SECRETS: pi✓ · 🌐 BROWSER: chrome✓ · 🔎 SEARCH: searx✓ · 🕸 CODE: 312sym · 🪝 HOOKS: 1 armed
+▦ 🧠 MEMORY: w:12 e:340 s:88 · 📚 RAG: 4d/842c · ⏰ SCHEDULE: backup in 13h · 📊 EVALS: 9/10 · 🤖 AGENTS: idle · ▣ TASKS: d:1/1 r:3 · ▶ WORKFLOW: task-run 2/5
 ```
 
 Each segment is a Rust `<crate> statusline` verb (`ok|…`, `warn|…`, `err|…`) —
@@ -188,7 +214,10 @@ active crate tools register in pi. Cut a release with `./build.sh minor "changel
 ```
 crates/         pure-Rust zero-dep tools (one binary each) + httpc library
 extensions/     thin pi extensions (TS glue) — one per tool
-config/         smartagent.conf (all endpoints)
+config/         smartagent.conf (all endpoints) + hooks.conf (lifecycle hooks)
+hooks.d/        hook scripts (stdin JSON in, exit 2 blocks)
+skills/         agent skills (SKILL.md) incl. Kanban methodology + workflows
+workflows/      standalone workflow definitions for the workflow engine
 ops/            supervisor boot unit, backup + preflight scripts, ops docs
 pi              project launcher (self-contained pi runtime under .pi/)
 build.sh        build + test + audits + smoke gate; release versioning
