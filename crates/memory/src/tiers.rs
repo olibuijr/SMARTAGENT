@@ -49,14 +49,8 @@ impl Memory {
     }
 
     fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
-        let cfg = Config::load();
-        let ep = cfg
-            .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", None)
-            .ok_or("no embeddings_endpoint in config/smartagent.conf")?;
-        let (host, port) = ep.rsplit_once(':').ok_or("endpoint must be host:port")?;
-        let port: u16 = port.parse().map_err(|_| "bad port")?;
-        let model = cfg.resolve("embeddings_model", "SEMDB_MODEL", None).unwrap_or_else(|| "embeddinggemma".into());
-        http::fetch_embedding(host, port, &model, text)
+        let (host, port, model) = Config::load().embeddings(None, None)?;
+        http::fetch_embedding(&host, port, &model, text)
     }
 
     /// Store text in a tier with an auto-embedded vector.

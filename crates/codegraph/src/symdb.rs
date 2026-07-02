@@ -14,13 +14,7 @@ use semdb::storage::Db;
 use crate::graph::{Graph, Symbol};
 
 fn endpoint() -> Result<(String, u16, String), String> {
-    let cfg = Config::load();
-    let ep = cfg
-        .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", None)
-        .ok_or("no embeddings_endpoint in config/smartagent.conf")?;
-    let (host, port) = ep.rsplit_once(':').ok_or("endpoint must be host:port")?;
-    let model = cfg.resolve("embeddings_model", "SEMDB_MODEL", None).unwrap_or_else(|| "embeddinggemma".into());
-    Ok((host.to_string(), port.parse().map_err(|_| "bad port")?, model))
+    Config::load().embeddings(None, None)
 }
 
 /// A short natural-language description of a symbol, so semantic search works

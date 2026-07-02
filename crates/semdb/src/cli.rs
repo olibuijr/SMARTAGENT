@@ -58,8 +58,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let query = if let Some(vs) = flag(args, "--vector") {
                 vector::parse_vec(&vs)?
             } else if let Some(text) = flag(args, "--text") {
-                let (host, port) = endpoint(args)?;
-                http::fetch_embedding(&host, port, &model(args), &text)?
+                let (host, port, model) = embed_backend(args)?;
+                http::fetch_embedding(&host, port, &model, &text)?
             } else {
                 return Err("--vector or --text required".into());
             };
@@ -80,8 +80,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let meta = flag(args, "--meta").unwrap_or_else(|| {
                 format!(r#"{{"text":"{}"}}"#, crate::json::escape(&text))
             });
-            let (host, port) = endpoint(args)?;
-            let vec = http::fetch_embedding(&host, port, &model(args), &text)?;
+            let (host, port, model) = embed_backend(args)?;
+            let vec = http::fetch_embedding(&host, port, &model, &text)?;
             let dim = vec.len();
             let mut db = Db::open(Path::new(&db_path))?;
             db.put(&id, &meta, vec)?;
@@ -141,19 +141,9 @@ fn required(args: &[String], idx: usize, what: &str) -> Result<String, String> {
 }
 
 
-fn endpoint(args: &[String]) -> Result<(String, u16), String> {
-    let cfg = Config::load();
-    let ep = cfg
-        .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", flag(args, "--endpoint").as_deref())
-        .ok_or("no embeddings endpoint: set embeddings_endpoint in config/smartagent.conf, $SEMDB_ENDPOINT, or --endpoint")?;
-    let (host, port) = ep.rsplit_once(':').ok_or("endpoint must be host:port")?;
-    Ok((host.to_string(), port.parse().map_err(|_| "bad port")?))
-}
-
-fn model(args: &[String]) -> String {
-    Config::load()
-        .resolve("embeddings_model", "SEMDB_MODEL", flag(args, "--model").as_deref())
-        .unwrap_or_else(|| "embeddinggemma".to_string())
+/// (host, port, model) for embeddings, honoring --endpoint/--model overrides.
+fn embed_backend(args: &[String]) -> Result<(String, u16, String), String> {
+    Config::load().embeddings(flag(args, "--endpoint").as_deref(), flag(args, "--model").as_deref())
 }
 
 const HELP: &str = r#"

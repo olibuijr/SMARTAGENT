@@ -123,7 +123,7 @@ fn embedder(args: &[String]) -> Result<Embedder, String> {
             "SEMDB_MODEL",
             flag(args, "--model").as_deref(),
         )
-        .unwrap_or_else(|| "embeddinggemma".into());
+        .unwrap_or_else(|| semdb::config::DEFAULT_EMBED_MODEL.to_string());
     Ok(Embedder::new(endpoint, model))
 }
 

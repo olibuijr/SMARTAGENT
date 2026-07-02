@@ -77,6 +77,31 @@ fn find() -> Option<PathBuf> {
     }
 }
 
+/// The default embedding model, in ONE place (was copy-pasted in 4 crates).
+pub const DEFAULT_EMBED_MODEL: &str = "embeddinggemma";
+
+impl Config {
+    /// Resolve the embeddings backend as `(host, port, model)`. Optional flag
+    /// overrides (`--endpoint`, `--model`) take precedence over env/config.
+    /// Centralizes the `host:port` parse and the model default so every crate
+    /// that embeds agrees.
+    pub fn embeddings(
+        &self,
+        endpoint_flag: Option<&str>,
+        model_flag: Option<&str>,
+    ) -> Result<(String, u16, String), String> {
+        let ep = self
+            .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", endpoint_flag)
+            .ok_or("no embeddings endpoint: set embeddings_endpoint in config/smartagent.conf, $SEMDB_ENDPOINT, or --endpoint")?;
+        let (host, port) = ep.rsplit_once(':').ok_or("endpoint must be host:port")?;
+        let port: u16 = port.parse().map_err(|_| "bad port in embeddings_endpoint")?;
+        let model = self
+            .resolve("embeddings_model", "SEMDB_MODEL", model_flag)
+            .unwrap_or_else(|| DEFAULT_EMBED_MODEL.to_string());
+        Ok((host.to_string(), port, model))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
