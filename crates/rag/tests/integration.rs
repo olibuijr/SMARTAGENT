@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::thread;
 
 fn scratch(name: &str) -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -16,10 +18,10 @@ fn embedding_server(requests: usize) -> u16 {
     thread::spawn(move || {
         for _ in 0..requests {
             let (mut sock, _) = listener.accept().unwrap();
-            let mut buf = [0u8; 8192];
-            let n = sock.read(&mut buf).unwrap();
-            let req = String::from_utf8_lossy(&buf[..n]);
-            let vec = if req.to_ascii_lowercase().contains("golf") || req.to_ascii_lowercase().contains("sports") {
+            let req = read_http_request(&mut sock);
+            let vec = if req.to_ascii_lowercase().contains("golf")
+                || req.to_ascii_lowercase().contains("sports")
+            {
                 "[1.0,0.0]"
             } else {
                 "[0.0,1.0]"
@@ -36,12 +38,44 @@ fn embedding_server(requests: usize) -> u16 {
     port
 }
 
+fn read_http_request(sock: &mut std::net::TcpStream) -> String {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1024];
+    loop {
+        let n = sock.read(&mut tmp).unwrap();
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(header_end) = find_header_end(&buf) {
+            let head = String::from_utf8_lossy(&buf[..header_end]);
+            let len = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length:"))
+                .and_then(|s| s.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if buf.len() >= header_end + 4 + len {
+                break;
+            }
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
 #[test]
 fn ingests_and_retrieves_cited_chunks() {
     let root = scratch("rag-e2e");
     let db = root.join("docs.semdb");
     let doc = root.join("guide.txt");
-    std::fs::write(&doc, "Golf swing tempo helps putting accuracy.\nPasta sauce uses basil tomatoes.").unwrap();
+    std::fs::write(
+        &doc,
+        "Golf swing tempo helps putting accuracy.\nPasta sauce uses basil tomatoes.",
+    )
+    .unwrap();
     let port = embedding_server(3);
     let endpoint = format!("127.0.0.1:{port}");
 

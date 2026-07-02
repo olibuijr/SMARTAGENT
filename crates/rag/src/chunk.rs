@@ -53,7 +53,13 @@ pub fn default_doc_id(path: &Path) -> String {
     format!("{prefix}-{:016x}", fnv1a(path.to_string_lossy().as_bytes()))
 }
 
-pub fn chunk_text(text: &str, doc_id: &str, source: &str, kind: &str, cfg: &ChunkConfig) -> Vec<Chunk> {
+pub fn chunk_text(
+    text: &str,
+    doc_id: &str,
+    source: &str,
+    kind: &str,
+    cfg: &ChunkConfig,
+) -> Vec<Chunk> {
     let spans = token_spans(text);
     if spans.is_empty() {
         return Vec::new();
@@ -103,7 +109,10 @@ fn token_spans(text: &str) -> Vec<Span> {
         }
     }
     if let Some(s) = start {
-        out.push(Span { start: s, end: text.len() });
+        out.push(Span {
+            start: s,
+            end: text.len(),
+        });
     }
     out
 }
@@ -141,18 +150,26 @@ mod tests {
 
     #[test]
     fn chunks_with_overlap_and_offsets() {
-        let cfg = ChunkConfig { max_tokens: 3, overlap_tokens: 1 };
+        let cfg = ChunkConfig {
+            max_tokens: 3,
+            overlap_tokens: 1,
+        };
         let chunks = chunk_text("one two three four five", "doc", "s.txt", "text", &cfg);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].text, "one two three");
         assert_eq!(chunks[1].text, "three four five");
-        assert_eq!(&"one two three four five"[chunks[1].start..chunks[1].end], chunks[1].text);
+        assert_eq!(
+            &"one two three four five"[chunks[1].start..chunks[1].end],
+            chunks[1].text
+        );
     }
 
     #[test]
     fn default_doc_id_is_stable_and_safe() {
         let id = default_doc_id(Path::new("Notes/My File.md"));
         assert!(id.starts_with("my-file-"));
-        assert!(id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+        assert!(id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
     }
 }

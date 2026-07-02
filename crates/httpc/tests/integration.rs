@@ -11,11 +11,33 @@ fn serve_once(response: &'static str) -> u16 {
     let port = listener.local_addr().unwrap().port();
     thread::spawn(move || {
         let (mut sock, _) = listener.accept().unwrap();
-        let mut buf = [0u8; 4096];
-        let _ = sock.read(&mut buf);
+        read_http_request(&mut sock);
         sock.write_all(response.as_bytes()).unwrap();
     });
     port
+}
+
+fn read_http_request(sock: &mut std::net::TcpStream) {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1024];
+    loop {
+        let n = sock.read(&mut tmp).unwrap();
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(header_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&buf[..header_end]);
+            let len = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length:"))
+                .and_then(|s| s.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if buf.len() >= header_end + 4 + len {
+                break;
+            }
+        }
+    }
 }
 
 #[test]

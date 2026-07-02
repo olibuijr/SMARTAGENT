@@ -17,13 +17,28 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let extracted = pdftext::read_document(&path, kind(args)?)?;
             let doc_id = flag(args, "--doc-id").unwrap_or_else(|| default_doc_id(&path));
             let cfg = chunk_config(args);
-            let chunks = chunk_text(&extracted.text, &doc_id, &path.display().to_string(), &extracted.kind, &cfg);
+            let chunks = chunk_text(
+                &extracted.text,
+                &doc_id,
+                &path.display().to_string(),
+                &extracted.kind,
+                &cfg,
+            );
             if chunks.is_empty() {
                 return Ok("no chunks".into());
             }
             Ok(chunks
                 .iter()
-                .map(|c| format!("{}\t{}:{}..{}\t{}", c.id, c.source, c.start, c.end, one_line(&c.text)))
+                .map(|c| {
+                    format!(
+                        "{}\t{}:{}..{}\t{}",
+                        c.id,
+                        c.source,
+                        c.start,
+                        c.end,
+                        one_line(&c.text)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
@@ -33,7 +48,13 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let extracted = pdftext::read_document(&path, kind(args)?)?;
             let doc_id = flag(args, "--doc-id").unwrap_or_else(|| default_doc_id(&path));
             let cfg = chunk_config(args);
-            let chunks = chunk_text(&extracted.text, &doc_id, &path.display().to_string(), &extracted.kind, &cfg);
+            let chunks = chunk_text(
+                &extracted.text,
+                &doc_id,
+                &path.display().to_string(),
+                &extracted.kind,
+                &cfg,
+            );
             if chunks.is_empty() {
                 return Ok("no chunks".into());
             }
@@ -49,7 +70,10 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 vectors
             };
             let n = store::put_chunks(&db, &chunks, &vectors)?;
-            Ok(format!("ingested {n} chunks from {} as {doc_id}", path.display()))
+            Ok(format!(
+                "ingested {n} chunks from {} as {doc_id}",
+                path.display()
+            ))
         }
         Some("retrieve") | Some("search") => {
             let db = path_arg(args, 1, "db")?;
@@ -79,7 +103,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
         Some("stats") => {
             let db = path_arg(args, 1, "db")?;
             let (chunks, docs, records) = store::stats(&db)?;
-            Ok(format!("chunks: {chunks}\ndocuments: {docs}\nrecords: {records}"))
+            Ok(format!(
+                "chunks: {chunks}\ndocuments: {docs}\nrecords: {records}"
+            ))
         }
         _ => Ok(HELP.trim().into()),
     }
@@ -91,7 +117,11 @@ fn embedder(args: &[String]) -> Result<Embedder, String> {
         .resolve("embeddings_endpoint", "SEMDB_ENDPOINT", flag(args, "--endpoint").as_deref())
         .ok_or("no embeddings endpoint: set embeddings_endpoint in config/smartagent.conf, $SEMDB_ENDPOINT, or --endpoint")?;
     let model = cfg
-        .resolve("embeddings_model", "SEMDB_MODEL", flag(args, "--model").as_deref())
+        .resolve(
+            "embeddings_model",
+            "SEMDB_MODEL",
+            flag(args, "--model").as_deref(),
+        )
         .unwrap_or_else(|| "embeddinggemma".into());
     Ok(Embedder::new(endpoint, model))
 }
@@ -107,17 +137,26 @@ fn kind(args: &[String]) -> Result<Kind, String> {
 
 fn chunk_config(args: &[String]) -> ChunkConfig {
     ChunkConfig {
-        max_tokens: flag(args, "--chunk-tokens").and_then(|s| s.parse().ok()).unwrap_or(512),
-        overlap_tokens: flag(args, "--overlap").and_then(|s| s.parse().ok()).unwrap_or(0),
+        max_tokens: flag(args, "--chunk-tokens")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(512),
+        overlap_tokens: flag(args, "--overlap")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0),
     }
 }
 
 fn path_arg(args: &[String], idx: usize, what: &str) -> Result<PathBuf, String> {
-    args.get(idx).map(Path::new).map(Path::to_path_buf).ok_or_else(|| format!("{what} required"))
+    args.get(idx)
+        .map(Path::new)
+        .map(Path::to_path_buf)
+        .ok_or_else(|| format!("{what} required"))
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn format_hits(hits: &[RetrievedChunk]) -> String {

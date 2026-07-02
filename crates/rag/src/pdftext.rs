@@ -25,15 +25,26 @@ pub fn read_document(path: &Path, kind: Kind) -> Result<Extracted, String> {
         Kind::Text => false,
         Kind::Auto => {
             bytes.starts_with(b"%PDF")
-                || path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false)
+                || path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.eq_ignore_ascii_case("pdf"))
+                    .unwrap_or(false)
         }
     };
     if is_pdf {
         let text = extract_pdf_text(&bytes)?;
-        Ok(Extracted { text, kind: "pdf".into() })
+        Ok(Extracted {
+            text,
+            kind: "pdf".into(),
+        })
     } else {
-        let text = String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8 text", path.display()))?;
-        Ok(Extracted { text, kind: "text".into() })
+        let text = String::from_utf8(bytes)
+            .map_err(|_| format!("{} is not UTF-8 text", path.display()))?;
+        Ok(Extracted {
+            text,
+            kind: "text".into(),
+        })
     }
 }
 
@@ -67,7 +78,10 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<String, String> {
     }
     let text = normalize_lines(&parts.join("\n"));
     if text.trim().is_empty() {
-        Err("no extractable PDF text found (compressed/OCR PDFs need upstream text extraction)".into())
+        Err(
+            "no extractable PDF text found (compressed/OCR PDFs need upstream text extraction)"
+                .into(),
+        )
     } else {
         Ok(text)
     }
@@ -162,7 +176,11 @@ fn useful(s: &str) -> bool {
 }
 
 fn normalize_lines(s: &str) -> String {
-    s.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n")
+    s.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

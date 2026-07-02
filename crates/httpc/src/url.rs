@@ -15,7 +15,9 @@ impl Url {
             .split_once("://")
             .ok_or_else(|| format!("no scheme in '{input}'"))?;
         if scheme != "http" && scheme != "https" {
-            return Err(format!("unsupported scheme '{scheme}' (plain http only; proxy https)"));
+            return Err(format!(
+                "unsupported scheme '{scheme}' (plain http only; proxy https)"
+            ));
         }
         let (authority, path) = match rest.find('/') {
             Some(i) => (&rest[..i], &rest[i..]),

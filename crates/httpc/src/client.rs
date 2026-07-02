@@ -110,7 +110,10 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
         .set_write_timeout(Some(Duration::from_secs(req.timeout_secs.min(30))))
         .map_err(|e| e.to_string())?;
 
-    let mut head = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", req.method, u.path, u.host);
+    let mut head = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+        req.method, u.path, u.host
+    );
     let mut has_len = false;
     for (k, v) in &req.headers {
         if k.to_ascii_lowercase() == "content-length" {
@@ -123,13 +126,19 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
     }
     head.push_str("\r\n");
 
-    stream.write_all(head.as_bytes()).map_err(|e| format!("send: {e}"))?;
+    stream
+        .write_all(head.as_bytes())
+        .map_err(|e| format!("send: {e}"))?;
     if !req.body.is_empty() {
-        stream.write_all(&req.body).map_err(|e| format!("send body: {e}"))?;
+        stream
+            .write_all(&req.body)
+            .map_err(|e| format!("send body: {e}"))?;
     }
 
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).map_err(|e| format!("recv: {e}"))?;
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("recv: {e}"))?;
     parse_response(&raw)
 }
 
@@ -173,7 +182,11 @@ fn parse_response(raw: &[u8]) -> Result<Response, String> {
     } else {
         raw_body.to_vec()
     };
-    Ok(Response { status, headers, body })
+    Ok(Response {
+        status,
+        headers,
+        body,
+    })
 }
 
 pub fn dechunk(data: &[u8]) -> Result<Vec<u8>, String> {
@@ -215,7 +228,11 @@ pub fn post_json(url: &str, body: &str) -> Result<Value, String> {
         return Err(format!(
             "HTTP {}: {}",
             resp.status,
-            resp.text().unwrap_or_default().chars().take(200).collect::<String>()
+            resp.text()
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect::<String>()
         ));
     }
     resp.json()
@@ -232,7 +249,10 @@ mod tests {
 
     #[test]
     fn dechunks() {
-        assert_eq!(dechunk(b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n").unwrap(), b"Wikipedia");
+        assert_eq!(
+            dechunk(b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n").unwrap(),
+            b"Wikipedia"
+        );
     }
 
     #[test]
@@ -246,7 +266,9 @@ mod tests {
 
     #[test]
     fn rejects_https_direct() {
-        let e = Request::new("GET", "https://example.com").send().unwrap_err();
+        let e = Request::new("GET", "https://example.com")
+            .send()
+            .unwrap_err();
         assert!(e.contains("proxy"), "{e}");
     }
 }

@@ -13,7 +13,11 @@ impl Embedder {
     }
 
     pub fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
-        let body = format!(r#"{{"model":"{}","input":"{}"}}"#, escape(&self.model), escape(text));
+        let body = format!(
+            r#"{{"model":"{}","input":"{}"}}"#,
+            escape(&self.model),
+            escape(text)
+        );
         let value = httpc::post_json(&self.url(), &body)?;
         parse_embedding(&value)
     }
@@ -29,7 +33,10 @@ impl Embedder {
 }
 
 pub fn parse_embedding(value: &Value) -> Result<Vec<f32>, String> {
-    let data = value.get("data").and_then(Value::as_arr).ok_or("embedding response missing data[]")?;
+    let data = value
+        .get("data")
+        .and_then(Value::as_arr)
+        .ok_or("embedding response missing data[]")?;
     let first = data.first().ok_or("embedding response has empty data[]")?;
     let emb = first
         .get("embedding")

@@ -35,7 +35,11 @@ pub fn open_or_create(path: &Path) -> Result<Db, String> {
 
 pub fn put_chunks(db_path: &Path, chunks: &[Chunk], vectors: &[Vec<f32>]) -> Result<usize, String> {
     if chunks.len() != vectors.len() {
-        return Err(format!("{} chunks but {} vectors", chunks.len(), vectors.len()));
+        return Err(format!(
+            "{} chunks but {} vectors",
+            chunks.len(),
+            vectors.len()
+        ));
     }
     let mut db = open_or_create(db_path)?;
     for (chunk, vector) in chunks.iter().zip(vectors.iter()) {
@@ -52,7 +56,11 @@ pub fn retrieve(
     doc_filter: Option<&str>,
 ) -> Result<Vec<RetrievedChunk>, String> {
     let db = Db::open(db_path)?;
-    let wanted = if doc_filter.is_some() { db.index.len() } else { k };
+    let wanted = if doc_filter.is_some() {
+        db.index.len()
+    } else {
+        k
+    };
     let mut out = Vec::new();
     for (id, score, meta) in cli::search(&db, query, wanted.max(k), exact) {
         let chunk = RetrievedChunk::from_meta(&id, score, &meta)?;
@@ -131,7 +139,9 @@ impl RetrievedChunk {
             order: num_field(&v, "chunk_order").unwrap_or(0),
             start: num_field(&v, "start").unwrap_or(0),
             end: num_field(&v, "end").unwrap_or(0),
-            text: str_field(&v, "text").or_else(|| str_field(&v, "content_with_weight")).unwrap_or_default(),
+            text: str_field(&v, "text")
+                .or_else(|| str_field(&v, "content_with_weight"))
+                .unwrap_or_default(),
             kind: str_field(&v, "doc_type_kwd").unwrap_or_else(|| "text".into()),
         })
     }
