@@ -17,9 +17,10 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
-import { BIN, ROOT, layout } from "./lib/statusline-common.ts";
+import { join } from "node:path";
+import { BIN, ROOT, layout, vwidth } from "./lib/statusline-common.ts";
 const REFRESH_MS = 5000;
-const PANE_WIDTH = 47; // +30% for readability
+const PANE_WIDTH = 58; // wide: pixel avatars + full card content
 
 const RESET = "\x1b[0m";
 const BG = "\x1b[48;5;235m"; // solid panel background — the visibility fix
@@ -166,7 +167,7 @@ function refresh(): void {
 	}
 }
 
-const vlen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
+const vlen = (s: string) => vwidth(s); // cell-accurate (kitty wcwidth)
 const clip = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w - 1)) + "…" : s);
 const humanBusy = (secs: number) => {
 	if (!secs) return "";
@@ -252,14 +253,17 @@ function render(width: number): string[] {
 			const body: string[] = [head + " ".repeat(gap1) + state];
 			const own = a.task && a.task !== "nothing" ? a.task : "";
 			if (own) {
-				// task sub-card: boxed row inside the agent card
-				body.push(fg("239", "┌" + "─".repeat(Math.max(4, textw - 6)) + "┐"));
-				body.push(fg("239", "│") + fg("222", " ▣ " + clip(own, textw - 10)) + " " + fg("239", "│"));
-				body.push(fg("239", "└" + "─".repeat(Math.max(4, textw - 6)) + "┘"));
+				// task sub-card: boxed row inside the agent card, padded to the
+				// box width so short titles don't pull the border inward
+				const boxw = Math.max(4, textw - 6);
+				const inner = " ▣ " + clip(own, boxw - 5);
+				body.push(fg("239", "┌" + "─".repeat(boxw) + "┐"));
+				body.push(fg("239", "│") + fg("222", inner + " ".repeat(Math.max(0, boxw - vlen(inner)))) + fg("239", "│"));
+				body.push(fg("239", "└" + "─".repeat(boxw) + "┘"));
 			}
 			if (a.tools) {
 				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
-				body.push(dim("⚙ ") + fg("253", clip(a.tools, textw - 12)) + " " + tick + " ".repeat(Math.max(0, cardw - vlen(dim("⚙ ")) - Math.min(vlen(a.tools), textw - 12) - 5 - tok.length - FACE_W - 1)) + dim(tok));
+				body.push(dim("⚙ ") + fg("253", clip(a.tools, textw - 8)) + " " + tick);
 			}
 			if (a.words) {
 				// Two readable lines, bright — this is "what is it doing" for the
