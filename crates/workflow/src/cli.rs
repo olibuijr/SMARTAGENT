@@ -78,10 +78,26 @@ pub fn run(args: &[String]) -> Result<String, String> {
         Some("start") => {
             let name = args.get(1).ok_or("usage: workflow start <name> [--task T-1]")?;
             let d = find_def(&root(args), name)?;
+            // Task lock: one running run per task. Multi-agent fleets race to
+            // pull the same top task; the first run claims it, later starts
+            // are refused loudly so the losing agent picks other work.
+            let task = flag(args, "--task").unwrap_or_default();
+            if !task.is_empty() {
+                if let Some(existing) = store
+                    .all()?
+                    .into_iter()
+                    .find(|r| r.status == "running" && r.task == task)
+                {
+                    return Err(format!(
+                        "task {task} already has running run {} (wf {}) — another agent owns it; pull a different task",
+                        existing.id, existing.wf
+                    ));
+                }
+            }
             let r = Run {
                 id: store.next_id()?,
                 wf: d.name.clone(),
-                task: flag(args, "--task").unwrap_or_default(),
+                task,
                 step: 0,
                 status: "running".into(),
                 started: now(),
