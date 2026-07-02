@@ -151,7 +151,7 @@ pub fn serve(args: &[String]) -> Result<(), String> {
                 let _ = child.lock().unwrap().command("steer", Some(&text));
             } else if autonomous {
                 let auto = format!(
-                    "{text}\nAUTONOMOUS MODE: if a task is in doing, continue it now. If doing is empty, pull the ONE highest-priority ready task to doing and work it end-to-end with real evidence, then close it. If ready is ALSO empty, triage per the Kanban skill: promote the highest-priority unclaimed backlog item to ready, then pull it — the backlog must never starve the loop. Never more than one task in doing."
+                    "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task is in doing → continue it; (b) doing empty, ready has items → pull the highest-priority one; (c) doing AND ready empty → triage the backlog per the Kanban skill (accept new unclaimed tasks: promote the highest-priority backlog item to ready, then pull it). The backlog must never starve the loop. If you truly cannot act, say why in one sentence — never answer with an empty turn. One task in doing, maximum."
                 );
                 let _ = child.lock().unwrap().command("prompt", Some(&auto));
             } else {
