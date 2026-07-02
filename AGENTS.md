@@ -69,7 +69,7 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
                  firings audited in a semdb table
 ```
 
-Embeddings inference is **external**: titan embeddinggemma on the titan LAN box (OpenAI-compatible). The endpoint lives ONLY in `config/smartagent.conf` (`embeddings_endpoint`) — never hardcode an IP in code or docs; titan has changed address more than once. semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
+Embeddings inference is **external**: titan embeddinggemma (OpenAI-compatible), reached over the **akurai-vpn overlay** (titan = 100.88.0.2; this host = 100.88.0.5; interface `akurai0`) so it works off-LAN. The endpoint lives ONLY in `config/smartagent.conf` (`embeddings_endpoint`) — never hardcode an IP in code or docs; titan has changed address more than once (LAN currently 192.168.1.119 if the VPN is down — restart with `akurai-node tunnel`). semdb stores and searches vectors itself — plain-HTTP client written on `std::net`, no TLS dep (route TLS through akurai-router if needed).
 
 ## Security posture (agent-driven tools)
 

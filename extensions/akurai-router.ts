@@ -23,6 +23,26 @@ const KEY_FILE = process.env.PI_CODING_AGENT_DIR
 type RouterModel = { id: string };
 type RouterModelList = { data: RouterModel[] };
 
+// Per-model context windows for opencode-go upstreams (from pi's opencode-go.models.ts).
+// The router dynamically discovers models but doesn't report context windows,
+// so we maintain this lookup keyed by the model name after the "opencode-go/" prefix.
+// Fallback: 256K for unknown opencode-go models.
+const OPENCODE_CONTEXT_WINDOWS: Record<string, number> = {
+  "deepseek-v4-flash": 1_000_000,
+  "deepseek-v4-pro": 1_000_000,
+  "glm-5.1": 202_752,
+  "glm-5.2": 1_000_000,
+  "kimi-k2.6": 262_144,
+  "kimi-k2.7-code": 262_144,
+  "mimo-v2.5": 1_000_000,
+  "mimo-v2.5-pro": 1_048_576,
+  "minimax-m2.7": 204_800,
+  "minimax-m3": 1_000_000,
+  "qwen3.6-plus": 1_000_000,
+  "qwen3.7-max": 1_000_000,
+  "qwen3.7-plus": 1_000_000,
+};
+
 export default async function (pi: ExtensionAPI) {
   // Respect offline mode — don't block startup on a network call.
   if (process.env.PI_OFFLINE) return;
@@ -68,7 +88,13 @@ export default async function (pi: ExtensionAPI) {
           | "image"
         )[],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: isCodex ? 400000 : isClaude ? 200000 : 256000,
+        contextWindow: isCodex
+          ? 400000
+          : isClaude
+            ? 200000
+            : isOpencode
+              ? (OPENCODE_CONTEXT_WINDOWS[id.slice("opencode-go/".length)] ?? 256000)
+              : 256000,
         maxTokens: 32000,
         // Chat-Completions upstreams here only accept the `system` role, not
         // OpenAI's `developer` role. codex (Responses API) handles it natively.

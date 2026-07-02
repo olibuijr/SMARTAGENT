@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "browser"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "codeindex"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
 ]
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "context"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
 ]
@@ -1046,7 +1046,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "evals"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -1450,7 +1450,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "hooks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "httpc"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "icu_collections"
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
 ]
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "memory"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -1924,7 +1924,7 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "notify"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2259,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "orchestrate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2506,7 +2506,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rag"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2645,7 +2645,7 @@ dependencies = [
 
 [[package]]
 name = "sandbox"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "schedule"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2686,7 +2686,7 @@ dependencies = [
 
 [[package]]
 name = "search"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2694,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "secrets"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2702,7 +2702,7 @@ dependencies = [
 
 [[package]]
 name = "semdb"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
 ]
@@ -2805,7 +2805,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "skills"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
 ]
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "supervise"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -2984,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "tasks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -3239,7 +3239,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "vault"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
 ]
@@ -3252,7 +3252,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voice"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",
@@ -3953,7 +3953,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "workflow"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "httpc",
  "semdb",

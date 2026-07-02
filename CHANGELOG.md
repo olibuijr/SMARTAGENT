@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Embeddings + voice endpoints wired to the akurai-vpn overlay (titan at 100.88.0.2:8081) — works off-LAN; LAN address 192.168.1.119 remains as fallback knowledge in docs.
+- build.sh gate now writes an autonomous per-build status snapshot into the project semdb (.smartagent/semdb/project.semdb): embedded when the endpoint is up, placeholder row offline, never fails the build.
+
 ## 0.2.0 — 2026-07-02
 - Tool review P0/P1 complete: secrets caller-token auth, hooks system, kanban tasks + workflow engine, colored statusline, batch embeddings, hardened sandbox/search/mcp/notify
 

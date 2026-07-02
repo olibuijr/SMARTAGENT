@@ -54,6 +54,31 @@ gate() {
     echo "tools the agent listed: $GOT / 20"
     if [ "$GOT" -lt 20 ]; then echo "FAIL: only $GOT/20 crate tools registered in pi"; exit 1; fi
     echo "ok ($GOT/20 crate tools live)"
+
+    echo "── status: project memory snapshot ────"
+    update_status
+}
+
+# Autonomous per-build status capture: one row per gate pass into the
+# project-scoped semdb (.smartagent/semdb/project.semdb — the repo memory
+# convention), plus a rolling `status-latest`. Embeds when the embeddings
+# endpoint is reachable so the row is semantically recallable; falls back to a
+# placeholder vector (still stored) when offline. Never fails the build.
+update_status() {
+    SDB=".smartagent/semdb/project.semdb"
+    mkdir -p .smartagent/semdb
+    [ -f "$SDB" ] || ./target/release/semdb create "$SDB" >/dev/null 2>&1 || true
+    VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+    CRATES=$(ls crates | wc -l | tr -d ' ')
+    TS=$(date -u +%Y-%m-%dT%H:%MZ)
+    TEXT="SMARTAGENT status $TS: v$VER, $CRATES crates, gate PASS (build+test+audits+$GOT/20 tools). Latest changelog: $(sed -n '4p' CHANGELOG.md | head -c 200)"
+    if ./target/release/semdb embed "$SDB" --id "status-latest" --text "$TEXT" >/dev/null 2>&1; then
+        ./target/release/semdb embed "$SDB" --id "status-$TS" --text "$TEXT" >/dev/null 2>&1 || true
+        echo "ok (embedded status row → $SDB)"
+    else
+        ./target/release/semdb put "$SDB" --id "status-latest" --vector 0 --meta "{\"text\":\"$TEXT\"}" >/dev/null 2>&1 || true
+        echo "ok (placeholder status row — embeddings endpoint unreachable)"
+    fi
 }
 
 case "${1:-}" in
