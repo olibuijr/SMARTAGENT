@@ -136,6 +136,16 @@ impl Db {
     }
 
     pub fn put(&mut self, id: &str, meta: &str, vector: Vec<f32>) -> Result<(), String> {
+        // Guard the on-disk length fields (id is u16, meta is u32). An oversized
+        // value would silently wrap and write a record that fails to decode on
+        // reopen, which open() treats as the corruption boundary and truncates
+        // everything after it — poisoning the whole log. Reject up front.
+        if id.len() > u16::MAX as usize {
+            return Err(format!("id too long: {} bytes (max {})", id.len(), u16::MAX));
+        }
+        if meta.len() > u32::MAX as usize {
+            return Err("meta too long (max u32)".into());
+        }
         let body = encode_put(id, meta, &vector);
         self.append(&body)?;
         self.index.insert(
@@ -149,6 +159,9 @@ impl Db {
     }
 
     pub fn delete(&mut self, id: &str) -> Result<bool, String> {
+        if id.len() > u16::MAX as usize {
+            return Err(format!("id too long: {} bytes (max {})", id.len(), u16::MAX));
+        }
         if !self.index.contains_key(id) {
             return Ok(false);
         }

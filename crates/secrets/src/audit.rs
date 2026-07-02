@@ -35,6 +35,16 @@ impl Audit {
         db.put(&id, &meta, PLACEHOLDER_VEC.to_vec())
     }
 
+    /// Record a non-read event (set / list / policy-allow) so mutations and
+    /// enumerations are auditable, not just reads.
+    pub fn event(&self, action: &str, target: &str) -> Result<(), String> {
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let meta = format!(r#"{{"ts":{ts},"action":"{}","target":"{}"}}"#, esc(action), esc(target));
+        let mut db = self.db()?;
+        let id = format!("{ts:039}-{}", db.index.len());
+        db.put(&id, &meta, PLACEHOLDER_VEC.to_vec())
+    }
+
     pub fn entries(&self) -> Result<Vec<String>, String> {
         let p = self.table();
         if !p.exists() {

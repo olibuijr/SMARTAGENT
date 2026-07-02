@@ -17,6 +17,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let name = flag(args, "--name").ok_or("--name required")?;
             let value = flag(args, "--value").ok_or("--value required")?;
             Store::open(&dir)?.set(&name, &value)?;
+            Audit::open(&dir)?.event("set", &name)?;
             Ok(format!("set {name}"))
         }
         Some("get") => {
@@ -33,6 +34,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
         }
         Some("list") => {
+            Audit::open(&dir)?.event("list", "*")?;
             let names = Store::open(&dir)?.list()?;
             Ok(if names.is_empty() { "no secrets".into() } else { names.join("\n") })
         }
@@ -41,9 +43,17 @@ pub fn run(args: &[String]) -> Result<String, String> {
             Ok(if entries.is_empty() { "no audit entries".into() } else { entries.join("\n") })
         }
         Some("policy-allow") => {
+            // Granting access is an ADMIN operation, deliberately kept off the
+            // agent's tool surface (secrets.ts exposes only get/list/audit).
+            // A self-granting agent is the whole threat, so require an
+            // out-of-band signal the agent's normal launch path does not carry.
+            if std::env::var("SMARTAGENT_SECRETS_ADMIN").as_deref() != Ok("1") {
+                return Err("policy-allow is admin-only: rerun with SMARTAGENT_SECRETS_ADMIN=1".into());
+            }
             let caller = flag(args, "--caller").ok_or("--caller required")?;
             let name = flag(args, "--name").ok_or("--name required")?;
             Policy::open(&dir)?.allow(&caller, &name)?;
+            Audit::open(&dir)?.event("policy-allow", &format!("{caller}->{name}"))?;
             Ok(format!("granted {caller} → {name}"))
         }
         _ => Ok(HELP.trim().into()),

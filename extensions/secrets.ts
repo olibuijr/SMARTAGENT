@@ -26,16 +26,15 @@ export default function (pi: ExtensionAPI) {
 		label: "Secrets",
 		description:
 			"Policy-gated, audited secret store (deny by default). Actions: 'set' stores a secret, " +
-			"'get' reads one as a caller (policy-checked + audited), 'list' shows names, " +
-			"'audit' shows the access log, 'policy-allow' grants a caller access to a name (* = all). " +
-			"The agent's caller identity is 'pi'.",
+			"'get' reads one as caller 'pi' (policy-checked + audited), 'list' shows names, " +
+			"'audit' shows the access log. Granting access (policy-allow) is admin-only and " +
+			"deliberately NOT available here — a human must run it out-of-band.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["set", "get", "list", "audit", "policy-allow"] },
-				name: { type: "string", description: "secret name (set/get/policy-allow)" },
+				action: { type: "string", enum: ["set", "get", "list", "audit"] },
+				name: { type: "string", description: "secret name (set/get)" },
 				value: { type: "string", description: "secret value (set)" },
-				caller: { type: "string", description: "caller identity (get default 'pi'; policy-allow required)" },
 			},
 			required: ["action"],
 		} as any,
@@ -46,10 +45,8 @@ export default function (pi: ExtensionAPI) {
 				p.action === "set"
 					? run([...base, "--name", p.name ?? "", "--value", p.value ?? ""])
 					: p.action === "get"
-						? run([...base, "--name", p.name ?? "", "--as", p.caller ?? "pi"])
-						: p.action === "policy-allow"
-							? run([...base, "--caller", p.caller ?? "", "--name", p.name ?? ""])
-							: run(base);
+						? run([...base, "--name", p.name ?? "", "--as", "pi"])
+						: run(base);
 			return { content: [{ type: "text", text: out }] };
 		},
 	});

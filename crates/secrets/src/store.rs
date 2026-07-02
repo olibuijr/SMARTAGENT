@@ -34,7 +34,11 @@ impl Store {
     pub fn set(&self, name: &str, value: &str) -> Result<(), String> {
         let obf = hex(&xor_stream(value.as_bytes(), &self.key, name));
         let mut db = self.db()?;
-        db.put(name, &obf, PLACEHOLDER_VEC.to_vec())
+        db.put(name, &obf, PLACEHOLDER_VEC.to_vec())?;
+        // The log is append-only, so an overwritten secret's previous
+        // obfuscated value would linger on disk. Compact after every write
+        // (the table is tiny) so rotated/removed values don't persist.
+        db.compact()
     }
 
     pub fn get(&self, name: &str) -> Result<Option<String>, String> {
@@ -72,16 +76,18 @@ fn load_or_make_key(dir: &Path) -> Result<Vec<u8>, String> {
             return Ok(k);
         }
     }
-    // Derive 32 pseudo-random bytes from process + time entropy (std-only).
-    let seed = seed_entropy();
-    let mut key = Vec::with_capacity(32);
-    let mut x = seed;
-    for _ in 0..32 {
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        key.push((x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u8);
-    }
+    // Read 32 bytes of real entropy from the OS CSPRNG. A time^pid xorshift
+    // seed (the old approach) lives in a tiny, searchable space; /dev/urandom
+    // does not. At-rest protection still rests on the 0600 key file, not the
+    // XOR cipher — but the key itself must not be guessable.
+    // read_exact (not fs::read) — /dev/urandom is an endless stream with no EOF.
+    let mut key = vec![0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| {
+            use std::io::Read;
+            f.read_exact(&mut key)
+        })
+        .map_err(|e| format!("read /dev/urandom: {e}"))?;
     std::fs::write(&path, &key).map_err(|e| e.to_string())?;
     // Best-effort 0600 perms.
     #[cfg(unix)]
@@ -90,11 +96,6 @@ fn load_or_make_key(dir: &Path) -> Result<Vec<u8>, String> {
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
     Ok(key)
-}
-
-fn seed_entropy() -> u64 {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
-    t ^ (std::process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03
 }
 
 /// Keystream = repeated hash-chain of key ++ salt; XOR into the data.
