@@ -158,7 +158,7 @@ function activate(ctx: any, url?: string): string {
 				overlayOptions: () => ({
 					width: "50%",
 					anchor: "top-right",
-					maxHeight: "95%",
+					maxHeight: "100%",
 					nonCapturing: true,
 				}),
 				onHandle: (h: any) => {

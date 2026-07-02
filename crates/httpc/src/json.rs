@@ -212,9 +212,37 @@ impl<'a> Parser<'a> {
                     self.i += 1;
                 }
                 Some(_) => {
-                    // Consume one UTF-8 char.
-                    let s = std::str::from_utf8(&self.b[self.i..]).map_err(|_| "bad utf8")?;
-                    let c = s.chars().next().ok_or("empty")?;
+                    // Bulk-copy the plain-ASCII run (validating from_utf8 on the
+                    // WHOLE remaining buffer per char was O(n²) — a multi-MB
+                    // base64 payload like a CDP screenshot took ~47s to parse).
+                    let start = self.i;
+                    while self.i < self.b.len() {
+                        let c = self.b[self.i];
+                        if c == b'"' || c == b'\\' || c >= 0x80 {
+                            break;
+                        }
+                        self.i += 1;
+                    }
+                    if self.i > start {
+                        // ASCII bytes are valid UTF-8 by construction.
+                        out.push_str(std::str::from_utf8(&self.b[start..self.i]).map_err(|_| "bad utf8")?);
+                        continue;
+                    }
+                    // Non-ASCII: validate only this char's bounded slice.
+                    let end = (self.i + 4).min(self.b.len());
+                    let c = match std::str::from_utf8(&self.b[self.i..end]) {
+                        Ok(s) => s.chars().next().ok_or("empty")?,
+                        // A trailing char can straddle `end`; from_utf8 tells us
+                        // the valid prefix — take its first char if any.
+                        Err(e) if e.valid_up_to() > 0 => {
+                            std::str::from_utf8(&self.b[self.i..self.i + e.valid_up_to()])
+                                .map_err(|_| "bad utf8")?
+                                .chars()
+                                .next()
+                                .ok_or("empty")?
+                        }
+                        Err(_) => return Err("bad utf8".into()),
+                    };
                     out.push(c);
                     self.i += c.len_utf8();
                 }
@@ -282,5 +310,21 @@ mod tests {
     fn unicode_escapes() {
         let v = parse(r#""é 😀""#).unwrap();
         assert_eq!(v.as_str().unwrap(), "é 😀");
+    }
+
+    #[test]
+    fn ascii_runs_mixed_with_escapes_and_multibyte() {
+        let v = parse(r#""abc\ndéf😀ghi\t""#).unwrap();
+        assert_eq!(v.as_str().unwrap(), "abc\ndéf😀ghi\t");
+    }
+
+    #[test]
+    fn large_string_parses_fast() {
+        // Regression for the O(n²) per-char from_utf8: a 4MB base64-ish string
+        // (CDP screenshot shape). Quadratic behavior turns this test from
+        // milliseconds into ~20s — the suite timeout is the guard.
+        let big = "A1b2C3d4".repeat(512 * 1024);
+        let v = parse(&format!(r#"{{"data":"{big}"}}"#)).unwrap();
+        assert_eq!(v.get("data").unwrap().as_str().unwrap().len(), big.len());
     }
 }
