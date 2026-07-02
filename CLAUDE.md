@@ -4,6 +4,8 @@
 
 **Fusion workflow (always):** you implement → codex CLI tests (`codex exec --sandbox workspace-write -m gpt-5.4-mini -c model_reasoning_effort=low`) → codex reports PASS/FAIL → you verify the report with a direct spot-check before marking done.
 
+**Memory policy (always):** store durable project facts in the SMARTAGENT-scoped semantic DB for the project root or workspace root (not raw `cwd`) under `workspaces/`. A repo/workspace-local `.smartagent/semdb` at the project root is the default convention. **Do not use Claude/Codex CLI integrated memory or any other global memory** for project facts.
+
 Hard rules (repeated here because they bite):
 
 - **Pure Rust, `std` only, zero crates.io deps** in every `crates/*` tool. pi extensions are thin TS glue only — no logic.
