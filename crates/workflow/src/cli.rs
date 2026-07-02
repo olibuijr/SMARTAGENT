@@ -157,11 +157,33 @@ pub fn run(args: &[String]) -> Result<String, String> {
         Some("runs") => {
             let rs = store.all()?;
             if rs.is_empty() { return Ok("no runs".into()); }
-            Ok(rs
+            // --live: only runs that are actually being worked — status running
+            // AND (no linked task, or the task is in doing/review on the board).
+            // Sessions that die mid-run leave "running" rows forever; without
+            // this cross-check UIs show phantom activity while the board says
+            // nothing is in doing.
+            let live_only = args.iter().any(|a| a == "--live");
+            let board: Option<Vec<tasks::store::Task>> = if live_only {
+                let tdb = flag(args, "--tasks-db").unwrap_or_else(|| "data/tasks.semdb".into());
+                tasks::store::Store::open(std::path::Path::new(&tdb)).and_then(|s| s.all()).ok()
+            } else {
+                None
+            };
+            let rows: Vec<String> = rs
                 .iter()
+                .filter(|r| {
+                    if !live_only { return true; }
+                    if r.status != "running" { return false; }
+                    if r.task.is_empty() { return true; }
+                    board
+                        .as_ref()
+                        .map(|b| b.iter().any(|t| t.id == r.task && matches!(t.col.as_str(), "doing" | "review")))
+                        .unwrap_or(true)
+                })
                 .map(|r| format!("{}\t{}\t{}\tstep {}{}", r.id, r.wf, r.status, r.step + 1, if r.task.is_empty() { String::new() } else { format!("\t{}", r.task) }))
-                .collect::<Vec<_>>()
-                .join("\n"))
+                .collect();
+            if rows.is_empty() { return Ok(if live_only { "no live runs".into() } else { "no runs".into() }); }
+            Ok(rows.join("\n"))
         }
         Some("statusline") => {
             // `level|text`: current run + step; warn when a run has stalled >1d.

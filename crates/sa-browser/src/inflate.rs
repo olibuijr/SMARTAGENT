@@ -97,9 +97,9 @@ impl Huffman {
         counts[0] = 0;
         // Over-subscription check.
         let mut left = 1i32;
-        for len in 1..16 {
+        for &count in &counts[1..16] {
             left <<= 1;
-            left -= counts[len] as i32;
+            left -= count as i32;
             if left < 0 {
                 return Err("huffman over-subscribed".into());
             }

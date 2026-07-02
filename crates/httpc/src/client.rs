@@ -137,7 +137,7 @@ fn send_once(req: &Request, url: &str) -> Result<Response, String> {
     // connect_timeout: a blackholed address (e.g. VPN peer down) must fail fast,
     // not block the tool indefinitely — the 10s budget is shared across ALL
     // resolved addresses (wall-clock bound), not granted per address.
-    let connect_budget = Duration::from_secs(req.timeout_secs.min(10).max(1));
+    let connect_budget = Duration::from_secs(req.timeout_secs.clamp(1, 10));
     let sock_addrs: Vec<std::net::SocketAddr> = (u.host.as_str(), u.port)
         .to_socket_addrs()
         .map_err(|e| format!("resolve {addr}: {e}"))?

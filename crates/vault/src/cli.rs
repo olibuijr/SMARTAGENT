@@ -253,7 +253,7 @@ fn notes_with_tag(vault: &Path, tag: &str) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for p in note::list(vault)? {
         let body = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
-        if note_tags(&body).iter().any(|t| *t == want) {
+        if note_tags(&body).contains(&want) {
             out.push(note::note_name(&p));
         }
     }
@@ -281,7 +281,7 @@ fn note_tags(content: &str) -> Vec<String> {
         if lt.starts_with("```") || lt.starts_with("~~~") { in_fence = !in_fence; continue; }
         if in_fence || lt.starts_with('#') && lt.chars().take_while(|c| *c == '#').count() >= 1 && lt.contains(' ') && lt.starts_with('#') && lt.split_whitespace().next().map(|w| w.chars().all(|c| c == '#')).unwrap_or(false) { continue; }
         let mut chars = line.char_indices().peekable();
-        while let Some((i, c)) = chars.next() {
+        for (i, c) in chars {
             if c == '#' && (i == 0 || !line[..i].ends_with(|p: char| p.is_alphanumeric())) {
                 let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
                 if tag.len() > 1 && tag.chars().any(|c| c.is_alphabetic()) {

@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = (name: string) => join(ROOT, "target", "release", name);
 const REFRESH_MS = 5000;
-const PANE_WIDTH = 36;
+const PANE_WIDTH = 47; // +30% for readability
 
 const RESET = "\x1b[0m";
 const BG = "\x1b[48;5;235m"; // solid panel background — the visibility fix
@@ -36,6 +36,16 @@ const fg = (c: string, s: string) => `\x1b[38;5;${c}m${s}${BODY}`;
 const dim = (s: string) => fg("244", s);
 const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 const ACCENTS = ["212", "80", "150", "215", "141", "117"];
+
+// Circular avatar per agent: circled initial (Ⓑ Ⓜ Ⓞ Ⓠ …) in the agent's accent.
+const avatar = (name: string): string => {
+	const c = (name[0] ?? "?").toUpperCase().charCodeAt(0);
+	return c >= 65 && c <= 90 ? String.fromCodePoint(0x24b6 + c - 65) : "◉";
+};
+
+// Captured extension context — lets the panel read live session state
+// (context-window usage) without owning any logic.
+let ctxRef: any;
 
 type Agent = { name: string; state: string; task: string; role: string; tokens: string; tools: string; words: string };
 type Run = { id: string; def: string; step: string; task: string };
@@ -80,7 +90,7 @@ function refresh(): void {
 		gatewayUp = false;
 	}
 	try {
-		const out = execFileSync(BIN("workflow"), ["runs", "--db", join(ROOT, "data", "workflow.semdb")], { timeout: 3000, encoding: "utf8" });
+		const out = execFileSync(BIN("workflow"), ["runs", "--live", "--db", join(ROOT, "data", "workflow.semdb"), "--tasks-db", join(ROOT, "data", "tasks.semdb")], { timeout: 3000, encoding: "utf8" });
 		runs = out
 			.split("\n")
 			.filter((l) => l.includes("\t") && !/\t(done|aborted)\t/.test(l))
@@ -120,6 +130,22 @@ function render(width: number): string[] {
 	const gap = " ".repeat(Math.max(1, inner - vlen("AGENT TEAM") - count.length));
 	lines.push(row(bold(fg("255", "AGENT TEAM")) + gap + (working.length ? fg("46", count) : fg("208", count)), w));
 	lines.push(rule(w));
+	// Context-window usage bar: fills as this session's context is consumed.
+	{
+		const u = ctxRef?.getContextUsage?.();
+		if (u && u.percent != null) {
+			const pct = Math.min(100, Math.round(u.percent));
+			const label = ` ${pct}%`;
+			const kk = `${Math.round((u.tokens ?? 0) / 1000)}k/${Math.round(u.contextWindow / 1000)}k`;
+			const barw = Math.max(8, inner - label.length - kk.length - 6);
+			const fill = Math.round((pct / 100) * barw);
+			const col = pct >= 80 ? "203" : pct >= 50 ? "215" : "78";
+			const bar = fg(col, "▕" + "█".repeat(fill)) + fg("238", "░".repeat(Math.max(0, barw - fill))) + fg(col, "▏");
+			lines.push(row(dim("ctx ") + bar + fg(col, label) + " " + dim(kk), w));
+		} else {
+			lines.push(row(dim("ctx ▕░░░░░░░░▏ —"), w));
+		}
+	}
 
 	if (!gatewayUp) {
 		lines.push(row(fg("203", "✖ gateway offline"), w));
@@ -140,7 +166,7 @@ function render(width: number): string[] {
 		working.forEach((a, i) => {
 			const accent = accentOf(a.name);
 			const spin = fg(accent, SPIN[(frame + i) % SPIN.length]);
-			const head = `${fg("46", "●")} ${spin} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
+			const head = `${fg(accent, avatar(a.name))} ${fg("46", "●")}${spin} ${bold(fg(accent, a.name))} ${dim("· " + a.role)}`;
 			const tok = humanTokens(a.tokens);
 			const gapw = Math.max(1, inner - vlen(head) - tok.length);
 			lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
@@ -160,7 +186,7 @@ function render(width: number): string[] {
 			.forEach((a, i) => {
 				const tok = humanTokens(a.tokens);
 				const pulse = (frame + i * 2) % 6 < 3 ? fg("208", "●") : fg("130", "●");
-				const head = `${pulse} ${fg(accentOf(a.name), a.name)} ${dim("· " + a.role)}`;
+				const head = `${fg(accentOf(a.name), avatar(a.name))} ${pulse} ${fg("250", a.name)} ${dim("· " + a.role)}`;
 				const gapw = Math.max(1, inner - vlen(head) - tok.length);
 				lines.push(row(head + " ".repeat(gapw) + dim(tok), w));
 			});
@@ -265,9 +291,11 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_e, ctx: any) => {
+		ctxRef = ctx;
 		if (ctx.mode === "tui" && !active) open(ctx);
 	});
-	pi.on("tool_execution_end", async () => {
+	pi.on("tool_execution_end", async (_e, ctx: any) => {
+		ctxRef = ctx;
 		tuiRef?.requestRender();
 	});
 	pi.on("session_shutdown", async () => {
