@@ -159,19 +159,26 @@ function render(width: number): string[] {
 			});
 	}
 
-	// RUNNING: in-flight workflows — answers "is anything running?" at a glance.
-	lines.push(row("", w));
-	lines.push(rule(w));
+	// RUNNING: in-flight workflows — answers "is anything running?" at a
+	// glance. Pinned to the BOTTOM of the full-height pane; the gap between
+	// the team block and it is filled with background rows so the sidebar
+	// reads as one solid column for the whole terminal height.
+	const bottom: string[] = [rule(w)];
 	if (runs.length === 0) {
-		lines.push(row(dim("no workflows running"), w));
+		bottom.push(row(dim("no workflows running"), w));
 	} else {
-		lines.push(row(bold(fg("117", "RUNNING")), w));
+		bottom.push(row(bold(fg("117", "RUNNING")), w));
 		for (const r of runs) {
-			lines.push(row(`${fg("117", r.id)} ${clip(r.def, 10)} ${dim("step")} ${fg("252", r.step)}${r.task ? dim(" → " + r.task) : ""}`, w));
+			bottom.push(row(`${fg("117", r.id)} ${clip(r.def, 10)} ${dim("step")} ${fg("252", r.step)}${r.task ? dim(" → " + r.task) : ""}`, w));
 		}
 	}
-	lines.push(rule(w));
-	lines.push(row(dim("/team hide"), w));
+	bottom.push(rule(w));
+	bottom.push(row(dim("/team hide"), w));
+
+	const termRows = process.stdout.rows ?? 40;
+	const filler = Math.max(0, termRows - lines.length - bottom.length);
+	for (let i = 0; i < filler; i++) lines.push(row("", w));
+	lines.push(...bottom);
 	return lines;
 }
 
@@ -203,7 +210,7 @@ export default function (pi: ExtensionAPI) {
 					// nonCapturing is LOAD-BEARING: custom() otherwise gives the
 					// overlay keyboard focus, and since this panel auto-opens at
 					// session_start it would swallow ALL typing — dead editor.
-					overlayOptions: () => ({ width: PANE_WIDTH, anchor: "top-right", nonCapturing: true }),
+					overlayOptions: () => ({ width: PANE_WIDTH, anchor: "top-right", maxHeight: "100%", nonCapturing: true }),
 					onHandle: (h: any) => {
 						if (h.isFocused?.()) h.unfocus?.();
 					},
