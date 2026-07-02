@@ -35,7 +35,8 @@ pi (earendil-works/pi, npm @mariozechner/pi)   ← agent spine, 4 core tools
    memory/       persistent 3-tier agent memory (agentmem pattern, Mem0 role)
    vault/        markdown second-brain read/write/link/search (Obsidian pattern)
    search/       web search client → self-hosted SearXNG instance
-   browser/      wrap AkurAI-AgentBrowser snapshots (Browser Use role)
+   browser/      Browser Use port: pure-Rust CDP client (hand-rolled WebSocket +
+                 JSON-RPC over std::net) → navigate a real Chrome, compact snapshot
    orchestrate/  subagent spawn/route/fan-out via akurai-router (LangGraph role);
                  subagent workspaces live in ./workspaces/ (project dir, gitignored),
                  launched from the project cwd
@@ -63,7 +64,7 @@ Popularity winners researched 2026-07-02; we clone the *pattern*, in Rust:
 | Code graph | [codegraph-ai/CodeGraph](https://github.com/codegraph-ai/CodeGraph) | `crates/codegraph` |
 | Memory | [mem0ai/mem0](https://github.com/mem0ai/mem0) | `crates/memory` |
 | Second brain | Obsidian (md vault pattern) | `crates/vault` |
-| Agent browser | [browser-use/browser-use](https://github.com/browser-use/browser-use) | `crates/browser` (wraps AkurAI-AgentBrowser) |
+| Agent browser | [browser-use/browser-use](https://github.com/browser-use/browser-use) | `crates/browser` (pure-Rust CDP client — WebSocket+JSON-RPC to real Chrome) |
 | Web search | [searxng/searxng](https://github.com/searxng/searxng) | `crates/search` (client; host SearXNG, don't rewrite) |
 | Orchestration | [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph) | `crates/orchestrate` |
 | Skills | [anthropics/skills](https://github.com/anthropics/skills) (SKILL.md standard) | `crates/skills` |

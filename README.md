@@ -13,8 +13,8 @@ Each capability is ported from the most popular tool in its category (researched
 | `vault` | markdown second brain (Obsidian pattern) | scaffold |
 | `skills` | SKILL.md loader (Agent Skills standard) | scaffold |
 | `schedule` | durable cron (Temporal concepts) | scaffold |
-| `rag` | RAGFlow-pattern ingestion/retrieval | working |
-| wave 2 | memory, codegraph, search, notify, secrets, rag, browser | planned |
+| `rag` | RAGFlow-pattern ingestion/retrieval | ✅ working, 7 tests, pi verified |
+| wave 2 | memory, codegraph, search, notify, secrets, browser | planned |
 | wave 3 | orchestrate, mcp, context, sandbox, voice, evals | planned |
 
 See [AGENTS.md](./AGENTS.md) for the full architecture and reference-repo map, [ISA.md](./ISA.md) for the verifiable criteria driving the build.
@@ -45,6 +45,20 @@ $B compact notes.semdb
 Default endpoint is `100.88.0.2:8081` / model `embeddinggemma`; override with `--endpoint host:port --model name`.
 
 Crash safety: every record is length+CRC32 framed — a torn write from a crash (`kill -9`) is detected and truncated on the next open. Verified by a real killed-writer test in `crates/semdb/tests/`.
+
+### rag — cited document retrieval
+
+Text and simple PDF-text ingestion pipeline: parse → token chunks with byte offsets → external embeddings → semdb rows with citation metadata → cited retrieval.
+
+```sh
+B=target/release/rag
+
+$B ingest docs.semdb README.md --doc-id readme
+$B retrieve docs.semdb --text "install demo" --k 3
+$B chunk manual.pdf --kind pdf
+```
+
+`rag` stores chunks in SMARTAGENT `semdb` only. Use `--endpoint host:port --model name` to override embedding config, or `--vector '1,0'` for offline probes/tests.
 
 ## Design rules
 

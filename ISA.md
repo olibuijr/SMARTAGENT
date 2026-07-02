@@ -3,10 +3,10 @@ project: SMARTAGENT
 task: Rebuild best-of-breed agent stack as pi extensions + pure-Rust 0-dep tools
 effort: E5
 phase: build
-progress: 0/36
+progress: 1/36
 mode: build
 started: 2026-07-02T01:10:00Z
-updated: 2026-07-02T01:20:00Z
+updated: 2026-07-02T02:44:54Z
 ---
 
 # ISA — SMARTAGENT
@@ -128,3 +128,4 @@ Integration:
 - 2026-07-02: SearXNG hosted not rewritten — engine-scraper maintenance is the value, client is the port surface.
 - 2026-07-02: TLS out of scope in-tool; https egress routed via akurai-router/localhost proxies.
 - 2026-07-02: E5 ISC floor (≥256) deferred — project ISA starts at 36 spine ISCs; per-crate ISCs grow during waves (refined: will expand as crates land).
+- 2026-07-02: ISC-26 landed and certified — `crates/rag` ports the RAGFlow ingestion/retrieval slice into std-only Rust, stores chunks as semdb rows, returns `[ID:...]` cited chunks, has `extensions/rag.ts`, passes codex fusion tester, and was driven through `./pi -p`.
