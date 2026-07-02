@@ -27,10 +27,14 @@ const PANE_WIDTH = 36;
 
 const RESET = "\x1b[0m";
 const BG = "\x1b[48;5;235m"; // solid panel background — the visibility fix
-const EDGE = "\x1b[38;5;60m▌";
-const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+const BODY = "\x1b[38;5;250m"; // explicit body fg — every fragment restores it
+const EDGE = `\x1b[38;5;60m▌${BODY}`;
+// Self-contained color fragments: each sets its fg and restores BODY after —
+// nothing inherits the edge color, and no SGR dim (dim over a dark bg is
+// muddy and theme-dependent; explicit grays are predictable).
+const fg = (c: string, s: string) => `\x1b[38;5;${c}m${s}${BODY}`;
+const dim = (s: string) => fg("244", s);
 const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
-const fg = (c: string, s: string) => `\x1b[38;5;${c}m${s}\x1b[39m`;
 const ACCENTS = ["212", "80", "150", "215", "141", "117"];
 
 type Agent = { name: string; state: string; task: string; role: string; tokens: string; tools: string; words: string };
@@ -113,7 +117,7 @@ function render(width: number): string[] {
 	// Header: name + live working count (green when active).
 	const count = `${working.length}/${agents.length} working`;
 	const gap = " ".repeat(Math.max(1, inner - vlen("AGENT TEAM") - count.length));
-	lines.push(row(bold("AGENT TEAM") + gap + (working.length ? fg("46", count) : dim(count)), w));
+	lines.push(row(bold(fg("255", "AGENT TEAM")) + gap + (working.length ? fg("46", count) : dim(count)), w));
 	lines.push(rule(w));
 
 	if (!gatewayUp) {
