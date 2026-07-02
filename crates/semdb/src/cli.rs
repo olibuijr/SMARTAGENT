@@ -63,6 +63,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
             } else {
                 return Err("--vector or --text required".into());
             };
+            if let Some(d) = db.dim() {
+                if query.len() > 1 && query.len() != d {
+                    return Err(format!("query dim {} does not match db dim {d}", query.len()));
+                }
+            }
             // --filter key=value keeps only rows whose meta JSON has that field.
             // Over-fetch candidates first so the top-k survives filtering.
             let filter = flag(args, "--filter").and_then(|f| f.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())));

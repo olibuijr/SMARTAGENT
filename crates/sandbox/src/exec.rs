@@ -104,11 +104,30 @@ pub fn run(spec: &SandboxSpec) -> Result<SandboxResult, String> {
     };
 
     let stdout = read_capped(&out_path, spec.max_output, spec.tail);
-    let stderr = read_capped(&err_path, spec.max_output, spec.tail);
+    let mut stderr = read_capped(&err_path, spec.max_output, spec.tail);
+    // Requested isolation silently downgrading to filesystem-only must be
+    // loud — the caller may be relying on the namespace jail.
+    if spec.isolate && !use_ns {
+        stderr.insert_str(0, "[sandbox] WARNING: namespace isolation requested but `unshare` unavailable — running filesystem-only\n");
+    }
     Ok(SandboxResult { exit, timed_out, workspace, stdout, stderr, isolated: use_ns })
 }
 
+/// Resource caps applied via `ulimit` in a wrapper shell (std can't call
+/// setrlimit directly): virtual memory 2GB, process ceiling 4096 (RLIMIT_NPROC
+/// is per-USER, not per-tree — it must sit above the session's baseline while
+/// still stopping a fork bomb), 512MB max file size (disk-fill ceiling), CPU
+/// seconds tied to the wall-clock timeout. `2>/dev/null || true` keeps a
+/// restrictive parent limit from failing the run.
+fn ulimit_prefix(spec: &SandboxSpec) -> String {
+    let cpu = spec.timeout.as_secs().max(1);
+    format!(
+        "{{ ulimit -v 2097152 -u 4096 -f 1048576 -t {cpu}; }} 2>/dev/null || true; "
+    )
+}
+
 fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
+    let limits = ulimit_prefix(spec);
     let c = if use_ns {
         // Add a mount namespace and tmpfs-mask the sensitive paths (data/secrets,
         // .pi) so a sandboxed command literally cannot read secrets/keys even
@@ -120,9 +139,10 @@ fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
         if !spec.net {
             c.arg("--net");
         }
-        // Wrapper: mask each SB_MASKS entry, then exec the real command ($@).
+        // Wrapper: apply rlimits, mask each SB_MASKS entry, then exec the real
+        // command ($@).
         c.arg("--").arg("sh").arg("-c")
-            .arg("for m in $SB_MASKS; do mount -t tmpfs none \"$m\" 2>/dev/null || true; done; exec \"$@\"")
+            .arg(format!("{limits}for m in $SB_MASKS; do mount -t tmpfs none \"$m\" 2>/dev/null || true; done; exec \"$@\""))
             .arg("sandbox")
             .args(&spec.cmd);
         scrub_env(&mut c);
@@ -132,8 +152,13 @@ fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
         }
         c
     } else {
-        let mut c = Command::new(&spec.cmd[0]);
-        c.args(&spec.cmd[1..]);
+        // No namespaces, but rlimits still apply: run through the same
+        // wrapper so `ulimit` binds before exec-ing the real argv.
+        let mut c = Command::new("sh");
+        c.arg("-c")
+            .arg(format!("{limits}exec \"$@\""))
+            .arg("sandbox")
+            .args(&spec.cmd);
         scrub_env(&mut c);
         c
     };
@@ -265,6 +290,26 @@ mod tests {
             assert!(!res.stdout.contains("TOPSECRET"), "secret leaked through mask: {}", res.stdout);
         } else {
             eprintln!("skip: isolation not active on this host");
+        }
+    }
+
+    #[test]
+    fn rlimits_cap_file_size() {
+        // ulimit -f 1048576 (512-byte blocks) = 512MB; writing past it fails.
+        let r = root("sb-rlimit");
+        let res = run(&spec(r, &["sh", "-c", "head -c 600000000 /dev/zero > big.bin; echo exit=$?"], 30)).unwrap();
+        let size = std::fs::metadata(res.workspace.join("big.bin")).map(|m| m.len()).unwrap_or(0);
+        assert!(size <= 512 * 1024 * 1024, "file-size rlimit not applied: {size}");
+    }
+
+    #[test]
+    fn degraded_isolation_is_loud() {
+        let r = root("sb-degrade");
+        let mut s = spec(r, &["true"], 5);
+        s.isolate = true;
+        let res = run(&s).unwrap();
+        if !res.isolated {
+            assert!(res.stderr.contains("WARNING"), "silent isolation downgrade");
         }
     }
 

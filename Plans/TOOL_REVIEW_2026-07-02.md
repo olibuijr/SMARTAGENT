@@ -2,7 +2,7 @@
 
 One read-only reviewer per tool (or pair). Full reports in session transcript; this file is the actionable distillation. Ranked by value-per-line under the repo constraints (pure Rust std-only, ≤1000-line files, data in semdb tables, no TS logic).
 
-## P0 — real bugs (correctness/security, all tiny fixes)
+## P0 — real bugs (correctness/security) — **ALL 10 FIXED 2026-07-02** (see CHANGELOG Unreleased)
 
 | Tool | Bug | Fix size |
 |---|---|---|

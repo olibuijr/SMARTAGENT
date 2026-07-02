@@ -25,7 +25,10 @@ enum Pat { Literal(String), Re(Regex) }
 impl Pat {
     fn build(pattern: &str, o: &Opts) -> Result<Pat, String> {
         if o.regex {
-            Ok(Pat::Re(Regex::new(pattern)?))
+            // -i lowercases the line at match time, so the pattern must be
+            // lowercased too or any uppercase char in it can never match.
+            let p = if o.ignore_case { pattern.to_lowercase() } else { pattern.to_string() };
+            Ok(Pat::Re(Regex::new(&p)?))
         } else {
             Ok(Pat::Literal(if o.ignore_case { pattern.to_lowercase() } else { pattern.to_string() }))
         }

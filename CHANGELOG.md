@@ -17,6 +17,18 @@ runs `supervise watch`.
 - JSONL journals (schedule, evals) migrated to semdb tables — no bespoke JSONL remains.
 - Dedup: one `json::Value` (semdb re-exports httpc::json), `semdb::http` is a thin httpc wrapper, `flag()`/`has()` unified into `httpc::args`, embeddings resolution centralized in `Config::embeddings()`.
 
+**P0 fixes (12-subagent tool review, all 10 fixed):**
+- secrets: caller identity is now token-authenticated — `issue-token` (admin) mints per-caller 0600 tokens; `get` requires SMARTAGENT_CALLER_TOKEN/`--token` (constant-time verify, fail-closed, audited). `./pi` launcher injects pi's token; sandbox env-scrub + secrets-mask keep it from sandboxed commands.
+- mcp: JSON injection fixed (tool name escaped, --args validated as JSON).
+- notify: CR/LF header injection rejected in topic/title/tags.
+- codeindex: `-i` with regex now lowercases the pattern (uppercase patterns never matched).
+- schedule: `--at` honors `utc_offset_minutes` config (was silently UTC); impossible dates (Feb 30) rejected instead of leaking a never-firing one-shot; new `Civil::to_unix` + `days_in_month`.
+- rag: ingest deletes existing doc chunks first — re-ingest no longer leaves stale orphans.
+- semdb: vector dimension enforced per-db (placeholder `[0.0]` rows exempt); mixed dims used to silently mis-score.
+- search: 20s timeout (hung SearXNG no longer blocks to the 60s kill) + http(s)-only instance validation (SSRF guard).
+- sandbox: ulimit caps (2GB vmem, 4096 procs, 512MB file size, CPU=timeout) in both isolation paths; isolation downgrade now warns loudly instead of degrading silently.
+- browser: fixed sleeps replaced with `document.readyState` polling (`wait_ready`) in navigate/click/enter/history — faster on fast pages, no race on slow ones.
+
 **TUI statusline (new):**
 - `supervise statusline` verb: compact one-line `name:state` service status for UI consumption (+ unit test).
 - `extensions/statusline.ts`: per-tool footer statuses (running/✓/✗ + duration, auto-clear) via pi `tool_execution_*` events + `ctx.ui.setStatus`, and a belowEditor services widget via `ctx.ui.setWidget` fed by the Rust verb. Guarded by `ctx.hasUI` (no-op headless).

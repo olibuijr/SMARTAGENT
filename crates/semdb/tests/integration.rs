@@ -185,3 +185,15 @@ fn compact_survives_stale_tmp_and_preserves_live_after_delete() {
     assert!(db2.get("drop").is_none(), "deleted entry must not resurrect after compact");
     std::fs::remove_file(&path).unwrap();
 }
+
+#[test]
+fn rejects_mismatched_dimensions() {
+    let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/semdb-dim");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let mut db = semdb::storage::Db::create(&d.join("t.semdb")).unwrap();
+    db.put("a", "{}", vec![1.0, 0.0, 0.0]).unwrap();
+    db.put("placeholder", "{}", vec![0.0]).unwrap(); // non-semantic rows stay allowed
+    let err = db.put("b", "{}", vec![1.0, 0.0]).unwrap_err();
+    assert!(err.contains("dim"), "{err}");
+}

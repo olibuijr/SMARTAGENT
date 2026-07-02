@@ -53,7 +53,10 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("call") => {
             let tool = flag(args, "--tool").ok_or("--tool required")?;
             let call_args = flag(args, "--args").unwrap_or_else(|| "{}".into());
-            let params = format!(r#"{{"name":"{}","arguments":{}}}"#, tool, call_args);
+            // Escape the name and validate args parse as JSON — raw interpolation
+            // would let a crafted tool name/args smuggle extra JSON-RPC fields.
+            httpc::json::parse(&call_args).map_err(|e| format!("--args is not valid JSON: {e}"))?;
+            let params = format!(r#"{{"name":"{}","arguments":{}}}"#, httpc::json::escape(&tool), call_args);
             let mut t = Transport::open(args)?;
             let res = t.call("tools/call", &params)?;
             let out = jsonrpc::parse_call(&res);

@@ -72,8 +72,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 }
                 vectors
             };
+            // Re-ingest safety: drop any existing chunks for this doc first,
+            // or an edited doc with fewer/reordered chunks leaves stale orphans.
+            let removed = store::delete_doc(&db, &doc_id).unwrap_or(0);
             let n = store::put_chunks(&db, &chunks, &vectors)?;
-            Ok(format!("ingested {n} chunks from {source} as {doc_id}"))
+            if removed > 0 {
+                Ok(format!("re-ingested {n} chunks from {source} as {doc_id} (replaced {removed})"))
+            } else {
+                Ok(format!("ingested {n} chunks from {source} as {doc_id}"))
+            }
         }
         Some("retrieve") | Some("search") => {
             let db = path_arg(args, 1, "db")?;

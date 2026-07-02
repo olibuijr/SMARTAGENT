@@ -143,9 +143,52 @@ impl Civil {
     }
 }
 
+impl Civil {
+    /// Inverse of `from_unix` for a wall-clock date/time (UTC). Howard
+    /// Hinnant's days_from_civil algorithm.
+    pub fn to_unix(year: i64, month: u32, day: u32, hour: u32, min: u32) -> i64 {
+        let y = if month <= 2 { year - 1 } else { year };
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let mp = if month > 2 { month - 3 } else { month + 9 } as i64;
+        let doy = (153 * mp + 2) / 5 + day as i64 - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era * 146_097 + doe - 719_468;
+        days * 86_400 + hour as i64 * 3600 + min as i64 * 60
+    }
+}
+
+/// Days in a month, leap-aware.
+pub fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 }
+        }
+        _ => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn to_unix_roundtrips() {
+        for t in [0i64, 1_782_952_200, 951_827_040 /* 2000-02-29 */] {
+            let c = Civil::from_unix(t);
+            assert_eq!(Civil::to_unix(c.year, c.month as u32, c.day as u32, c.hour as u32, c.minute as u32), t - t.rem_euclid(60));
+        }
+    }
+
+    #[test]
+    fn month_lengths() {
+        assert_eq!(days_in_month(2026, 2), 28);
+        assert_eq!(days_in_month(2028, 2), 29);
+        assert_eq!(days_in_month(2100, 2), 28);
+        assert_eq!(days_in_month(2026, 4), 30);
+    }
 
     #[test]
     fn parses_fields() {

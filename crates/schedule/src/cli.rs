@@ -25,21 +25,39 @@ fn build_notify_cmd(msg: &str) -> String {
 /// Turn `YYYY-MM-DDTHH:MM` (or `YYYY-MM-DD HH:MM`) into a cron expression
 /// `MIN HOUR DAY MONTH *` for a one-shot job. The job is marked `once` so the
 /// runner removes it after the single fire.
-fn cron_from_at(at: &str) -> Result<String, String> {
+///
+/// The wall-clock time is local time = UTC + `utc_offset_minutes` (config key,
+/// env `SMARTAGENT_UTC_OFFSET`, default 0). The cron matcher runs in UTC, so
+/// the offset is subtracted here. Impossible dates (Feb 30, Apr 31) are
+/// rejected — they would never match and the one-shot job would leak forever.
+fn cron_from_at(at: &str, offset_min: i64) -> Result<String, String> {
     let (date, time) = at.split_once(['T', ' ']).ok_or("--at must be YYYY-MM-DDTHH:MM")?;
     let d: Vec<&str> = date.split('-').collect();
     let t: Vec<&str> = time.split(':').collect();
     if d.len() != 3 || t.len() < 2 {
         return Err("--at must be YYYY-MM-DDTHH:MM".into());
     }
+    let year: i64 = d[0].parse().map_err(|_| "bad year")?;
     let month: u32 = d[1].parse().map_err(|_| "bad month")?;
     let day: u32 = d[2].parse().map_err(|_| "bad day")?;
     let hour: u32 = t[0].parse().map_err(|_| "bad hour")?;
     let min: u32 = t[1].parse().map_err(|_| "bad minute")?;
-    if month == 0 || month > 12 || day == 0 || day > 31 || hour > 23 || min > 59 {
+    if month == 0 || month > 12 || hour > 23 || min > 59 {
         return Err("--at has an out-of-range field".into());
     }
-    Ok(format!("{min} {hour} {day} {month} *"))
+    if day == 0 || day > crate::cron::days_in_month(year, month) {
+        return Err(format!("--at date {date} does not exist"));
+    }
+    let utc = Civil::from_unix(Civil::to_unix(year, month, day, hour, min) - offset_min * 60);
+    Ok(format!("{} {} {} {} *", utc.minute, utc.hour, utc.day, utc.month))
+}
+
+/// Local-time offset in minutes from config/env (default 0 = UTC).
+fn utc_offset() -> i64 {
+    semdb::config::Config::load()
+        .resolve("utc_offset_minutes", "SMARTAGENT_UTC_OFFSET", None)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 fn journal_path(args: &[String]) -> PathBuf {
@@ -61,7 +79,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             // --at 'YYYY-MM-DDTHH:MM' schedules a one-shot at that local time
             // (self-removes after firing); otherwise --cron for a recurring job.
             let (cron_expr, once) = match flag(args, "--at") {
-                Some(at) => (cron_from_at(&at)?, true),
+                Some(at) => (cron_from_at(&at, utc_offset())?, true),
                 None => (flag(args, "--cron").ok_or("--cron or --at required")?, false),
             };
             // A scheduled job runs a shell command on a recurring timer — the
@@ -166,11 +184,33 @@ fn fmt_time(t: i64) -> String {
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::cron_from_at;
+
+    #[test]
+    fn at_is_utc_by_default_and_offset_shifts() {
+        assert_eq!(cron_from_at("2026-08-01T15:00", 0).unwrap(), "0 15 1 8 *");
+        // UTC+120min local 15:00 → 13:00 UTC
+        assert_eq!(cron_from_at("2026-08-01T15:00", 120).unwrap(), "0 13 1 8 *");
+        // offset crossing midnight shifts the day too
+        assert_eq!(cron_from_at("2026-08-01T00:30", 60).unwrap(), "30 23 31 7 *");
+    }
+
+    #[test]
+    fn rejects_impossible_dates() {
+        assert!(cron_from_at("2026-02-30T10:00", 0).is_err());
+        assert!(cron_from_at("2026-04-31T10:00", 0).is_err());
+        assert!(cron_from_at("2028-02-29T10:00", 0).is_ok()); // leap year
+    }
+}
+
 const HELP: &str = r#"
 schedule — durable cron scheduler (journal + replay)
 
 USAGE:
   schedule add  --cron '*/5 * * * *' --cmd '<shell>' [--id X] [--journal FILE]
+  schedule add  --at 'YYYY-MM-DDTHH:MM' ...   one-shot; local = UTC + utc_offset_minutes (config, default 0)
   schedule list [--journal FILE]
   schedule next [--journal FILE]
   schedule rm   --id X [--journal FILE]

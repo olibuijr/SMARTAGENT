@@ -52,9 +52,25 @@ impl Cdp {
     pub fn navigate(&mut self, url: &str) -> Result<(), String> {
         self.call("Page.enable", "{}")?;
         self.call("Page.navigate", &format!(r#"{{"url":"{}"}}"#, json::escape(url)))?;
-        // Give the page a beat to load, then continue (event-wait is out of scope v1).
-        std::thread::sleep(std::time::Duration::from_millis(800));
+        self.wait_ready(8000);
         Ok(())
+    }
+
+    /// Poll `document.readyState` until the document is complete (or the
+    /// deadline passes — SPAs may never signal, so this never errors). Replaces
+    /// the fixed sleeps that raced slow pages and wasted time on fast ones.
+    fn wait_ready(&mut self, max_ms: u64) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(max_ms);
+        // Small settle first: a just-triggered navigation may still report the
+        // OLD document as complete.
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        loop {
+            match self.eval("document.readyState") {
+                Ok(s) if s == "complete" || s == "interactive" => return,
+                _ if std::time::Instant::now() >= deadline => return,
+                _ => std::thread::sleep(std::time::Duration::from_millis(100)),
+            }
+        }
     }
 
     /// Evaluate JS in the page and return the string result.
@@ -93,7 +109,7 @@ impl Cdp {
             json::escape(selector)
         );
         let r = self.eval(&js)?;
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        self.wait_ready(3000);
         Ok(r)
     }
 
@@ -162,7 +178,7 @@ impl Cdp {
             json::escape(selector)
         );
         let r = self.eval(&js)?;
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        self.wait_ready(3000);
         Ok(r)
     }
 
@@ -170,7 +186,7 @@ impl Cdp {
     pub fn history(&mut self, delta: i32) -> Result<String, String> {
         self.call("Runtime.enable", "{}")?;
         let r = self.eval(&format!("(function(){{history.go({delta});return 'ok';}})()"))?;
-        std::thread::sleep(std::time::Duration::from_millis(700));
+        self.wait_ready(5000);
         Ok(r)
     }
 }

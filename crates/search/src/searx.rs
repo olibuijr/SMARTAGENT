@@ -38,9 +38,21 @@ pub fn build_url(q: &Query) -> String {
     url
 }
 
+/// Model-supplied instance URLs must be http(s) — anything else (or a
+/// scheme-less internal host) is an SSRF vector.
+pub fn validate_instance(instance: &str) -> std::result::Result<(), String> {
+    if instance.starts_with("http://") || instance.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!("instance must start with http:// or https:// (got '{instance}')"))
+    }
+}
+
 pub fn search(q: &Query) -> ResultList {
+    validate_instance(q.instance)?;
     let url = build_url(q);
-    let resp = httpc::get(&url).map_err(|e| format!("request failed: {e}"))?;
+    // Explicit timeout: a hung SearXNG must not block until the extension's 60s kill.
+    let resp = httpc::request("GET", &url).timeout(20).send().map_err(|e| format!("request failed: {e}"))?;
     if !resp.ok() {
         return Err(format!("HTTP {}", resp.status));
     }
@@ -66,8 +78,20 @@ pub fn parse_results(json: &Value, limit: usize) -> Vec<Result> {
 }
 
 pub fn health(instance: &str) -> std::result::Result<u16, String> {
-    let resp = httpc::get(instance.trim_end_matches('/'))?;
+    validate_instance(instance)?;
+    let resp = httpc::request("GET", instance.trim_end_matches('/')).timeout(10).send()?;
     Ok(resp.status)
+}
+
+#[cfg(test)]
+mod scheme_tests {
+    #[test]
+    fn rejects_non_http_instance() {
+        assert!(super::validate_instance("file:///etc/passwd").is_err());
+        assert!(super::validate_instance("192.168.1.1:8080").is_err());
+        assert!(super::validate_instance("http://searx.local").is_ok());
+        assert!(super::validate_instance("https://searx.local").is_ok());
+    }
 }
 
 #[cfg(test)]

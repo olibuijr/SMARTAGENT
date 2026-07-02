@@ -10,10 +10,22 @@ pub struct Message {
     pub tags: Option<String>,
 }
 
+/// Reject CR/LF in header values — a `\r\n` in title/tags/topic would let the
+/// caller inject arbitrary HTTP headers into the request.
+fn clean(name: &str, v: &str) -> Result<(), String> {
+    if v.contains('\r') || v.contains('\n') {
+        return Err(format!("{name} must not contain newlines"));
+    }
+    Ok(())
+}
+
 pub fn send(m: &Message) -> Result<String, String> {
     if m.topic.is_empty() || m.topic.contains('/') {
         return Err("topic must be non-empty and contain no '/'".into());
     }
+    clean("topic", &m.topic)?;
+    if let Some(t) = &m.title { clean("title", t)?; }
+    if let Some(t) = &m.tags { clean("tags", t)?; }
     let url = format!("{}/{}", m.server.trim_end_matches('/'), m.topic);
     let mut req = httpc::request("POST", &url).body(m.message.as_bytes()).timeout(15);
     if let Some(t) = &m.title {
@@ -41,6 +53,22 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    #[test]
+    fn rejects_header_injection() {
+        for (title, tags) in [(Some("x\r\nEvil: 1".to_string()), None), (None, Some("a\nb".to_string()))] {
+            let err = send(&Message {
+                server: "http://127.0.0.1:1".into(),
+                topic: "t".into(),
+                message: "m".into(),
+                title,
+                priority: None,
+                tags,
+            })
+            .unwrap_err();
+            assert!(err.contains("newlines"), "{err}");
+        }
+    }
 
     #[test]
     fn posts_message_with_headers() {

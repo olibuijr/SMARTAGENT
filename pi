@@ -17,6 +17,15 @@ export PI_CODING_AGENT_DIR="$ROOT/.pi/agent"
 export PI_CODING_AGENT_SESSION_DIR="$ROOT/.pi/sessions"
 mkdir -p "$PI_CODING_AGENT_DIR" "$PI_CODING_AGENT_SESSION_DIR"
 
+# Caller authentication for the secrets tool: the launch path injects pi's
+# token so `secrets get --as pi` can prove its identity. The sandbox scrubs
+# env and tmpfs-masks data/secrets, so sandboxed commands can't present it.
+PI_TOKEN_FILE="$ROOT/data/secrets/tokens/pi.token"
+if [ -f "$PI_TOKEN_FILE" ]; then
+    SMARTAGENT_CALLER_TOKEN="$(cat "$PI_TOKEN_FILE")"
+    export SMARTAGENT_CALLER_TOKEN
+fi
+
 # ── Self-update (EXPLICIT only: `./pi --self-update`) ──────────────────────
 # Normal launches never touch the network or mutate the pinned runtime — the
 # old unpinned daily `bun update` silently jumped versions and blocked startup

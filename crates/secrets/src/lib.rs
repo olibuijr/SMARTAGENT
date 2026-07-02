@@ -6,3 +6,4 @@ pub mod audit;
 pub mod cli;
 pub mod policy;
 pub mod store;
+pub mod token;

@@ -135,6 +135,12 @@ impl Db {
         })
     }
 
+    /// Embedding dimension of this db: the length of the first real
+    /// (non-placeholder) vector, or None if only placeholders exist.
+    pub fn dim(&self) -> Option<usize> {
+        self.index.values().map(|e| e.vector.len()).find(|&l| l > 1)
+    }
+
     pub fn put(&mut self, id: &str, meta: &str, vector: Vec<f32>) -> Result<(), String> {
         // Guard the on-disk length fields (id is u16, meta is u32). An oversized
         // value would silently wrap and write a record that fails to decode on
@@ -145,6 +151,16 @@ impl Db {
         }
         if meta.len() > u32::MAX as usize {
             return Err("meta too long (max u32)".into());
+        }
+        // Dimension guard: cosine over mixed-dim vectors zips to the shorter
+        // length and silently mis-scores. Placeholder vectors (len ≤ 1, the
+        // non-semantic-row convention) are exempt.
+        if vector.len() > 1 {
+            if let Some(d) = self.dim() {
+                if vector.len() != d {
+                    return Err(format!("vector dim {} does not match db dim {d}", vector.len()));
+                }
+            }
         }
         let body = encode_put(id, meta, &vector);
         self.append(&body)?;
@@ -287,12 +303,12 @@ mod tests {
         let path = tmp("basic");
         let mut db = Db::create(&path).unwrap();
         db.put("a", r#"{"k":1}"#, vec![1.0, 2.0]).unwrap();
-        db.put("b", "", vec![0.5; 8]).unwrap();
+        db.put("b", "", vec![0.5, 0.25]).unwrap();
         db.delete("a").unwrap();
         drop(db);
         let db = Db::open(&path).unwrap();
         assert!(db.get("a").is_none());
-        assert_eq!(db.get("b").unwrap().vector.len(), 8);
+        assert_eq!(db.get("b").unwrap().vector.len(), 2);
         std::fs::remove_file(&path).unwrap();
     }
 
