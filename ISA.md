@@ -124,6 +124,9 @@ Integration:
 
 ## Decisions
 
+- 2026-07-02: 12-subagent tool review ran (one reviewer per tool); findings distilled to `Plans/TOOL_REVIEW_2026-07-02.md`. All 10 P0 bugs fixed same day with regression tests (secrets caller-token auth, mcp/notify injection, codeindex -i regex, schedule tz+impossible-dates, rag re-ingest dedup, semdb dim guard, search timeout+SSRF, sandbox rlimits+loud degrade, browser readyState waits). P1 feature backlog remains in the plan file.
+- 2026-07-02: Statusline widgets shipped — uniform `level|icon text` protocol on 11 crates; severity classification in Rust, extension only colors (green/yellow/red) and places. Two belowEditor rows (infra ⛭ / data ▦) + per-tool footer activity.
+
 - 2026-07-02: Forge/Cato codex agents skipped per standing user rule (Claude-family teams only) — delegation floor met via 9 research agents + worktree build agents.
 - 2026-07-02: SearXNG hosted not rewritten — engine-scraper maintenance is the value, client is the port surface.
 - 2026-07-02: TLS out of scope in-tool; https egress routed via akurai-router/localhost proxies.

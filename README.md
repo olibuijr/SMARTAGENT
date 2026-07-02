@@ -19,7 +19,8 @@ produces the whole fleet, and one launcher (`./pi`) wires it into the agent.
 
 ## Capabilities
 
-Nineteen tools, each a pure-Rust binary the agent calls through a pi extension:
+Twenty crates — eighteen agent tools plus shared libraries — each a pure-Rust
+binary the agent calls through a pi extension:
 
 | Tool | Ported from | What it does |
 |------|-------------|--------------|
@@ -43,8 +44,67 @@ Nineteen tools, each a pure-Rust binary the agent calls through a pi extension:
 | `voice` | [Pipecat](https://github.com/pipecat-ai/pipecat) | STT/TTS bridge |
 | `supervise` | — | Internal process manager for the long-running services |
 
-Plus `httpc` (shared HTTP/1.1 + JSON library) and `session-memory` (a hookless
-extension that gives the agent continuity across sessions).
+Plus `httpc` (shared HTTP/1.1 + JSON library), `session-memory` (a hookless
+extension that gives the agent continuity across sessions), and `statusline`
+(a TUI extension that paints live tool/service health under the input — see
+**Statusline** below).
+
+## What's new (post-v0.1.0)
+
+The full detail lives in [`CHANGELOG.md`](CHANGELOG.md); the highlights:
+
+### Features added
+
+- **TUI statusline widgets** — eleven crates gained a `statusline` verb emitting
+  a uniform `level|icon text` protocol (severity decided in Rust). The
+  `statusline` extension renders two ANSI-colored rows below the input —
+  infra `⛭` (services, sandbox capability, secrets auth, Chrome, SearXNG,
+  codegraph freshness) and data `▦` (memory tiers, rag corpus, next scheduled
+  job, evals pass ratio, orchestrate runs) — plus per-tool `⚙ running… → ✓ 142ms`
+  footer activity. Segments re-probe after related tool runs and every 30s.
+- **Caller-token authentication for secrets** — `secrets get --as C` now
+  requires a per-caller token (admin-minted via `issue-token`, 0600 on disk,
+  constant-time verify, fail-closed, audited). The `./pi` launcher injects the
+  token; the sandbox scrubs it from the environment and masks it on disk.
+- **`supervise` process manager** — pure-Rust replacement for per-service
+  systemd: spawn/track/health-check/self-heal the scheduler daemon and headless
+  Chromium.
+- **Session memory** — session intent is captured on shutdown and recalled at
+  the next launch, giving the agent cross-session continuity.
+- **Tool expansion pass** — browser grew to 8 actions, memory gained
+  update/recent/forget/promote, search gained time-range/site filters, schedule
+  gained one-shot `--at` + pause/resume, rag gained URL ingest and doc-scoped
+  retrieval, and every CLI gained scope/limit/terse flags for token discipline.
+
+### Fixes (12-subagent review, all 10 P0s closed)
+
+- **Injection**: mcp JSON-RPC injection (tool name/args), notify CR/LF header
+  injection.
+- **Correctness**: codeindex case-insensitive regex never matched uppercase
+  patterns; schedule `--at` fired in UTC while documented as local (now honors
+  `utc_offset_minutes` config) and accepted impossible dates (Feb 30) that
+  leaked never-firing jobs; rag re-ingest left stale chunks behind; semdb
+  silently mis-scored mixed-dimension vectors (per-db dim now enforced).
+- **Robustness/security**: search got a 20s timeout and http(s)-only instance
+  validation (SSRF guard); sandbox got ulimit resource caps and now warns
+  loudly instead of silently downgrading isolation; browser replaced fixed
+  sleeps with `document.readyState` polling (~3× faster on fast pages, no race
+  on slow ones).
+
+## Statusline
+
+Live health under the input, painted green/yellow/red by severity:
+
+```
+⛭ scheduler:up chromium:up · 🧱 ns✓ limits✓ · 🔑 pi✓ · 🌐 chrome✓ · 🔎 searx✓ · 🕸 312sym
+▦ 🧠 w:12 e:340 s:88 · 📚 4d/842c · ⏰ nightly-backup in 13h · 📊 9/10 run-7 · 🤖 idle
+```
+
+Each segment is a Rust `<crate> statusline` verb (`ok|…`, `warn|…`, `err|…`) —
+the extension only maps level → color and places text, keeping all logic in
+Rust. Red means act now (service DOWN, token failing verify, SearXNG
+unreachable); yellow means attention (stale codegraph index, memory tier near
+its eviction cap, no jobs scheduled).
 
 ## Quick start
 
@@ -106,8 +166,10 @@ The agent can invoke every tool and may be prompt-injected via web content, so
 guards are deterministic, not prompt-level: untrusted web/search/rag content is
 fenced in an explicit envelope; `mcp` and `schedule` cannot smuggle shell
 commands; secret grants are admin-only and off the agent's tool surface; the
-sandbox scrubs the parent environment so secrets can't leak into a sandboxed
-command. See the **Security posture** section in [AGENTS.md](AGENTS.md).
+sandbox scrubs the parent environment, applies ulimit resource caps, and
+tmpfs-masks the secret store so secrets can't leak into a sandboxed command;
+and secret reads are caller-token-authenticated — a bare `--as pi` claim no
+longer works. See the **Security posture** section in [AGENTS.md](AGENTS.md).
 
 ## Development
 
@@ -118,8 +180,8 @@ command. See the **Security posture** section in [AGENTS.md](AGENTS.md).
 - **Borrow, don't invent** — reference repos are shallow-cloned into `.refrepos/` (gitignored) and ported, never wrapped.
 
 The gate (`./build.sh`) enforces the line-count and zero-dep rules, lints
-extensions for the silent-registration-failure trap, and smoke-tests that all 19
-crate tools register in pi. Cut a release with `./build.sh minor "changelog line"`.
+extensions for the silent-registration-failure trap, and smoke-tests that all 18
+active crate tools register in pi. Cut a release with `./build.sh minor "changelog line"`.
 
 ## Project layout
 
