@@ -35,7 +35,9 @@ fn render_step(d: &Def, r: &Run) -> String {
     let s = &d.steps[r.step];
     let mut out = vec![format!("{} · {} — step {}/{}: {}", r.id, d.name, r.step + 1, d.steps.len(), s.name)];
     if !r.task.is_empty() { out.push(format!("task: {} (tasks show {})", r.task, r.task)); }
-    if !s.skill.is_empty() { out.push(format!("skill: {} — use this tool/skill for this step", s.skill)); }
+    // `skill:` values usually name a TOOL (memory, tasks, sandbox, …); only
+    // load via the skills tool if a skill by that name actually exists.
+    if !s.skill.is_empty() { out.push(format!("use: {} — the tool for this step (a skill only if one by this name exists; don't chase missing skills)", s.skill)); }
     if !s.expect.is_empty() { out.push(format!("expect: {}", s.expect)); }
     if !s.body.is_empty() { out.push(s.body.clone()); }
     out.push(format!("when done: workflow advance --run {} --evidence '<what you verified>'", r.id));

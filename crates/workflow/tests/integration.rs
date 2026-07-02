@@ -27,13 +27,13 @@ fn evidence_gated_engine_end_to_end() {
     assert!(list.contains("mini") && list.contains("triage"), "{list}");
     // start prints step 1 with skill routing
     let step1 = cli::run(&s(&["start", "mini", "--task", "T-7"], &root)).unwrap();
-    assert!(step1.contains("step 1/2: observe") && step1.contains("skill: memory") && step1.contains("T-7"), "{step1}");
+    assert!(step1.contains("step 1/2: observe") && step1.contains("use: memory") && step1.contains("T-7"), "{step1}");
     // trivial evidence rejected
     let e = cli::run(&s(&["advance", "--evidence", "done"], &root)).unwrap_err();
     assert!(e.contains("evidence required"), "{e}");
     // real evidence advances to step 2
     let step2 = cli::run(&s(&["advance", "--evidence", "recalled 3 memories about the task"], &root)).unwrap();
-    assert!(step2.contains("step 2/2: verify") && step2.contains("skill: evals"), "{step2}");
+    assert!(step2.contains("step 2/2: verify") && step2.contains("use: evals"), "{step2}");
     // finishing the last step completes the run and points back at the board
     let fin = cli::run(&s(&["advance", "--evidence", "probe returned expected output x=42"], &root)).unwrap();
     assert!(fin.contains("W-1 complete") && fin.contains("tasks move T-7"), "{fin}");

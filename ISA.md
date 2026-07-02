@@ -112,6 +112,16 @@ Per-project scoping + 3-line statusline (2026-07-02):
 - [x] ISC-56: extensions expose `project` param (tasks/codegraph/memory/rag/workflow); `./build.sh` gate green, 20/20 tools register
 - [x] ISC-57: codex fusion tester 10/10 PASS + live `./pi` run 6/6 PASS on project scoping
 
+Enforced operating loop (2026-07-02):
+- [x] ISC-58: AGENT_TOOLS.md carries a single 7-step ordered operating loop (skills→tasks→workflow→investigate→execute→verify→close) covering all active tools by situation
+- [x] ISC-59: hook `require-doing-task` blocks edit/write while `doing` is empty; block reason contains copy-pasteable unlock commands
+- [x] ISC-60: gate honors the target repo's own board for workspaces/<p>/ paths; `.scratch/` and SMARTAGENT_HOOKS_RELAX=1 exempt
+- [x] ISC-61: hook `session-brief` injects live board/workflow/index context at agent start
+- [x] ISC-62: hook `stop-board-audit` records board snapshot at agent end in the audit trail
+- [x] ISC-63: hooks.ts before_agent_start returns the correct BeforeAgentStartResult shape (crash fixed, trivial `./pi -p` run exits 0)
+- [x] ISC-64: Anti: read-only work (bash/grep/read, trivial Q&A) passes without a board entry — the gate never blocks non-mutating tools
+- [x] ISC-65: live `./pi` run followed the FULL loop unprompted — skills match → tasks todo+criteria → move doing → workflow task-run W-2 evidenced through all 5 steps → crit checks → memory remember → criteria-gated done (23 ordered tool calls)
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |

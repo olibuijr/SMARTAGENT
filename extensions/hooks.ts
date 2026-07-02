@@ -65,7 +65,15 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event: any) => {
 		const d = dispatch("session_start", "startup", { prompt: event?.message ?? "" });
 		if (d.context && d.context.length > 0) {
-			return { message: `Hook context:\n${d.context.join("\n")}` };
+			// BeforeAgentStartResult shape: messages[] with block-array content —
+			// a plain {message: string} crashes pi ("content is not iterable").
+			return {
+				messages: [{
+					role: "user",
+					content: [{ type: "text", text: `Hook context:\n${d.context.join("\n")}` }],
+					timestamp: Date.now(),
+				}],
+			};
 		}
 		return undefined;
 	});

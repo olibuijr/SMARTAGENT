@@ -4,26 +4,55 @@ You are running inside the SMARTAGENT project with these custom tools available
 (each is a pure-Rust binary; call the tool, don't reimplement it). Use them
 instead of guessing or shelling out manually.
 
-## How to work
+## Operating loop (the order of work — steps 1–2 are HOOK-ENFORCED)
 
-- **Track multi-step work on the board.** Anything that takes more than one
-  step goes through `tasks` (no invisible WIP): capture with add/todo, pull
-  with `next`, finish with `done`. WIP limits and criteria-gated done are
-  enforced — when the tool refuses, that is the methodology working; don't
-  `force` past it. Methodology details: `skills show kanban`.
-- **Run non-trivial tasks through a workflow.** `workflow start task-run
-  --task T-n` walks observe→plan→execute→verify→learn, telling you which
-  skill/tool to use at each step. Advancing requires evidence of what you
-  verified — write the actual probe result, not "done".
-- **Pick skills with match.** `skills match '<the task sentence>'` scores all
-  skills against the prompt; load the winner with `show` before specialized work.
+Your session starts with the live operating state injected (board, workflow
+run, index). Work every request in this order:
+
+1. **Route.** `skills match '<the request sentence>'` → load the winner with
+   `skills show` before specialized work. Trivial Q&A (read/answer, no side
+   effects) needs no board entry — answer and stop.
+2. **Pull before you touch files.** The edit/write tools are BLOCKED by a
+   hook while nothing is in `doing`. Capture → pull: `tasks todo '<title>'`
+   (or `add … --criteria 'a;b'`), then `tasks move T-n doing`. Work on a
+   workspace repo uses that repo's own board (`project` param) — its `doing`
+   also satisfies the gate. When the tool refuses (WIP full, criteria
+   unchecked), that is the methodology working — fix the cause, don't `force`.
+3. **Engine for non-trivial work** (≥2 steps or ≥2 files): `workflow start
+   task-run --task T-n` walks observe→plan→execute→verify→learn and names the
+   skill per step. `advance` REQUIRES real evidence — the probe result, not
+   "done".
+4. **Investigate cheap → expensive, before editing:** `memory recall`
+   (`project` for repo facts) → `codeindex search/files` (`project` scopes to
+   a workspace repo) → `codegraph defs/refs/callers` (`project` for that
+   repo's graph) → `rag retrieve` (ingested docs) → `search` (web) →
+   `browser` (live pages, last resort).
+5. **Execute.** edit/write (gated by step 2); `bash` for builds/tests; risky
+   or untrusted commands via `sandbox run` (isolated, secrets masked);
+   credentials ONLY via `secrets get`; external MCP servers via `mcp`;
+   independent parallel work via `orchestrate`; recurring/future actions via
+   `schedule add`; long-running services via `supervise` (run `status` first
+   when browser/search/schedule act dead).
+6. **Verify by using** — rerun the real probe (test, curl, browser check);
+   log regressions with `evals log`/`score` when output quality matters.
+7. **Close.** `tasks crit check T-n <i>` for each met criterion → `tasks done
+   T-n` (criteria-gated); finish the workflow run; store durable facts with
+   `memory remember` (`project` for repo facts — the memory policy); notes
+   worth keeping → `vault new`; after structural changes to a workspace repo:
+   `codeindex index <project>` (and `codegraph index --project <p>` for Rust
+   repos); `notify send` when a long run finishes.
+
 - **Statusline is live state.** The three colored rows under the input show
   workspace/code state (⌂ — code graph, repos indexed, tasks, workflow run),
   data/flow state (▦), and service/auth health (⛭). Red = act now (service
   DOWN, token failing); yellow = attention (stale index, WIP full, blockers).
+  Healthy segments show `Name ✓`; detail appears when something needs you.
 - **Token discipline:** most tools take scope/limit flags — use them. Default
   to the cheapest form that answers the question (count/ids/files before rows;
   snippets/ids-only before full text; quiet before a page dump), then widen.
+- `semdb` is the low-level store — prefer the domain tools (memory, rag,
+  tasks, …); reach for `semdb` only for new/ad-hoc tables. `context` loads
+  principal identity when a task needs it.
 
 ## Tools
 

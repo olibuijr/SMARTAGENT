@@ -63,5 +63,8 @@ fn timeout_fails_open_with_warning() {
     let d = hooks::dispatch::dispatch(&hooks, &root, "stop", "", "{}");
     assert!(!d.block);
     assert!(d.warnings.iter().any(|w| w.contains("timed out")), "{:?}", d.warnings);
-    assert!(t0.elapsed().as_secs() < 5);
+    // Proves the 30s sleep was cut short at the 1s timeout. Margin is wide
+    // (15s) because the full ./build.sh gate runs this under heavy parallel
+    // load, where <5s flaked twice on spawn+kill scheduling alone.
+    assert!(t0.elapsed().as_secs() < 15);
 }
