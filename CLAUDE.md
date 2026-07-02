@@ -1,6 +1,12 @@
 # CLAUDE.md — SMARTAGENT
 
-> Thin pointer. Read **[AGENTS.md](./AGENTS.md)** first — architecture, crate map, reference repos, conventions. Read **[ISA.md](./ISA.md)** — system of record, ISC state.
+> Thin pointer. Read **[AGENTS.md](./AGENTS.md)** first — architecture, crate map, reference repos, conventions, **Gotchas**. Read **[ISA.md](./ISA.md)** — system of record, ISC state.
+
+**Status (v0.1.0, tagged):** all 19 crates done, tested, committed — semdb, httpc, memory, codegraph, codeindex, vault, skills, schedule, search, notify, secrets, browser, orchestrate, mcp, sandbox, context, evals, rag, voice. Each has a pi extension in `extensions/`. `cargo test --workspace` green; no file >1000 lines; zero crates.io deps. Local git, no remote yet.
+
+**Run the agent:** `./pi` from repo root (project-isolated: vendored runtime in `.pi/runtime/`, config in `.pi/agent/`, models via `extensions/akurai-router.ts`; default/test model `codex/gpt-5.4-mini --thinking low`). The launcher auto-loads `extensions/*.ts` and injects `AGENT_TOOLS.md` into the agent's initial context (keep it current with the extensions catalog). Headless: `./pi -p '<prompt>' < /dev/null` (redirect MANDATORY).
+
+**Config:** all endpoints in `config/smartagent.conf` (embeddings `100.88.0.2:8081` embeddinggemma, ntfy, searx, browser CDP `:9222`, voice). Resolve via `semdb::config::Config` (flag → env → file). `workspaces_dir`/`data_dir` resolve to repo root. Nothing hardcoded.
 
 **Fusion workflow (always):** you implement → codex CLI tests (`codex exec --sandbox workspace-write -m gpt-5.4-mini -c model_reasoning_effort=low`) → codex reports PASS/FAIL → you verify the report with a direct spot-check before marking done.
 

@@ -118,8 +118,20 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 
 ## Conventions
 
-- Build: `cargo build --release` at workspace root; each crate also builds standalone.
+- Build: `cargo build --release` at workspace root; each crate also builds standalone. Full gate: `./build.sh` (build + test + audits); release: `./build.sh minor "changelog line"` (also bumps version + writes CHANGELOG).
 - Tests: unit tests in-module, integration under `crates/<name>/tests/`. Gates before merge.
-- Versioning: workspace semver lockstep, `CHANGELOG.md` per release (myagents pattern).
-- Existing Rust to harvest: AkurAI-Framework (B+tree, HTTP), AkurAI-AgentBrowser, agentmem, AkurAI-Router, akurai-passvault.
+- **Test scratch path (standard everywhere):** `PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch")` — an in-repo, gitignored dir. `env!("CARGO_TARGET_TMPDIR")` does NOT exist at compile time; use `CARGO_MANIFEST_DIR`. Never `std::env::temp_dir()` / `/tmp`.
+- Versioning: workspace semver lockstep (`[workspace.package] version`), `CHANGELOG.md` per release.
+- **`semdb` is the shared storage library** other crates depend on via path dep. Its public API: `semdb::storage::Db` (`create`/`open`/`put`/`get`/`delete`/`index`), `semdb::cli::search(db, query, k, exact)` (cosine/HNSW), `semdb::http::fetch_embedding(host, port, model, text)`, `semdb::config::Config` (`load`/`resolve`/`workspaces_dir`/`data_dir`), `semdb::json` (parse/escape/Value). `httpc` is the shared HTTP+JSON library (`httpc::get`/`post_json`/`request`, `httpc::json`). Non-semantic tables store rows with a placeholder `[0.0]` vector.
+- Existing Rust to harvest: AkurAI-Framework (B+tree, HTTP), agentmem, AkurAI-Router, akurai-passvault.
 - ISA.md in this repo is the system of record — read it before any work; update ISCs as you land them.
+
+## Gotchas (learned the hard way — read before building/testing)
+
+- **`./pi -p '<prompt>' < /dev/null`** — the stdin redirect is MANDATORY; without it pi hangs. Same for **`codex exec … < /dev/null`** (blocks on "Reading additional input from stdin…").
+- **pi extensions fail SILENTLY on runtime imports.** Type-only imports from `@earendil-works/pi-*` + `node:` builtins ONLY. `import { defineTool } from …` or `typebox` at runtime → the extension never registers, and the model hallucinates tool output instead of erroring. Use `pi.registerTool({...})` with a plain JSON-schema `parameters` object. The `extensions/` dir symlinks/uses `.pi/runtime/node_modules` for type resolution.
+- **Mock TCP servers in tests must drain the FULL request before responding.** If the server closes with unread bytes in its receive buffer, the client gets `Connection reset by peer (os error 104)` instead of a clean response. Read until you've seen `\r\n\r\n` + the `Content-Length` body, THEN write the reply. (Bit notify, mcp, voice.)
+- **Capturing a killable child's output: redirect stdout/stderr to files, not pipes.** After a timeout-kill, `read_to_end` on a pipe blocks forever if a grandchild still holds it open (e.g. `unshare --fork`). sandbox writes to `.stdout`/`.stderr` files and reads them back. Namespace isolation is opt-in (`--isolate`) so it never fires unexpectedly in restricted CI.
+- **Two `json::Value` types exist** — `semdb::json::Value` and `httpc::json::Value` are distinct; don't mix them across crates (`httpc::get(...).json()` returns httpc's). Pick one module per file.
+- **Byte-string literals must be ASCII** — `b"…ó…"` fails to compile; use ASCII in test fixtures or `\xHH` escapes.
+- **The Agent tool's worktree isolation was broken this session** (repo was `git init`'d mid-session → harness git cache stale → `git rev-parse HEAD` fails on spawn). Plain `general-purpose` agents sometimes spawned; `Engineer`/worktree agents did not. If it recurs, build inline. Manual `git worktree` works fine.
