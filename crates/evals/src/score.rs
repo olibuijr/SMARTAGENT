@@ -64,14 +64,15 @@ pub struct CaseScore {
 }
 
 pub fn score_run(traces: &[Trace], run: &str, matcher: Matcher) -> Vec<CaseScore> {
-    traces
-        .iter()
-        .filter(|t| t.run == run)
-        .filter_map(|t| {
-            t.expected.as_ref().map(|e| CaseScore {
-                case: t.case.clone(),
-                pass: matcher.matches(&t.output, e),
-            })
+    let mut latest = std::collections::BTreeMap::<String, &Trace>::new();
+    for t in traces.iter().filter(|t| t.run == run && t.expected.is_some()) {
+        latest.insert(t.case.clone(), t);
+    }
+    latest
+        .into_iter()
+        .map(|(case, t)| CaseScore {
+            case,
+            pass: matcher.matches(&t.output, t.expected.as_ref().unwrap()),
         })
         .collect()
 }
@@ -101,5 +102,17 @@ mod tests {
         assert!(wildcard("golf swing", "golf*"));
         assert!(!wildcard("my golf", "golf*"));
         assert!(wildcard("my golf", "*golf"));
+    }
+
+    #[test]
+    fn score_run_uses_latest_trace_per_case() {
+        let traces = vec![
+            Trace { run: "r".into(), case: "c".into(), input: "old".into(), output: "bad".into(), expected: Some("good".into()), latency_ms: None },
+            Trace { run: "r".into(), case: "c".into(), input: "new".into(), output: "good".into(), expected: Some("good".into()), latency_ms: None },
+        ];
+        let scores = score_run(&traces, "r", Matcher::Exact);
+        assert_eq!(scores.len(), 1);
+        assert_eq!(scores[0].case, "c");
+        assert!(scores[0].pass);
     }
 }

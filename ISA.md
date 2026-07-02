@@ -3,7 +3,7 @@ project: SMARTAGENT
 task: Rebuild best-of-breed agent stack as pi extensions + pure-Rust 0-dep tools
 effort: E5
 phase: build
-progress: 111/116
+progress: 125/130
 mode: build
 started: 2026-07-02T01:10:00Z
 updated: 2026-07-02T19:30:00Z
@@ -196,6 +196,23 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - [x] ISC-115: sextant mode (2×3 px/cell, 2-means fg/bg clustering, correct U+1FB00 mapping incl. ▌▐█ exclusions) is the default; quad and half selectable
 - [x] ISC-116: bare-host URLs normalize to https (`visir.is` → `https://visir.is`); explicit schemes and about:/data: untouched
 
+### Self-heal loop — eval failures become board tasks (2026-07-02)
+
+- [x] ISC-117: `evals triage` creates one criteria-gated `eval-fix:` task per failing run (col ready, p2, tags eval-fix)
+- [x] ISC-118: re-sweeping with an open eval-fix task for the run creates nothing (dedupe, prefix includes separator)
+- [x] ISC-119: a run named after an open board task (`T-n-…`) is skipped — the work is already owned
+- [x] ISC-120: re-failure after a COMPLETED fix escalates once to a p1 `eval-fix (recurring)` task tagged escalate; exhausted escalation defers to the orchestrator
+- [x] ISC-121: scoring is latest-trace-per-case — a re-logged passing trace flips the case green
+- [x] ISC-122: incremental sweep cursor — only traces logged since the last sweep generate tasks; first sweep initializes the cursor and skips history (live: 21 historical traces skipped, second sweep quiet)
+- [x] ISC-123: `--all` sweeps full history; `--dry-run` creates nothing and moves no cursor
+- [x] ISC-124: generated tasks carry the no-gaming criterion (root-cause fix; no expectation weakening; no hand-logged green traces)
+- [x] ISC-125: `hooks.d/eval-triage.sh` fires on the stop event — verified in a live agent session (exit 0, 25ms, in hooks audit)
+- [x] ISC-126: Anti: the cursor row and `_trend` row are invisible to `evals` loads and `tasks all()` respectively — no listing pollution
+- [x] ISC-127: tasks statusline leads with total open count + last-change trend arrow (▲/▼, persisted across probes)
+- [x] ISC-128: Anti: statusline probes at rest do not flatten the trend — flat counts keep the last direction (unit-tested)
+- [x] ISC-129: concurrent sweeps are lock-guarded (`.eval-triage.lock`, first-writer-wins, 120s stale expiry, self-cleaning)
+- [x] ISC-130: kill switch — `data/eval-triage.off` disables the loop instantly without rebuild/restart
+
 ## Test Strategy
 
 | isc | type | check | threshold | tool |
@@ -238,9 +255,12 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 | sa-browser-crate (inflate+png+art+cli) | 81-90,98-100 | browser, httpc | yes |
 | sa-browser-extension (pane+tool) | 91-97,103,107 | sa-browser-crate | no (after crate) |
 | sa-browser-docs+gate | 101,105 | sa-browser-extension | no (same commit) |
+| eval-triage (cursor+escalation+hook) | 117-126 | evals, tasks, hooks | no (single author) |
+| tasks-statusline-trend | 127,128 | tasks | yes |
 
 ## Decisions
 
+- 2026-07-02 (night): self-heal loop shipped with structural guards baked in, not bolted on. SystemsThinking causal-loop pass BEFORE building found the three dominant pathologies: task-spam amplifier (R1), expectation-gaming shortcut (B2 — "Shifting the Burden": editing the eval is always faster than fixing the code), and the retry treadmill (R3). v1 therefore ships dedupe + tracked-run skip + p1-escalation-not-retry + no-gaming criteria IN the same commit as the loop. The live dry-run proved the analysis immediately: a naive full-history sweep would have created 19 tasks from stale append-only traces — fixed with latest-trace-per-case scoring + a sweep cursor (bootstrap skips history). IterativeDepth adversarial lens then found the NEW cheapest gaming path the guards create (hand-logging a fake passing trace) — mitigated in criterion wording, structural fix boarded as T-120 (write-boundary hook, trace provenance, suite-strength watchdog). Known accepted limitation: concurrent stop-hook sweeps have a ms-window dedupe race (worst case one duplicate task, self-corrects next sweep). Statusline trend: total open + direction of last change persisted in a reserved `_trend` row — flat probes keep the last arrow. Cato skipped per standing Claude-family rule; codex fusion not run (offline surface fully unit-tested, 11/11; live surfaces probed directly per the codex-sandbox-network lesson).
 - 2026-07-02 (late): headless TUI verification round (tmux 240×67 = 1920×1080-equivalent) surfaced and fixed two latent platform bugs. (1) **agentpanel focus steal**: the GOAGENT sidebar (other session's 7ebc995) auto-opened at session_start via `ctx.ui.custom()` without `nonCapturing: true` (the comment claimed it, the code omitted it) — keyboard focus went to the panel and the chat editor was DEAD in every new TUI session. Fixed + committed with an explicit LOAD-BEARING comment. (2) **httpc::json O(n²) string parse**: `string()` re-validated the entire remaining buffer with `from_utf8` per character; a ~7MB CDP screenshot payload took 47s CPU (pane stuck on ⏳). Root-cause-at-ingestion fix in the shared crate (ASCII-run bulk copy + bounded multibyte validation): pane render 49.9s → 2.4s wall (400× CPU); every JSON consumer (search, mcp, orchestrate, evals, semdb embed) benefits. Regression tests added (4MB-string parse + mixed-run correctness). Also: sa-browser overlay maxHeight 95%→100% (art stopped ~4 rows short of the bottom).
 - 2026-07-02: sa-browser VERIFY notes — (1) Advisor (`Inference.ts --mode advisor --auto-state`) cross-contaminated: auto-state loaded a concurrent session's QA-harness ISA and judged that work's gaps (T-16/17/18, commit 1029f2e); its only sa-browser-applicable ask — a real verification surface beyond the gate — already exists (ISA `## Verification` sa-browser block: tmux focus/toggle/chrome-down probes, live Chrome renders, headless-agent run). No empirical conflict → no re-call. (2) Cato skipped per the standing Claude-family-only rule (see 2026-07-02 precedent decisions); the cross-vendor check was the codex fusion tester, whose 3 sandbox-network FAILs were spot-check-refuted by direct probes (protocol worked as designed). (3) codex sandbox cannot reach :9222 — future fusion tests of networked tools should test offline surfaces via codex and leave live probes to the orchestrator.
 - 2026-07-02: sa-browser designed (ISC-81..107) — visual browser pane distinct from the text-first `browser` tool. pi has no left/right widget placement (agentpanel precedent), but pi-tui overlays support `width: "50%"`, `anchor: "top-right"`, `maxHeight`, and `nonCapturing: true` — that is the split mechanism: chat keeps the left half and keyboard focus, the pane overlays the right half with address bar + loading status + half-block truecolor page art. All pixel work (zlib inflate, PNG decode, downscale, ANSI emit) is std-only Rust in `crates/sa-browser`; the extension only paints lines. `screenshot_png`/`page_status` land in browser::cdp so sa-browser composes the existing CDP client — this is also the migration seam: browser's click/type/wait/scroll verbs can later be surfaced through sa-browser, browser retired, sa-browser renamed. Tier E4 ISC floor (128) relaxed with math: the feature decomposes into 27 atomic probes; ISA total is 107 — padding to 128 would violate granularity discipline. Delegation floor met per project precedent: Claude-family only (standing rule), codex `exec` fusion tester is the cross-vendor check; orchestrator builds the platform directly per the CORE RULE exemption.
@@ -293,3 +313,13 @@ Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agen
 - ISC-115: cargo test — sextant_codepoints_known (U+1FB00/02/3B, ▌▐█ exclusions), sextant_cell_splits, quad_cell_left_column_lit, geometry_identical_across_modes; live render shows U+1FB3x glyphs on 39/40 lines
 - ISC-116: cargo test — normalize_url tests; live probe `pane --url visir.is` → header `https://www.visir.is/ Forsíða - Vísir`
 - ISC-92..97/106/113..116 (headless TUI re-verification, 2026-07-02 late): tmux 240×67 (1920×1080-equivalent) real `./pi` session, `/sab visir.is` → address bar `● https://www.visir.is/` + `Forsíða - Vísir`, 60 sextant-art rows, colored art through row 66/67 (bottom-filled, 1-row slack by design), typed text landed in the chat editor with the pane open, `/sab` toggle closed it (0 art glyphs). Perf: pane call 49.9s → 2.4s after the httpc::json fix
+
+### Self-heal loop (2026-07-02 night)
+
+- ISC-117..124: cargo test — 11/11 evals tests incl. failing_run_creates_one_task_idempotently, refailure_after_done_escalates_once_to_p1, incremental_bootstrap_skips_history_then_catches_new_failures, latest_pass_supersedes_earlier_fail, dry_run_creates_nothing
+- ISC-122 (live): first sweep on real data → "cursor initialized — 21 historical trace(s) skipped"; second sweep → "all fresh runs green"; naive dry-run --all had shown a would-be 19-task burst
+- ISC-125: Bash — `./pi -p` session end → hooks audit row `{"hook":"eval-triage","event":"stop","exit":0,"ms":25}`; the fleet's own sessions fired it independently minutes later
+- ISC-126: unit tests — cursor row invisible to store::load (statusline unchanged live); `_trend` row invisible to all() (trend test asserts empty board)
+- ISC-127/128: Bash + unit — statusline reads `ok|▣ 55 open · 0/4 doing · 20 ready` (arrow appears on first change; trend_dir_tracks_last_change_direction covers rise/fall/flat persistence); live on Óli's screen: `▣ 55 open ▼`
+- ISC-129/130: unit kill_switch_and_sweep_lock + live probes — lock absent after sweep; `eval-triage.off` → "disabled" message, removed to re-enable
+- LOOP CLOSED AUTONOMOUSLY (2026-07-02 ~22:00): triage-created tasks T-100..T-104+ on the board; fleet pulled and completed T-100 (gateway-multi-agent cargo test) and T-101 (orchestrate-list-statusline) with no human involvement — failure → task → fix → done

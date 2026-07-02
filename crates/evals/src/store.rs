@@ -67,6 +67,34 @@ pub fn append(path: &Path, t: &Trace) -> Result<(), String> {
     db.put(&id, &to_meta(t), PLACEHOLDER_VEC.to_vec())
 }
 
+/// Triage sweep cursor: count of traces already swept by `evals triage`.
+/// Stored as a reserved row — `!` sorts before the timestamp ids and the row
+/// has no `run` field, so `from_meta` (and therefore `load`) never sees it.
+const CURSOR_ID: &str = "!triage-cursor";
+
+pub fn triage_cursor(path: &Path) -> usize {
+    let p = table(path);
+    if !p.exists() {
+        return 0;
+    }
+    Db::open(&p)
+        .ok()
+        .and_then(|db| db.index.get(CURSOR_ID).map(|e| e.meta.clone()))
+        .and_then(|m| json::parse(&m).ok())
+        .and_then(|v| v.get("triage_cursor").and_then(|x| x.as_f64()))
+        .map(|f| f as usize)
+        .unwrap_or(0)
+}
+
+pub fn set_triage_cursor(path: &Path, n: usize) -> Result<(), String> {
+    let p = table(path);
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut db = if p.exists() { Db::open(&p)? } else { Db::create(&p)? };
+    db.put(CURSOR_ID, &format!(r#"{{"triage_cursor":{n}}}"#), PLACEHOLDER_VEC.to_vec())
+}
+
 /// All traces, in append order (ids are timestamp+count, so sorting == order).
 pub fn load(path: &Path) -> Vec<Trace> {
     let p = table(path);

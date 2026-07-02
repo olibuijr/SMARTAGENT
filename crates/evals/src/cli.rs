@@ -108,6 +108,14 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if counts.is_empty() { return Ok("no runs".into()); }
             Ok(counts.iter().map(|(r, n)| format!("{r}\t{n} cases")).collect::<Vec<_>>().join("\n"))
         }
+        Some("triage") => {
+            // Self-heal loop ingestion: failing runs → deduped, criteria-gated
+            // board tasks the autonomous fleet pulls. Fired by the stop hook.
+            let tasks_db = flag(args, "--tasks-db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/tasks.semdb"));
+            let dry = args.iter().any(|a| a == "--dry-run");
+            let all = args.iter().any(|a| a == "--all");
+            crate::triage::triage(&db(args), &tasks_db, dry, all)
+        }
         _ => Ok(HELP.trim().into()),
     }
 }
@@ -121,6 +129,9 @@ USAGE:
   evals score [--db data/evals.semdb] --run R [--matcher exact|contains|regex-lite]
   evals diff  [--db data/evals.semdb] --run-a A --run-b B [--matcher ...]
   evals runs  [--db data/evals.semdb]
+  evals triage [--db data/evals.semdb] [--tasks-db data/tasks.semdb] [--dry-run]
+              failing runs → deduped board tasks (self-heal loop; p1 escalation
+              on re-failure after a completed fix; skips runs owned by open T-n)
 
 Storage: eval traces live in a semdb table. Legacy --db paths ending in
 *.jsonl are accepted for compatibility and transparently map to *.semdb.

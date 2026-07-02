@@ -76,7 +76,7 @@ run, index). Work every request in this order:
 - **mcp** — connect to any MCP server (stdio or HTTP): tools (`namesOnly`/`filter`), call (`head` caps output).
 - **sandbox** — isolated shell exec (secrets masked, env scrubbed, ulimit caps): run (`tail` keeps last output — right for build logs; default 16KB cap), clean. Warns if namespace isolation is unavailable.
 - **context** — principal identity/context loader: compose, validate, stat.
-- **evals** — trace/score/diff: log, score (`minPass` → error below threshold, `failOnly`), diff, runs.
+- **evals** — trace/score/diff: log, score (`minPass` → error below threshold, `failOnly`), diff, runs, triage (self-heal loop: failing runs → deduped criteria-gated board tasks; incremental via sweep cursor, latest-trace-per-case scoring, p1 escalation on re-failure; fires automatically at agent stop via hook).
 - **rag** — document RAG: ingest (file or `url`, http; re-ingest replaces old chunks), retrieve (`docId` scope, `snippetChars`, `idsOnly`), get (full chunk), delete-doc, stats. `project` = that workspace repo's own corpus.
 
 _(voice — STT/TTS — built but disabled: no titan speech server. See extensions/disabled/.)_

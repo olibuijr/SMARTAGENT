@@ -117,6 +117,32 @@ impl Store {
         Ok(ts)
     }
 
+    /// Open-count trend for the statusline: 1 rising, -1 falling, 0 unknown.
+    /// Persists the last seen open count in a reserved `_trend` row (not a
+    /// `T-` key — invisible to `all()`); the direction of the LAST CHANGE is
+    /// kept until the count moves again, so frequent probes don't flatten it.
+    pub fn trend_dir(&self, open_now: usize) -> i64 {
+        let mut db = match self.db() {
+            Ok(d) => d,
+            Err(_) => return 0,
+        };
+        let stored = db.get("_trend").and_then(|e| json::parse(&e.meta).ok());
+        let prev_open = stored.as_ref().and_then(|v| v.get("open").and_then(Value::as_f64)).map(|f| f as i64);
+        let prev_dir = stored.as_ref().and_then(|v| v.get("dir").and_then(Value::as_f64)).map(|f| f as i64).unwrap_or(0);
+        match prev_open {
+            Some(p) if p == open_now as i64 => prev_dir,
+            None => {
+                let _ = db.put("_trend", &format!(r#"{{"open":{open_now},"dir":0}}"#), PLACEHOLDER_VEC.to_vec());
+                0
+            }
+            Some(p) => {
+                let dir = if (open_now as i64) > p { 1 } else { -1 };
+                let _ = db.put("_trend", &format!(r#"{{"open":{open_now},"dir":{dir}}}"#), PLACEHOLDER_VEC.to_vec());
+                dir
+            }
+        }
+    }
+
     pub fn wip(&self) -> Wip {
         let db = match self.db() {
             Ok(d) => d,
@@ -206,6 +232,23 @@ fn decode(id: &str, meta: &str) -> Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trend_dir_tracks_last_change_direction() {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("trend.semdb");
+        let _ = std::fs::remove_file(&p);
+        let s = Store::open(&p).unwrap();
+        assert_eq!(s.trend_dir(10), 0); // first observation: unknown
+        assert_eq!(s.trend_dir(10), 0); // flat: stays unknown
+        assert_eq!(s.trend_dir(12), 1); // rose
+        assert_eq!(s.trend_dir(12), 1); // flat: keeps last direction
+        assert_eq!(s.trend_dir(9), -1); // fell
+        assert_eq!(s.trend_dir(9), -1); // flat: keeps falling marker
+        // the reserved row is invisible to task listings
+        assert!(s.all().unwrap().is_empty());
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
