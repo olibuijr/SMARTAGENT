@@ -5,32 +5,38 @@
 //!   → {"op":"send"|"steer"|"attach"|"status"|"agents"|"stop","agent"?:s,"message"?:s}
 //!   ← {"ev":"text","data":s} {"ev":"info","data":s} {"ev":"done"}
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use httpc::json::{self, Value};
 
 use crate::beat::Beat;
+use crate::agents_view::{write_agents, tokens_today, status_line};
 use crate::child::{Event, PiChild};
 
 type Clients = Arc<Mutex<Vec<UnixStream>>>;
-type Agents = Arc<BTreeMap<String, Arc<AgentRuntime>>>;
+pub(crate) type Agents = Arc<BTreeMap<String, Arc<AgentRuntime>>>;
+
+const AUTONOMOUS_RULES: &str = "AUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task YOU pulled earlier is in doing → continue it; (b) otherwise, review has an item assigned to you/your role → verify it or move it with a note; (c) otherwise, ready has an unclaimed item → pull the highest-priority one; (d) otherwise → load the Triage skill and promote exactly one UNCLAIMED backlog task by p1→p2→p3, oldest, then smallest id, and pull it. Tasks in doing/review that belong to OTHER agents are never a reason to stay idle — skip them and take unclaimed backlog work. If the backlog is truly empty of unclaimed tasks, say so in one sentence — never answer with an empty turn. One task in your doing, maximum.";
 
 struct Flags {
     agents: Vec<String>,
+    chat_agents: Vec<String>,
     heartbeat_secs: u64,
     autonomous: bool,
 }
 
-struct AgentRuntime {
-    name: String,
-    child: Arc<Mutex<PiChild>>,
-    clients: Clients,
-    beat: Arc<Mutex<Beat>>,
-    queued_beat: Arc<Mutex<Option<String>>>,
+pub(crate) struct AgentRuntime {
+    pub(crate) name: String,
+    pub(crate) child: Arc<Mutex<PiChild>>,
+    pub(crate) clients: Clients,
+    pub(crate) beat: Arc<Mutex<Beat>>,
+    pub(crate) queued_beat: Arc<Mutex<Option<String>>>,
+    pending_prompts: Arc<Mutex<VecDeque<String>>>,
+    pub(crate) busy_since: Arc<Mutex<Option<Instant>>>,
 }
 
 fn parse_flags(args: &[String]) -> Flags {
@@ -46,6 +52,7 @@ fn parse_flags(args: &[String]) -> Flags {
         });
     let mut f = Flags {
         agents: Vec::new(),
+        chat_agents: Vec::new(),
         heartbeat_secs: cfg
             .resolve("heartbeat_secs", "SMARTAGENT_HEARTBEAT_SECS", None)
             .and_then(|v| v.parse().ok())
@@ -72,6 +79,11 @@ fn parse_flags(args: &[String]) -> Flags {
                     .unwrap_or(f.heartbeat_secs)
             }
             "--autonomous" => f.autonomous = true,
+            "--chat" => {
+                if let Some(v) = it.next() {
+                    f.chat_agents.extend(split_agents(v));
+                }
+            }
             _ => {}
         }
     }
@@ -125,18 +137,16 @@ pub fn serve(args: &[String]) -> Result<(), String> {
     let listener =
         UnixListener::bind(&sock).map_err(|e| format!("bind {}: {e}", sock.display()))?;
 
+    reconcile_board_roster(&repo_root, &flags.agents);
+
     let mut map = BTreeMap::new();
+    // Worker agents (autonomous) + conversational chat agents (never
+    // auto-prompted — they idle waiting for a real message, e.g. Telegram).
     for name in &flags.agents {
-        map.insert(
-            name.clone(),
-            Arc::new(spawn_agent(
-                name,
-                &repo_root,
-                &data_dir,
-                flags.heartbeat_secs,
-                flags.autonomous,
-            )?),
-        );
+        map.insert(name.clone(), Arc::new(spawn_agent(name, &repo_root, &data_dir, flags.heartbeat_secs, flags.autonomous)?));
+    }
+    for name in &flags.chat_agents {
+        map.insert(name.clone(), Arc::new(spawn_agent(name, &repo_root, &data_dir, flags.heartbeat_secs, false)?));
     }
     let agents: Agents = Arc::new(map);
     eprintln!(
@@ -155,6 +165,54 @@ pub fn serve(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn reconcile_board_roster(repo_root: &std::path::Path, live_agents: &[String]) {
+    if live_agents.is_empty() {
+        return;
+    }
+    let tasks = repo_root.join("target/release/tasks");
+    let _ = std::process::Command::new(&tasks)
+        .args(["wip", "--doing", &live_agents.len().to_string()])
+        .current_dir(repo_root)
+        .output();
+    for col in ["doing", "review"] {
+        let Ok(out) = std::process::Command::new(&tasks)
+            .args(["list", "--col", col])
+            .current_dir(repo_root)
+            .output()
+        else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        for id in orphan_task_ids(&text, live_agents) {
+            let _ = std::process::Command::new(&tasks)
+                .args(["move", &id, "ready", "--force"])
+                .current_dir(repo_root)
+                .output();
+        }
+    }
+}
+
+fn orphan_task_ids(list_output: &str, live_agents: &[String]) -> Vec<String> {
+    list_output
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let id = parts.next()?;
+            let owner = line
+                .split_whitespace()
+                .find_map(|part| part.strip_prefix('@'))?;
+            if live_agents.iter().any(|a| a == owner) {
+                None
+            } else {
+                Some(id.to_string())
+            }
+        })
+        .collect()
+}
+
 fn spawn_agent(
     name: &str,
     repo_root: &std::path::Path,
@@ -162,10 +220,17 @@ fn spawn_agent(
     heartbeat_secs: u64,
     autonomous: bool,
 ) -> Result<AgentRuntime, String> {
-    let mut child = PiChild::spawn(repo_root, name)?;
+    let static_prompt = if autonomous {
+        Some(AUTONOMOUS_RULES)
+    } else {
+        None
+    };
+    let mut child = PiChild::spawn(repo_root, name, static_prompt)?;
     let clients: Clients = Arc::new(Mutex::new(Vec::new()));
     let beat = Beat::new(repo_root, data_dir);
     let queued_beat = Mutex::new(None);
+    let pending_prompts = Arc::new(Mutex::new(VecDeque::new()));
+    let busy_since = Arc::new(Mutex::new(None));
     let transcript = data_dir.join("gateway").join(format!("{name}.log"));
     if let Some(d) = transcript.parent() {
         let _ = std::fs::create_dir_all(d);
@@ -181,6 +246,8 @@ fn spawn_agent(
         clients: clients.clone(),
         beat: beat.clone(),
         queued_beat: queued_beat.clone(),
+        pending_prompts: pending_prompts.clone(),
+        busy_since: busy_since.clone(),
     };
     start_event_pump(
         name.to_string(),
@@ -190,10 +257,17 @@ fn spawn_agent(
         events,
         beat.clone(),
         child.clone(),
+        busy_since.clone(),
     );
     let prompt_gate = Arc::new(Mutex::new(PromptGate::default()));
     if autonomous {
-        start_work_chaser(name.to_string(), child.clone(), beat.clone(), prompt_gate.clone());
+        start_work_chaser(
+            name.to_string(),
+            child.clone(),
+            beat.clone(),
+            prompt_gate.clone(),
+            pending_prompts.clone(),
+        );
     }
     start_heartbeat(
         name.to_string(),
@@ -203,6 +277,7 @@ fn spawn_agent(
         heartbeat_secs,
         autonomous,
         prompt_gate,
+        pending_prompts,
     );
     Ok(runtime)
 }
@@ -215,6 +290,7 @@ fn start_event_pump(
     events: std::sync::mpsc::Receiver<Event>,
     beat: Arc<Mutex<Beat>>,
     child: Arc<Mutex<PiChild>>,
+    busy_since: Arc<Mutex<Option<Instant>>>,
 ) {
     std::thread::spawn(move || {
         let mut empty_turns = 0u32;
@@ -228,6 +304,7 @@ fn start_event_pump(
                     );
                 }
                 Event::State(b) => {
+                    *busy_since.lock().unwrap() = if b { Some(Instant::now()) } else { None };
                     broadcast(
                         &clients,
                         &format!(
@@ -293,6 +370,7 @@ fn start_heartbeat(
     heartbeat_secs: u64,
     autonomous: bool,
     prompt_gate: Arc<Mutex<PromptGate>>,
+    pending_prompts: Arc<Mutex<VecDeque<String>>>,
 ) {
     let period = Duration::from_secs(heartbeat_secs.max(10));
     std::thread::spawn(move || {
@@ -307,9 +385,15 @@ fn start_heartbeat(
             beat.lock()
                 .unwrap()
                 .log(&agent, "beat", if busy { "busy" } else { "idle" }, &text);
-            match heartbeat_action(busy, autonomous, beat.lock().unwrap().has_autonomous_work()) {
+            match heartbeat_action(
+                busy,
+                autonomous,
+                beat.lock()
+                    .unwrap()
+                    .has_autonomous_work_for(&agent, role_of(&agent)),
+            ) {
                 HeartbeatAction::Steer => {
-                    let _ = child.lock().unwrap().command("steer", Some(&text));
+                    queue_prompt(&pending_prompts, text);
                 }
                 HeartbeatAction::Prompt => {
                     if prompt_gate.lock().unwrap().allow() {
@@ -324,9 +408,7 @@ fn start_heartbeat(
 }
 
 fn autonomous_prompt(text: &str) -> String {
-    format!(
-        "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task YOU pulled earlier is in doing → continue it; (b) otherwise, ready has an unclaimed item → pull the highest-priority one; (c) otherwise → load the Triage skill and promote exactly one UNCLAIMED backlog task by p1→p2→p3, oldest, then smallest id, and pull it. Tasks in doing/review that belong to OTHER agents are never a reason to stay idle — skip them and take unclaimed backlog work. If the backlog is truly empty of unclaimed tasks, say so in one sentence — never answer with an empty turn. One task in your doing, maximum."
-    )
+    text.to_string()
 }
 
 /// Shared cooldown so the heartbeat and the work-chaser never double-prompt:
@@ -338,7 +420,10 @@ struct PromptGate {
 
 impl PromptGate {
     fn allow(&mut self) -> bool {
-        let ok = self.last.map(|t| t.elapsed() >= Duration::from_secs(20)).unwrap_or(true);
+        let ok = self
+            .last
+            .map(|t| t.elapsed() >= Duration::from_secs(20))
+            .unwrap_or(true);
         if ok {
             self.last = Some(std::time::Instant::now());
         }
@@ -356,6 +441,7 @@ fn start_work_chaser(
     child: Arc<Mutex<PiChild>>,
     beat: Arc<Mutex<Beat>>,
     prompt_gate: Arc<Mutex<PromptGate>>,
+    pending_prompts: Arc<Mutex<VecDeque<String>>>,
 ) {
     std::thread::spawn(move || {
         let mut prev_busy = false;
@@ -367,18 +453,46 @@ fn start_work_chaser(
             if !finished_turn {
                 continue;
             }
+            if drain_pending_prompt(&child, &pending_prompts) {
+                continue;
+            }
             let (has_work, text) = {
                 let mut b = beat.lock().unwrap();
-                let w = b.has_autonomous_work();
+                let w = b.has_autonomous_work_for(&agent, role_of(&agent));
                 (w, b.compose(false))
             };
             if has_work && prompt_gate.lock().unwrap().allow() {
-                beat.lock().unwrap().log(&agent, "chase", "idle", "work-chaser: immediate next-task prompt");
+                beat.lock().unwrap().log(
+                    &agent,
+                    "chase",
+                    "idle",
+                    "work-chaser: immediate next-task prompt",
+                );
                 let auto = autonomous_prompt(&text);
                 let _ = child.lock().unwrap().command("prompt", Some(&auto));
             }
         }
     });
+}
+
+fn queue_prompt(queue: &Arc<Mutex<VecDeque<String>>>, text: String) {
+    queue.lock().unwrap().push_back(text);
+}
+
+fn drain_pending_prompt(child: &Arc<Mutex<PiChild>>, queue: &Arc<Mutex<VecDeque<String>>>) -> bool {
+    let Some(next) = queue.lock().unwrap().pop_front() else {
+        return false;
+    };
+    if child
+        .lock()
+        .unwrap()
+        .command("prompt", Some(&next))
+        .is_err()
+    {
+        queue.lock().unwrap().push_front(next);
+        return false;
+    }
+    true
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -436,7 +550,7 @@ fn handle_client(stream: UnixStream, agents: Agents) {
         let requested = v.get("agent").and_then(Value::as_str).unwrap_or("");
         match op {
             "agents" => write_agents(&mut write_side, &agents),
-            "send" | "steer" | "attach" | "status" | "stop" => {
+            "send" | "steer" | "attach" | "ask" | "status" | "stop" => {
                 let Some(agent) = select_agent(&agents, requested) else {
                     write_info_done(&mut write_side, &format!("unknown agent {requested}"));
                     continue;
@@ -460,6 +574,20 @@ fn select_agent(agents: &Agents, requested: &str) -> Option<Arc<AgentRuntime>> {
 
 fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &mut UnixStream) {
     match op {
+        "ask" => {
+            // Request→reply: register this connection as a broadcast client so
+            // it receives the agent's reply turn, THEN deliver the prompt.
+            if let Ok(s) = write_side.try_clone() {
+                clients_lock(&agent.clients).push(s);
+            }
+            let busy = agent.child.lock().unwrap().is_busy();
+            if busy {
+                queue_prompt(&agent.pending_prompts, msg.to_string());
+            } else {
+                let _ = agent.child.lock().unwrap().command("prompt", Some(msg));
+            }
+            agent.beat.lock().unwrap().log(&agent.name, "user", if busy { "queued" } else { "ask" }, msg);
+        }
         "send" | "steer" => {
             let mut full = String::new();
             if let Some(b) = agent.queued_beat.lock().unwrap().take() {
@@ -467,15 +595,17 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
                 full.push_str("\n\n");
             }
             full.push_str(msg);
-            let sent = if op == "steer" {
+            let busy = agent.child.lock().unwrap().is_busy();
+            let sent = if busy {
+                queue_prompt(&agent.pending_prompts, full);
+                Ok("queued")
+            } else {
                 agent
                     .child
                     .lock()
                     .unwrap()
-                    .command("steer", Some(&full))
-                    .map(|_| "steer")
-            } else {
-                agent.child.lock().unwrap().send_auto(&full)
+                    .command("prompt", Some(&full))
+                    .map(|_| "prompt")
             };
             match sent {
                 Ok(mode) => {
@@ -498,7 +628,7 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
                 .as_bytes(),
             );
             if let Ok(s) = write_side.try_clone() {
-                agent.clients.lock().unwrap().push(s);
+                clients_lock(&agent.clients).push(s);
             }
         }
         "status" => {
@@ -511,14 +641,16 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
                 )
             };
             let queued = agent.queued_beat.lock().unwrap().is_some();
-            let fleet_tokens = tokens_today(None).total();
+            let tokens = tokens_today(Some(&agent.name)).total();
             write_info_done(
                 write_side,
-                &format!(
-                    "agent {}: {} | last beat {last} | queued beat: {queued} | doing: {} | tokens today: {fleet_tokens}",
-                    agent.name,
-                    if busy { "working" } else { "idle" },
-                    doing
+                &status_line(
+                    &agent.name,
+                    busy,
+                    &last,
+                    queued,
+                    &doing,
+                    tokens,
                 ),
             );
         }
@@ -531,7 +663,7 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
 }
 
 /// Role by agent name — mirrors MULTIROLE.md's default team.
-fn role_of(name: &str) -> &'static str {
+pub(crate) fn role_of(name: &str) -> &'static str {
     match name {
         // Fleet roster: famous developers/geeks (distinct initials — the
         // sidebar avatars are circled first letters).
@@ -539,6 +671,7 @@ fn role_of(name: &str) -> &'static str {
         "ada" | "dennis" | "woz" | "builder" => "Builder",
         "grace" | "turing" | "qa" => "QA",
         "ken" | "margaret" | "ops" => "Ops",
+        "jeeves" => "Assistant",
         _ => "Agent",
     }
 }
@@ -546,128 +679,6 @@ fn role_of(name: &str) -> &'static str {
 /// Structured last activity from the agent's own transcript: the recent tool
 /// chain ("tasks→memory→codeindex") and its last words (clean word-boundary
 /// tail) as separate fields — raw log tails render as garbage in the panel.
-fn last_activity(name: &str) -> (String, String) {
-    let path = semdb::config::Config::load()
-        .data_dir()
-        .join("gateway")
-        .join(format!("{name}.log"));
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return (String::new(), String::new());
-    };
-    let tail: String = text
-        .chars()
-        .rev()
-        .take(1500)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    let tools: Vec<&str> = tail
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("⚙ "))
-        .collect();
-    let chain = tools
-        .iter()
-        .rev()
-        .take(3)
-        .rev()
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("→");
-    let words_raw = tail
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("⚙ ") && *l != "---")
-        .last()
-        .unwrap_or("");
-    // keep the freshest words: take the LAST ≤56 chars, then trim to a word start
-    let w: Vec<&str> = words_raw.split_whitespace().collect();
-    let mut words = String::new();
-    for word in w.iter().rev() {
-        if words.chars().count() + word.chars().count() + 1 > 56 {
-            break;
-        }
-        if words.is_empty() {
-            words = (*word).to_string();
-        } else {
-            words = format!("{word} {words}");
-        }
-    }
-    (chain, words)
-}
-
-#[derive(Default)]
-struct TokenTotals {
-    input: u64,
-    output: u64,
-    cache_read: u64,
-    cache_write: u64,
-}
-
-impl TokenTotals {
-    fn total(&self) -> u64 {
-        self.input + self.output + self.cache_read + self.cache_write
-    }
-}
-
-fn tokens_today(agent: Option<&str>) -> TokenTotals {
-    let path = semdb::config::Config::load()
-        .data_dir()
-        .join("medvitund.semdb");
-    let Ok(db) = semdb::storage::Db::open(&path) else {
-        return TokenTotals::default();
-    };
-    let today = crate::beat::human_day_prefix();
-    let mut out = TokenTotals::default();
-    for entry in db.index.values() {
-        let Ok(v) = json::parse(&entry.meta) else {
-            continue;
-        };
-        if v.get("kind").and_then(Value::as_str) != Some("turn") {
-            continue;
-        }
-        if let Some(a) = agent {
-            if v.get("agent").and_then(Value::as_str) != Some(a) {
-                continue;
-            }
-        }
-        if v.get("day").and_then(Value::as_str) != Some(today.as_str()) {
-            continue;
-        }
-        out.input += meta_u64(&v, "input");
-        out.output += meta_u64(&v, "output");
-        out.cache_read += meta_u64(&v, "cacheRead");
-        out.cache_write += meta_u64(&v, "cacheWrite");
-    }
-    out
-}
-
-fn meta_u64(v: &Value, key: &str) -> u64 {
-    v.get(key).and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64
-}
-
-fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
-    for agent in agents.values() {
-        let busy = agent.child.lock().unwrap().is_busy();
-        let doing = agent.beat.lock().unwrap().doing_short();
-        let state = if busy { "working" } else { "idle" };
-        let (tools, words) = last_activity(&agent.name);
-        let tokens = tokens_today(Some(&agent.name));
-        let line = format!(
-            "{{\"ev\":\"info\",\"data\":\"{}\\t{}\\t{}\\t{}\\t{}\\t{}\\t{}\"}}\n",
-            json::escape(&agent.name),
-            state,
-            json::escape(&doing),
-            role_of(&agent.name),
-            tokens.total(),
-            json::escape(&tools),
-            json::escape(&words)
-        );
-        let _ = write_side.write_all(line.as_bytes());
-    }
-    let _ = write_side.write_all(b"{\"ev\":\"done\"}\n");
-}
-
 fn write_info_done(write_side: &mut UnixStream, text: &str) {
     let _ = write_side.write_all(
         format!(
@@ -678,8 +689,18 @@ fn write_info_done(write_side: &mut UnixStream, text: &str) {
     );
 }
 
+fn clients_lock(clients: &Clients) -> std::sync::MutexGuard<'_, Vec<UnixStream>> {
+    // T-84: attach clients are deliberately disposable (tmux panes and
+    // terminal pipes can be SIGKILLed). A panic while touching the client list
+    // must not poison the daemon's broadcast path forever; recover the list,
+    // then let broadcast prune broken sockets on the next write.
+    clients
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn broadcast(clients: &Clients, line: &str) {
-    let mut list = clients.lock().unwrap();
+    let mut list = clients_lock(clients);
     list.retain_mut(|c| c.write_all(line.as_bytes()).is_ok());
 }
 
@@ -737,6 +758,13 @@ mod tests {
     }
 
     #[test]
+    fn orphan_task_ids_detects_non_roster_owners() {
+        let live = vec!["linus".to_string(), "grace".to_string()];
+        let rows = "T-1\tdoing\tp2\told owner @builder\nT-2\tdoing\tp2\tlive owner @linus\nT-3\treview\tp2\tother @dev3\n";
+        assert_eq!(orphan_task_ids(rows, &live), vec!["T-1", "T-3"]);
+    }
+
+    #[test]
     fn agent_list_dedupes() {
         assert_eq!(
             dedupe_agents(vec!["main".into(), "qa".into(), "main".into()]),
@@ -757,6 +785,33 @@ mod tests {
         );
     }
 
+
+
+
+    #[test]
+    fn queued_prompts_keep_fifo_order_for_busy_beat_and_send_soak() {
+        let q = Arc::new(Mutex::new(VecDeque::new()));
+        queue_prompt(&q, "beat-while-busy".to_string());
+        for i in 0..5 {
+            queue_prompt(&q, format!("send-{i}"));
+        }
+        let drained: Vec<String> = (0..6)
+            .filter_map(|_| q.lock().unwrap().pop_front())
+            .collect();
+        assert_eq!(
+            drained,
+            vec![
+                "beat-while-busy",
+                "send-0",
+                "send-1",
+                "send-2",
+                "send-3",
+                "send-4"
+            ]
+        );
+        assert!(q.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn cross_model_resume_reject_regression_recovers() {
         // A 5.4-mini session resumed under a future/different model can reject
@@ -771,7 +826,46 @@ mod tests {
         ];
         assert_eq!(
             actions,
-            [MuteAction::Observe, MuteAction::CompactRetry, MuteAction::Rotate]
+            [
+                MuteAction::Observe,
+                MuteAction::CompactRetry,
+                MuteAction::Rotate
+            ]
         );
+    }
+
+    #[test]
+    fn autonomous_prompt_carries_only_dynamic_beat_text() {
+        let beat =
+            "⏲ heartbeat 2026-07-02 22:44:40Z | session up 2m10s | you are working\nREADY (1)";
+        let prompt = autonomous_prompt(beat);
+        assert_eq!(prompt, beat);
+        assert!(!prompt.contains("AUTONOMOUS MODE"));
+        assert!(AUTONOMOUS_RULES.contains("AUTONOMOUS MODE"));
+    }
+
+    #[test]
+    fn killed_attach_client_is_pruned_without_poisoning_broadcasts() {
+        // Regression for T-84: an attached terminal/tmux client can disappear
+        // ungracefully. The daemon must treat that as a dead subscriber, not as
+        // a fatal broadcast error or a permanently poisoned client registry.
+        let clients: Clients = Arc::new(Mutex::new(Vec::new()));
+        let (server_side, client_side) = UnixStream::pair().unwrap();
+        clients_lock(&clients).push(server_side);
+        drop(client_side);
+
+        broadcast(&clients, "{\"ev\":\"text\",\"data\":\"hi\"}\n");
+        assert_eq!(clients_lock(&clients).len(), 0);
+
+        // Simulate a panic while holding the registry: subsequent broadcasts
+        // must recover the inner list instead of panicking on PoisonError.
+        let poisoned = clients.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("synthetic attach-list panic");
+        })
+        .join();
+        broadcast(&clients, "{\"ev\":\"done\"}\n");
+        assert_eq!(clients_lock(&clients).len(), 0);
     }
 }

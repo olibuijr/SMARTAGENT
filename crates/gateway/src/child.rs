@@ -49,10 +49,14 @@ pub struct PiChild {
 
 impl PiChild {
     /// Spawn `<repo>/pi --mode rpc --session-id gw-<agent>` from the repo root.
-    pub fn spawn(repo_root: &std::path::Path, agent: &str) -> Result<PiChild, String> {
+    pub fn spawn(
+        repo_root: &std::path::Path,
+        agent: &str,
+        static_prompt: Option<&str>,
+    ) -> Result<PiChild, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         let busy = Arc::new(Mutex::new(false));
-        let (child, stdin) = spawn_process(repo_root, agent, 0, &tx, busy.clone())?;
+        let (child, stdin) = spawn_process(repo_root, agent, 0, static_prompt, &tx, busy.clone())?;
         Ok(PiChild {
             child,
             stdin: Arc::new(Mutex::new(stdin)),
@@ -74,6 +78,7 @@ impl PiChild {
             &self.repo_root,
             &self.agent,
             self.generation,
+            None,
             &self.tx,
             self.busy.clone(),
         )?;
@@ -103,13 +108,6 @@ impl PiChild {
         stdin.flush().map_err(|e| e.to_string())
     }
 
-    /// Route a user message: `prompt` when idle, `steer` when busy.
-    pub fn send_auto(&self, message: &str) -> Result<&'static str, String> {
-        let mode = if self.is_busy() { "steer" } else { "prompt" };
-        self.command(mode, Some(message))?;
-        Ok(mode)
-    }
-
     pub fn kill(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -120,6 +118,7 @@ fn spawn_process(
     repo_root: &std::path::Path,
     agent: &str,
     generation: u64,
+    static_prompt: Option<&str>,
     tx: &Sender<Event>,
     busy: Arc<Mutex<bool>>,
 ) -> Result<(Child, std::process::ChildStdin), String> {
@@ -129,8 +128,9 @@ fn spawn_process(
     } else {
         format!("gw-{agent}-recovered-{generation}")
     };
+    let args = spawn_args(&session, static_prompt);
     let mut child = Command::new(&launcher)
-        .args(["--mode", "rpc", "--session-id", &session])
+        .args(&args)
         // Board ownership: tasks current_owner() reads this, so pulls made by
         // this agent are tagged @<agent> — per-agent attribution on the board
         // and in the sidebar instead of everything showing the unix user.
@@ -146,6 +146,20 @@ fn spawn_process(
     let tx = tx.clone();
     std::thread::spawn(move || reader_loop(stdout, tx, busy));
     Ok((child, stdin))
+}
+
+fn spawn_args(session: &str, static_prompt: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "--mode".to_string(),
+        "rpc".to_string(),
+        "--session-id".to_string(),
+        session.to_string(),
+    ];
+    if let Some(prompt) = static_prompt {
+        args.push("--append-system-prompt".to_string());
+        args.push(prompt.to_string());
+    }
+    args
 }
 
 fn now_millis() -> u64 {
@@ -221,6 +235,26 @@ fn num(v: &Value, key: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_args_append_static_prompt_once() {
+        let args = spawn_args("gw-main", Some("static autonomous rules"));
+        assert_eq!(
+            args,
+            vec![
+                "--mode",
+                "rpc",
+                "--session-id",
+                "gw-main",
+                "--append-system-prompt",
+                "static autonomous rules"
+            ]
+        );
+        assert_eq!(
+            spawn_args("gw-main", None),
+            vec!["--mode", "rpc", "--session-id", "gw-main"]
+        );
+    }
 
     #[test]
     fn usage_from_message_end() {

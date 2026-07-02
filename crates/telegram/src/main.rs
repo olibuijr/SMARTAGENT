@@ -102,6 +102,12 @@ fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
     let from = v.get("from").and_then(Value::as_str).unwrap_or("?").to_string();
     let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
     eprintln!("[tg] inbound from @{from} ({chat}): {}", &text.chars().take(60).collect::<String>());
+    if let Some(result) = slash_command(&text) {
+        let reply = result.unwrap_or_else(|e| format!("command error: {e}"));
+        eprintln!("[tg] slash /{}: {} chars", text.split_whitespace().next().unwrap_or(""), reply.len());
+        let _ = send(&["send".into(), "--chat".into(), chat, "--text".into(), reply]);
+        return;
+    }
     let Some(agent) = gateway_agent else { println!("{line}"); return };
     let prompt = format!(
         "Telegram message from @{from}: {text}\n(Reply concisely — your reply text is relayed straight back to Telegram.)"
@@ -124,15 +130,42 @@ fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
 }
 
 fn gateway_send(agent: &str, msg: &str) -> Result<String, String> {
-    // Capture stdout — it IS the agent's reply (one-shot send since T-52).
+    // `ask` = request→reply: capture the agent's actual reply turn (send only
+    // returned a delivery receipt). 90s reply budget.
     let out = Command::new("target/release/gateway")
-        .args(["send", "--agent", agent, msg])
-        .output().map_err(|e| format!("run gateway send: {e}"))?;
+        .args(["ask", "--agent", agent, "--timeout", "90", msg])
+        .output().map_err(|e| format!("run gateway ask: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
-        Err(format!("gateway send failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+        Err(format!("gateway ask failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
     }
+}
+
+/// Telegram slash commands run the platform binaries directly (no LLM turn) and
+/// relay their output — same set as the TUI slash commands.
+fn slash_command(text: &str) -> Option<Result<String, String>> {
+    let mut parts = text.trim().splitn(2, char::is_whitespace);
+    let cmd = parts.next()?.strip_prefix('/')?;
+    let arg = parts.next().unwrap_or("").trim();
+    let run = |bin: &str, args: &[&str]| -> Result<String, String> {
+        let out = Command::new(format!("target/release/{bin}"))
+            .args(args).output().map_err(|e| format!("{bin}: {e}"))?;
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(if s.is_empty() { "(no output)".into() } else { s })
+    };
+    Some(match cmd {
+        "start" | "help" => Ok(
+            "SMARTAGENT bot. Talk to me normally, or use:\n/board — kanban board\n/tasks — task list\n/status — service status\n/skills [q] — skills\n/agents — fleet state\n/runs — active workflows\n/memory <q> — recall".into()),
+        "board" => run("tasks", &["board", "--db", "data/tasks.semdb"]),
+        "tasks" => run("tasks", &["list", "--col", "ready", "--db", "data/tasks.semdb"]),
+        "status" => run("supervise", &["status"]),
+        "agents" => run("gateway", &["agents"]),
+        "runs" => run("workflow", &["runs", "--live", "--db", "data/workflow.semdb"]),
+        "skills" => run("skills", if arg.is_empty() { vec!["list"] } else { vec!["match", arg] }.as_slice()),
+        "memory" if !arg.is_empty() => run("memory", &["recall", "--dir", "data/memory", "--text", arg]),
+        _ => return None, // unknown slash → treat as normal chat
+    })
 }
 
 fn bot_token() -> Result<String, String> {
