@@ -191,6 +191,10 @@ fn spawn_agent(
         beat.clone(),
         child.clone(),
     );
+    let prompt_gate = Arc::new(Mutex::new(PromptGate::default()));
+    if autonomous {
+        start_work_chaser(name.to_string(), child.clone(), beat.clone(), prompt_gate.clone());
+    }
     start_heartbeat(
         name.to_string(),
         child,
@@ -198,6 +202,7 @@ fn spawn_agent(
         queued_beat,
         heartbeat_secs,
         autonomous,
+        prompt_gate,
     );
     Ok(runtime)
 }
@@ -287,6 +292,7 @@ fn start_heartbeat(
     queued: Arc<Mutex<Option<String>>>,
     heartbeat_secs: u64,
     autonomous: bool,
+    prompt_gate: Arc<Mutex<PromptGate>>,
 ) {
     let period = Duration::from_secs(heartbeat_secs.max(10));
     std::thread::spawn(move || {
@@ -306,12 +312,70 @@ fn start_heartbeat(
                     let _ = child.lock().unwrap().command("steer", Some(&text));
                 }
                 HeartbeatAction::Prompt => {
-                    let auto = format!(
-                    "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task YOU pulled earlier is in doing → continue it; (b) otherwise, ready has an unclaimed item → pull the highest-priority one; (c) otherwise → load the Triage skill and promote exactly one UNCLAIMED backlog task by p1→p2→p3, oldest, then smallest id, and pull it. Tasks in doing/review that belong to OTHER agents are never a reason to stay idle — skip them and take unclaimed backlog work. If the backlog is truly empty of unclaimed tasks, say so in one sentence — never answer with an empty turn. One task in your doing, maximum."
-                );
-                    let _ = child.lock().unwrap().command("prompt", Some(&auto));
+                    if prompt_gate.lock().unwrap().allow() {
+                        let auto = autonomous_prompt(&text);
+                        let _ = child.lock().unwrap().command("prompt", Some(&auto));
+                    }
                 }
                 HeartbeatAction::Queue => *queued.lock().unwrap() = Some(text),
+            }
+        }
+    });
+}
+
+fn autonomous_prompt(text: &str) -> String {
+    format!(
+        "{text}\nAUTONOMOUS MODE — act now, do not end the turn without one of these: (a) a task YOU pulled earlier is in doing → continue it; (b) otherwise, ready has an unclaimed item → pull the highest-priority one; (c) otherwise → load the Triage skill and promote exactly one UNCLAIMED backlog task by p1→p2→p3, oldest, then smallest id, and pull it. Tasks in doing/review that belong to OTHER agents are never a reason to stay idle — skip them and take unclaimed backlog work. If the backlog is truly empty of unclaimed tasks, say so in one sentence — never answer with an empty turn. One task in your doing, maximum."
+    )
+}
+
+/// Shared cooldown so the heartbeat and the work-chaser never double-prompt:
+/// at most one autonomous prompt per 20s per agent.
+#[derive(Default)]
+struct PromptGate {
+    last: Option<std::time::Instant>,
+}
+
+impl PromptGate {
+    fn allow(&mut self) -> bool {
+        let ok = self.last.map(|t| t.elapsed() >= Duration::from_secs(20)).unwrap_or(true);
+        if ok {
+            self.last = Some(std::time::Instant::now());
+        }
+        ok
+    }
+}
+
+/// Work chaser (throughput): the heartbeat alone leaves an idle gap of up to
+/// a full period between finishing one task and pulling the next. This thread
+/// watches for the busy→idle transition and re-prompts IMMEDIATELY when the
+/// board still has unclaimed work — tasks chain back-to-back instead of
+/// waiting out the beat.
+fn start_work_chaser(
+    agent: String,
+    child: Arc<Mutex<PiChild>>,
+    beat: Arc<Mutex<Beat>>,
+    prompt_gate: Arc<Mutex<PromptGate>>,
+) {
+    std::thread::spawn(move || {
+        let mut prev_busy = false;
+        loop {
+            std::thread::sleep(Duration::from_secs(5));
+            let busy = child.lock().unwrap().is_busy();
+            let finished_turn = prev_busy && !busy;
+            prev_busy = busy;
+            if !finished_turn {
+                continue;
+            }
+            let (has_work, text) = {
+                let mut b = beat.lock().unwrap();
+                let w = b.has_autonomous_work();
+                (w, b.compose(false))
+            };
+            if has_work && prompt_gate.lock().unwrap().allow() {
+                beat.lock().unwrap().log(&agent, "chase", "idle", "work-chaser: immediate next-task prompt");
+                let auto = autonomous_prompt(&text);
+                let _ = child.lock().unwrap().command("prompt", Some(&auto));
             }
         }
     });

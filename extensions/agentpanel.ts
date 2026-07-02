@@ -48,6 +48,7 @@ type Agent = { name: string; state: string; task: string; role: string; tokens: 
 type Run = { id: string; def: string; step: string; task: string };
 
 let agents: Agent[] = [];
+let doingByOwner: Record<string, string> = {};
 let runs: Run[] = [];
 let gatewayUp = false;
 let frame = 0;
@@ -85,6 +86,16 @@ function refresh(): void {
 	} catch {
 		agents = [];
 		gatewayUp = false;
+	}
+	try {
+		const out = execFileSync(BIN("tasks"), ["list", "--col", "doing", "--db", join(ROOT, "data", "tasks.semdb")], { timeout: 3000, encoding: "utf8" });
+		doingByOwner = {};
+		for (const l of out.split("\n")) {
+			const m = l.match(/^(T-\d+)\tdoing\tp\d\t(.*?)(?:\s+@(\S+))?$/);
+			if (m && m[3]) doingByOwner[m[3]] = `${m[1]} ${m[2]}`;
+		}
+	} catch {
+		doingByOwner = {};
 	}
 	try {
 		const out = execFileSync(BIN("workflow"), ["runs", "--live", "--db", join(ROOT, "data", "workflow.semdb"), "--tasks-db", join(ROOT, "data", "tasks.semdb")], { timeout: 3000, encoding: "utf8" });
@@ -181,6 +192,13 @@ function render(width: number): string[] {
 			const tok = humanTokens(a.tokens);
 			const gapw = Math.max(1, cardw - vlen(head) - tok.length);
 			const body: string[] = [head + " ".repeat(gapw) + dim(tok)];
+			const own = doingByOwner[a.name];
+			if (own) {
+				// task sub-card: boxed row inside the agent card
+				body.push(fg("239", "┌" + "─".repeat(Math.max(4, cardw - 6)) + "┐"));
+				body.push(fg("239", "│") + fg("222", " ▣ " + clip(own, cardw - 10)) + " " + fg("239", "│"));
+				body.push(fg("239", "└" + "─".repeat(Math.max(4, cardw - 6)) + "┘"));
+			}
 			if (a.tools) {
 				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
 				body.push(dim("⚙ ") + fg("252", clip(a.tools, cardw - 6)) + " " + tick);
@@ -309,6 +327,14 @@ export default function (pi: ExtensionAPI) {
 		if (ctx.mode === "tui" && !active) open(ctx);
 	});
 	pi.on("tool_execution_end", async (_e, ctx: any) => {
+		ctxRef = ctx;
+		tuiRef?.requestRender();
+	});
+	pi.on("turn_end", async (_e, ctx: any) => {
+		ctxRef = ctx; // context usage updates after each turn's LLM response
+		tuiRef?.requestRender();
+	});
+	pi.on("agent_end", async (_e, ctx: any) => {
 		ctxRef = ctx;
 		tuiRef?.requestRender();
 	});

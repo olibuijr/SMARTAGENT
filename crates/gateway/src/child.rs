@@ -131,6 +131,10 @@ fn spawn_process(
     };
     let mut child = Command::new(&launcher)
         .args(["--mode", "rpc", "--session-id", &session])
+        // Board ownership: tasks current_owner() reads this, so pulls made by
+        // this agent are tagged @<agent> — per-agent attribution on the board
+        // and in the sidebar instead of everything showing the unix user.
+        .env("SMARTAGENT_GATEWAY_AGENT", agent)
         .current_dir(repo_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
