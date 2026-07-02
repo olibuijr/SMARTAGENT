@@ -1,11 +1,17 @@
-//! Append-only JSONL event journal — the durability layer (Temporal concept:
-//! state = replay of the event history). One JSON object per line; a torn
-//! tail line (no trailing newline) is ignored on replay.
+//! Durable job store backed by a semdb table (rule 7: all data in semdb tables,
+//! not bespoke JSONL). The public API stays event-shaped — `append(Event)` +
+//! `replay() -> jobs` — so the CLI and runner are unchanged, but each event is
+//! applied to the job-state table immediately (put/delete/read-modify-write)
+//! and the table is the source of truth. semdb's CRC-framed log gives crash
+//! safety for free (a torn tail is truncated on open).
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+use semdb::json;
+use semdb::storage::Db;
+
+const PLACEHOLDER_VEC: [f32; 1] = [0.0]; // non-semantic rows
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -17,80 +23,12 @@ pub enum Event {
     Ran { id: String, fire: i64, exit: i32, attempt: u8 },
 }
 
-impl Event {
-    fn to_line(&self) -> String {
-        // Hand-built JSON; ids/cmds are escaped.
-        match self {
-            Event::Scheduled { id, cron, cmd } => format!(
-                r#"{{"ev":"scheduled","id":"{}","cron":"{}","cmd":"{}"}}"#,
-                esc(id),
-                esc(cron),
-                esc(cmd)
-            ),
-            Event::Removed { id } => format!(r#"{{"ev":"removed","id":"{}"}}"#, esc(id)),
-            Event::Ran { id, fire, exit, attempt } => format!(
-                r#"{{"ev":"ran","id":"{}","fire":{fire},"exit":{exit},"attempt":{attempt}}}"#,
-                esc(id)
-            ),
-        }
-    }
-
-    fn from_line(line: &str) -> Option<Event> {
-        let get_str = |key: &str| -> Option<String> {
-            let pat = format!("\"{key}\":\"");
-            let start = line.find(&pat)? + pat.len();
-            let mut out = String::new();
-            let mut chars = line[start..].chars();
-            while let Some(c) = chars.next() {
-                match c {
-                    '\\' => match chars.next()? {
-                        'n' => out.push('\n'),
-                        't' => out.push('\t'),
-                        other => out.push(other),
-                    },
-                    '"' => return Some(out),
-                    c => out.push(c),
-                }
-            }
-            None
-        };
-        let get_num = |key: &str| -> Option<i64> {
-            let pat = format!("\"{key}\":");
-            let start = line.find(&pat)? + pat.len();
-            let end = line[start..]
-                .find(|c: char| !c.is_ascii_digit() && c != '-')
-                .map(|i| start + i)
-                .unwrap_or(line.len());
-            line[start..end].parse().ok()
-        };
-        match get_str("ev")?.as_str() {
-            "scheduled" => Some(Event::Scheduled {
-                id: get_str("id")?,
-                cron: get_str("cron")?,
-                cmd: get_str("cmd")?,
-            }),
-            "removed" => Some(Event::Removed { id: get_str("id")? }),
-            "ran" => Some(Event::Ran {
-                id: get_str("id")?,
-                fire: get_num("fire")?,
-                exit: get_num("exit")? as i32,
-                attempt: get_num("attempt")? as u8,
-            }),
-            _ => None,
-        }
-    }
-}
-
-fn esc(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t")
-}
-
 #[derive(Debug, Clone)]
 pub struct Job {
     pub id: String,
     pub cron: String,
     pub cmd: String,
-    /// Last fire time journaled as completed (any exit).
+    /// Last fire time recorded as completed (any exit).
     pub last_fire: Option<i64>,
 }
 
@@ -99,49 +37,70 @@ pub struct Journal {
 }
 
 impl Journal {
+    /// `path` may be given as the legacy `*.jsonl` name; it is normalized to a
+    /// `*.semdb` table so old CLI invocations keep working.
     pub fn new(path: &Path) -> Journal {
-        Journal { path: path.to_path_buf() }
+        let mut p = path.to_path_buf();
+        if p.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            p.set_extension("semdb");
+        }
+        Journal { path: p }
+    }
+
+    fn db(&self) -> Result<Db, String> {
+        if self.path.exists() { Db::open(&self.path) } else { Db::create(&self.path) }
+    }
+
+    fn row(job: &Job) -> String {
+        format!(
+            r#"{{"cron":"{}","cmd":"{}","last_fire":{}}}"#,
+            json::escape(&job.cron),
+            json::escape(&job.cmd),
+            job.last_fire.unwrap_or(-1)
+        )
+    }
+
+    fn parse_row(id: &str, meta: &str) -> Option<Job> {
+        let v = json::parse(meta).ok()?;
+        let cron = v.get("cron")?.as_str()?.to_string();
+        let cmd = v.get("cmd")?.as_str()?.to_string();
+        let lf = v.get("last_fire").and_then(|x| x.as_f64()).unwrap_or(-1.0) as i64;
+        Some(Job { id: id.to_string(), cron, cmd, last_fire: if lf < 0 { None } else { Some(lf) } })
     }
 
     pub fn append(&self, ev: &Event) -> Result<(), String> {
-        let mut f = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|e| format!("open journal: {e}"))?;
-        f.write_all(format!("{}\n", ev.to_line()).as_bytes())
-            .map_err(|e| e.to_string())?;
-        f.sync_data().map_err(|e| e.to_string())
+        let mut db = self.db()?;
+        match ev {
+            Event::Scheduled { id, cron, cmd } => {
+                // Preserve an existing last_fire if the job is being re-registered.
+                let last_fire = db.get(id).and_then(|e| Self::parse_row(id, &e.meta)).and_then(|j| j.last_fire);
+                let job = Job { id: id.clone(), cron: cron.clone(), cmd: cmd.clone(), last_fire };
+                db.put(id, &Self::row(&job), PLACEHOLDER_VEC.to_vec())?;
+            }
+            Event::Removed { id } => {
+                db.delete(id)?;
+                db.compact()?; // keep the table from growing with tombstones
+            }
+            Event::Ran { id, fire, .. } => {
+                if let Some(mut job) = db.get(id).and_then(|e| Self::parse_row(id, &e.meta)) {
+                    job.last_fire = Some(job.last_fire.map_or(*fire, |p| p.max(*fire)));
+                    db.put(id, &Self::row(&job), PLACEHOLDER_VEC.to_vec())?;
+                }
+            }
+        }
+        Ok(())
     }
 
-    /// Replay the full history into current state (live jobs + last runs).
+    /// Current live jobs (id → Job).
     pub fn replay(&self) -> Result<HashMap<String, Job>, String> {
-        let mut jobs: HashMap<String, Job> = HashMap::new();
-        let mut content = String::new();
-        match std::fs::File::open(&self.path) {
-            Ok(mut f) => {
-                f.read_to_string(&mut content).map_err(|e| e.to_string())?;
-            }
-            Err(_) => return Ok(jobs), // no journal yet
+        let mut jobs = HashMap::new();
+        if !self.path.exists() {
+            return Ok(jobs);
         }
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            match Event::from_line(line) {
-                Some(Event::Scheduled { id, cron, cmd }) => {
-                    jobs.insert(id.clone(), Job { id, cron, cmd, last_fire: None });
-                }
-                Some(Event::Removed { id }) => {
-                    jobs.remove(&id);
-                }
-                Some(Event::Ran { id, fire, .. }) => {
-                    if let Some(j) = jobs.get_mut(&id) {
-                        j.last_fire = Some(j.last_fire.map_or(fire, |p| p.max(fire)));
-                    }
-                }
-                None => continue, // torn/corrupt line — skip (crash tolerance)
+        let db = Db::open(&self.path)?;
+        for (id, entry) in db.index.iter() {
+            if let Some(job) = Self::parse_row(id, &entry.meta) {
+                jobs.insert(id.clone(), job);
             }
         }
         Ok(jobs)
@@ -153,17 +112,16 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        // In-repo scratch (never /tmp): <workspace>/target/test-scratch/
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
         std::fs::create_dir_all(&dir).unwrap();
-        dir.join(format!("journal-{name}.jsonl"))
+        let p = dir.join(format!("journal-{name}.semdb"));
+        let _ = std::fs::remove_file(&p);
+        p
     }
 
     #[test]
     fn roundtrip_and_replay() {
-        let p = scratch("rt");
-        let _ = std::fs::remove_file(&p);
-        let j = Journal::new(&p);
+        let j = Journal::new(&scratch("rt"));
         j.append(&Event::Scheduled { id: "a".into(), cron: "* * * * *".into(), cmd: "echo \"hi\"".into() }).unwrap();
         j.append(&Event::Ran { id: "a".into(), fire: 100, exit: 0, attempt: 1 }).unwrap();
         j.append(&Event::Scheduled { id: "b".into(), cron: "0 0 * * *".into(), cmd: "true".into() }).unwrap();
@@ -176,17 +134,21 @@ mod tests {
     }
 
     #[test]
-    fn torn_tail_ignored() {
-        let p = scratch("torn");
-        let _ = std::fs::remove_file(&p);
-        let j = Journal::new(&p);
+    fn ran_keeps_latest_fire() {
+        let j = Journal::new(&scratch("fire"));
         j.append(&Event::Scheduled { id: "a".into(), cron: "* * * * *".into(), cmd: "true".into() }).unwrap();
-        // Torn write: partial line, no newline.
-        let mut f = OpenOptions::new().append(true).open(&p).unwrap();
-        f.write_all(br#"{"ev":"ran","id":"a","fi"#).unwrap();
-        drop(f);
-        let state = j.replay().unwrap();
-        assert_eq!(state.len(), 1);
-        assert_eq!(state["a"].last_fire, None);
+        j.append(&Event::Ran { id: "a".into(), fire: 200, exit: 0, attempt: 1 }).unwrap();
+        j.append(&Event::Ran { id: "a".into(), fire: 100, exit: 0, attempt: 1 }).unwrap();
+        assert_eq!(j.replay().unwrap()["a"].last_fire, Some(200));
+    }
+
+    #[test]
+    fn legacy_jsonl_path_maps_to_semdb() {
+        let p = scratch("legacy");
+        let jsonl = p.with_extension("jsonl");
+        let j = Journal::new(&jsonl);
+        j.append(&Event::Scheduled { id: "a".into(), cron: "* * * * *".into(), cmd: "true".into() }).unwrap();
+        assert!(p.exists(), "should have written the .semdb table");
+        assert_eq!(j.replay().unwrap().len(), 1);
     }
 }

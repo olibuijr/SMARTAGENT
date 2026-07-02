@@ -5,7 +5,10 @@ fn dbpath() -> PathBuf {
     let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
     std::fs::create_dir_all(&d).unwrap();
     let p = d.join("evals-it.jsonl");
+    // Data lives in the normalized *.semdb table now — clear that too so a
+    // prior run's rows don't accumulate.
     let _ = std::fs::remove_file(&p);
+    let _ = std::fs::remove_file(p.with_extension("semdb"));
     p
 }
 fn s(v: &[&str]) -> Vec<String> { v.iter().map(|x| x.to_string()).collect() }

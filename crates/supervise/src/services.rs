@@ -28,7 +28,7 @@ pub fn registry(chromium_bin: &str, chrome_profile: &str) -> Vec<Service> {
                 "target/release/schedule",
                 "run",
                 "--journal",
-                "data/schedule.jsonl",
+                "data/schedule.semdb",
             ]),
             needle: "schedule",
             probe: None,

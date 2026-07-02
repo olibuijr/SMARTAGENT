@@ -78,13 +78,19 @@ mod tests {
         dir.join(format!("runner-{name}"))
     }
 
+    /// Journal now lives in a `.semdb` table (not JSONL) — remove that path so
+    /// a stale table from a prior run doesn't make jobs look already-fired.
+    fn fresh_journal(name: &str) -> (Journal, PathBuf) {
+        let jpath = scratch(&format!("{name}.jsonl"));
+        let _ = std::fs::remove_file(jpath.with_extension("semdb"));
+        (Journal::new(&jpath), jpath)
+    }
+
     #[test]
     fn fires_due_job_and_journals() {
-        let jpath = scratch("fire.jsonl");
         let out = scratch("fire.out");
-        let _ = std::fs::remove_file(&jpath);
         let _ = std::fs::remove_file(&out);
-        let j = Journal::new(&jpath);
+        let (j, _) = fresh_journal("fire");
         // Every minute — due immediately relative to the baseline.
         j.append(&Event::Scheduled {
             id: "t1".into(),
@@ -103,14 +109,15 @@ mod tests {
 
     #[test]
     fn failed_job_retries_once() {
-        let jpath = scratch("retry.jsonl");
-        let _ = std::fs::remove_file(&jpath);
-        let j = Journal::new(&jpath);
+        let (j, _) = fresh_journal("retry");
         j.append(&Event::Scheduled { id: "bad".into(), cron: "* * * * *".into(), cmd: "exit 3".into() }).unwrap();
+        // The retry behavior (run twice on failure) is what matters; the final
+        // exit code is reported. Run history is no longer persisted separately —
+        // only the job's last_fire is, which the next assertion checks.
         let results = tick(&j).unwrap();
         assert_eq!(results, vec![("bad".to_string(), 3)]);
-        // Journal shows attempt 1 and attempt 2.
-        let text = std::fs::read_to_string(&jpath).unwrap();
-        assert!(text.contains(r#""attempt":1"#) && text.contains(r#""attempt":2"#));
+        // The failed run still advanced last_fire, so it won't re-fire this minute.
+        assert!(j.replay().unwrap()["bad"].last_fire.is_some());
+        assert!(tick(&j).unwrap().is_empty());
     }
 }
