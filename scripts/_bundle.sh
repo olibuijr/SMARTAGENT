@@ -108,11 +108,26 @@ bundle_seed_state() {
     for _cf in smartagent.conf hooks.conf; do
         [ -f "$_src/config/$_cf" ] && cp -p "$_src/config/$_cf" "$_dst/config/$_cf"
     done
-    # a fresh instance must not inherit someone else's Telegram allow-id
-    [ -f "$_dst/config/smartagent.conf" ] && \
-        sed -i.bak 's/^telegram_allowed_chats.*/telegram_allowed_chats =/' \
-            "$_dst/config/smartagent.conf" 2>/dev/null && \
-        rm -f "$_dst/config/smartagent.conf.bak"
+    # a fresh instance must not inherit someone else's Telegram allow-id.
+    # Keep this portable: BSD/GNU sed disagree on -i, and failures must be loud.
+    if [ -f "$_dst/config/smartagent.conf" ]; then
+        _conf="$_dst/config/smartagent.conf"
+        _tmp="$_conf.tmp"
+        sed 's/^telegram_allowed_chats.*/telegram_allowed_chats =/' "$_conf" > "$_tmp" || {
+            rm -f "$_tmp"
+            echo "bundle_seed_state: failed to de-personalize telegram_allowed_chats" >&2
+            return 1
+        }
+        mv "$_tmp" "$_conf" || {
+            rm -f "$_tmp"
+            echo "bundle_seed_state: failed to install de-personalized config" >&2
+            return 1
+        }
+        grep -qE '^telegram_allowed_chats *= *$' "$_conf" || {
+            echo "bundle_seed_state: failed to blank telegram_allowed_chats" >&2
+            return 1
+        }
+    fi
     # base skills (per-instance procedural memory accumulates from here)
     [ -d "$_src/skills" ] && cp -Rp "$_src/skills" "$_dst/skills"
     # pi agent config: default provider/model (non-secret) — needed to resolve a model
