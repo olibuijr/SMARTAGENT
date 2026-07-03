@@ -59,6 +59,7 @@ The result is an agent you can run locally, inspect, and verify:
 - an autonomous 8-agent fleet (the meðvitund gateway) with a dedicated chat
   agent reachable over a **Telegram bot** — streaming replies, slash commands,
   and task-completion broadcasts
+- a configured AkurAI-Notes MCP server endpoint at `https://akurai-notes.olibuijr.com/mcp` (`mcp_akurai_notes_url`, hosted at `https://akurai-notes.olibuijr.com`) that is the priority destination for durable documentation across all repos and projects
 
 No `npm install`, no `pip install`, and no crates.io dependency tree inside the
 tool crates. The system borrows proven patterns from popular agent projects and
@@ -201,7 +202,7 @@ The core active tool catalog is 22 standalone Rust binaries exposed to pi by thi
 | `memory` | [mem0](https://github.com/mem0ai/mem0) | Working/episodic/semantic memory with recall and promotion |
 | `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust symbols, refs, callers, impls, paths, semantic code search |
 | `codeindex` | ripgrep-style search | Fast code search plus per-project file inventory |
-| `vault` | Obsidian-style vault | Markdown notes, links, backlinks, graph, keyword search |
+| `vault` | Obsidian-style vault | Markdown notes, links, backlinks, graph, keyword search; fallback/mirror for docs after AkurAI-Notes MCP |
 | `skills` | [Agent Skills](https://github.com/anthropics/skills) | `SKILL.md` loader, matcher, validator |
 | `schedule` | [Temporal](https://github.com/temporalio/temporal) | Durable cron and one-shot reminders |
 | `search` | [SearXNG](https://github.com/searxng/searxng) | Web metasearch client; output is fenced as untrusted data |
@@ -211,7 +212,7 @@ The core active tool catalog is 22 standalone Rust binaries exposed to pi by thi
 | `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open, click, type, wait, scroll, snapshot |
 | `sa-browser` | browser-use visual companion | Visual browser pane in the pi TUI plus DOM snapshots |
 | `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out headless-pi subagents with persisted results |
-| `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers |
+| `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers; AkurAI-Notes endpoint `https://akurai-notes.olibuijr.com/mcp` is the preferred documentation sink |
 | `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution with secret masking and resource caps |
 | `context` | TELOS-style context | Principal identity and context composition |
 | `evals` | [Langfuse](https://github.com/langfuse/langfuse) | Trace logs, scoring, regression diffs |

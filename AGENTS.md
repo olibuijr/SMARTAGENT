@@ -14,6 +14,10 @@ Every feature follows the same loop: **Claude implements → codex CLI tests →
 
 When asked for workspace contents, list the folders/projects and files under `workspaces/`, not the repository root.
 
+## Documentation destination policy (mandatory)
+
+**AkurAI-Notes is the priority location for durable documentation across all repos and projects.** Use the hosted AkurAI-Notes MCP server endpoint `https://akurai-notes.olibuijr.com/mcp` (configured as `mcp_akurai_notes_url` in `config/smartagent.conf`; service home `https://akurai-notes.olibuijr.com`) before writing long-lived docs to the local vault or ad-hoc markdown. Local repo docs remain the source for operational instructions that must ship with code, and local `vault` notes are fallback/mirror material when the AkurAI-Notes MCP server is unavailable; the canonical cross-repo/project note should live in AkurAI-Notes.
+
 ## The one rule set
 
 1. **Pure Rust, `std` only.** No crates.io dependencies in any tool. No TypeScript logic — pi extensions are thin glue that shell out to Rust binaries.

@@ -33,6 +33,7 @@ run, index). Work every request in this order:
 5. **Execute.** edit/write (gated by step 2); `bash` for builds/tests; risky
    or untrusted commands via `sandbox run` (isolated, secrets masked);
    credentials ONLY via `secrets get`; external MCP servers via `mcp`;
+   use the configured AkurAI-Notes MCP server (`mcp_akurai_notes_url = https://akurai-notes.olibuijr.com/mcp`, hosted at https://akurai-notes.olibuijr.com) as the priority destination when saving durable documentation for any repo/project;
    independent parallel work via `orchestrate`; recurring/future actions via
    `schedule add`; long-running services via `supervise` (run `status` first
    when browser/search/schedule act dead). Gateway-hosted agents must not
@@ -45,7 +46,7 @@ run, index). Work every request in this order:
    met criterion → `tasks done T-n` (criteria-gated, merges/removes the task
    worktree when isolation is active); finish the workflow run; store durable
    facts with `memory remember` (`project` for repo facts — the memory policy);
-   notes worth keeping → `vault new`; after structural changes to a workspace
+   durable documentation worth keeping → AkurAI-Notes MCP first (`https://akurai-notes.olibuijr.com/mcp`; local `vault new` only as fallback/mirror); after structural changes to a workspace
    repo: `codeindex index <project>` (and `codegraph index --project <p>` for
    repos containing supported languages); `notify send` when a long run finishes. **Run-once → codify:**
    the first time you work out a novel, non-trivial command or procedure (5+
@@ -109,7 +110,7 @@ run, index). Work every request in this order:
 - **sa-browser** — visual browser: activate opens a right-side TUI pane (50% width, fills to the bottom row; chat keeps the left and the keyboard) showing the live page as high-DPI art — braille pixels by default (2×4 px/cell; `pixels` half|quad|sextant|braille), tablet viewport emulation by default (`device` tablet|none) — with an address bar + loading status; deactivate closes it. open (navigate + DOM snapshot), click (CSS selector/link), type (fill input/textarea, optional enter), snapshot, status (url/title/readyState), probe. Bare hosts work (`visir.is` → https). Pane refreshes itself after interactions; snapshots fenced UNTRUSTED. `/sab [url]`, `/sab address`, `/sab click <selector>`, and `/sab type <selector> <text>` control it from the TUI without a model turn.
 - **supervise** — manage background services (scheduler, gateway, telegram listener, chromium): status, up, down, restart, logs (`tail`). Telegram listener is disabled by default until token/allow-list are configured. Run 'status' first when browser/search/schedule/gateway fail.
 - **orchestrate** — fan out N headless-pi subagents: run (`max_parallel` width cap, `retries`), list, out (collect a run's subagent output). Depth-guarded — subagents cannot fan out further.
-- **mcp** — connect to any MCP server (stdio or HTTP): tools (`namesOnly`/`filter`), call (`head` caps output). HTTP calls are per-request timeout bounded; stdio execs argv directly (no shell).
+- **mcp** — connect to any MCP server (stdio or HTTP): tools (`namesOnly`/`filter`), call (`head` caps output). HTTP calls are per-request timeout bounded; stdio execs argv directly (no shell). The configured AkurAI-Notes MCP server endpoint is `https://akurai-notes.olibuijr.com/mcp` (`mcp_akurai_notes_url`; hosted at `https://akurai-notes.olibuijr.com`) and is the priority destination for durable documentation across all repos/projects.
 - **sandbox** — isolated shell exec (secrets masked, env scrubbed, ulimit caps): run (`tail` keeps last output — right for build logs; default 16KB cap), clean. Warns if namespace isolation is unavailable.
 - **context** — principal identity/context loader: compose, validate, stat.
 - **evals** — trace/score/diff: log, score (`minPass` → error below threshold, `failOnly`), diff, runs, triage (self-heal loop: failing runs → deduped criteria-gated board tasks; incremental via sweep cursor, latest-trace-per-case scoring, p1 escalation on re-failure; fires automatically at agent stop via hook).
