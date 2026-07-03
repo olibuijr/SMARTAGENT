@@ -120,6 +120,10 @@ fn poll(args: &[String]) -> Result<String, String> {
             max_id = max_id.max(uid);
             let msg = if let Some(msg) = it.get("message") {
                 msg
+            } else if let Some(msg) = it.get("channel_post") {
+                msg
+            } else if let Some(msg) = it.get("edited_channel_post") {
+                msg
             } else if let Some(cb) = it.get("callback_query") {
                 let Some(msg) = cb.get("message") else {
                     continue;
@@ -229,7 +233,8 @@ fn poll(args: &[String]) -> Result<String, String> {
 }
 
 fn is_group_mention(chat_type: &str, text: &str, bot_username: &str) -> bool {
-    matches!(chat_type, "group" | "supergroup") && contains_bot_mention(text, bot_username)
+    matches!(chat_type, "group" | "supergroup" | "channel")
+        && contains_bot_mention(text, bot_username)
 }
 
 fn contains_bot_mention(text: &str, bot_username: &str) -> bool {

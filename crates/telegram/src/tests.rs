@@ -24,6 +24,11 @@ fn group_mentions_are_recognized_and_cleaned_for_gateway_prompt() {
         "hey @Olafurs_Bot, status?",
         "olafurs_bot"
     ));
+    assert!(super::is_group_mention(
+        "channel",
+        "@olafurs_bot status?",
+        "olafurs_bot"
+    ));
     assert!(!super::is_group_mention(
         "private",
         "@olafurs_bot status?",
