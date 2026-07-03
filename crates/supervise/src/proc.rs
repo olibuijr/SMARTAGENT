@@ -1,7 +1,8 @@
 //! Process primitives on std only (Linux): spawn detached, liveness via /proc,
 //! terminate via the `kill` coreutil. No libc dependency.
 
-use std::fs::File;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -46,13 +47,24 @@ pub fn pid_by_needle(needle: &str) -> Option<u32> {
     found.into_iter().min()
 }
 
-/// Spawn a detached child: stdout/stderr → `log`, stdin from /dev/null. The
+/// Spawn a detached child: stdout/stderr appended to `log`, stdin from
+/// /dev/null. Appending preserves crash-loop forensics across restarts. The
 /// handle is dropped so we never wait on it; if this supervisor later exits,
 /// the child is reparented to init and keeps running (we track it by pid).
 /// Returns the child pid.
 pub fn spawn_detached(argv: &[String], workdir: &Path, log: &Path) -> Result<u32, String> {
     let program = argv.first().ok_or("empty command")?;
-    let out = File::create(log).map_err(|e| format!("open log {}: {e}", log.display()))?;
+    let mut out = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .map_err(|e| format!("open log {}: {e}", log.display()))?;
+    let _ = writeln!(
+        out,
+        "\n[supervise] spawn at {} argv={}",
+        unix_secs(),
+        argv.join(" ")
+    );
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let child = Command::new(program)
         .args(&argv[1..])
@@ -63,6 +75,13 @@ pub fn spawn_detached(argv: &[String], workdir: &Path, log: &Path) -> Result<u32
         .spawn()
         .map_err(|e| format!("spawn '{program}': {e}"))?;
     Ok(child.id())
+}
+
+pub fn unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Is `pid` a live process whose command line still contains `needle`? The
@@ -113,6 +132,39 @@ mod tests {
         // name. An empty needle just checks liveness.
         let me = std::process::id();
         assert!(is_alive(me, ""));
+    }
+
+    #[test]
+    fn spawn_detached_appends_repeated_startup_failures() {
+        let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/supervise-append-log");
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch).unwrap();
+        let script = scratch.join("fail.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho out-$1\necho err-$1 >&2\nexit 7\n",
+        )
+        .unwrap();
+        let _ = Command::new("chmod").arg("+x").arg(&script).status();
+        let log = scratch.join("svc.log");
+        for i in 1..=3 {
+            let argv = vec![script.to_string_lossy().to_string(), i.to_string()];
+            let pid = spawn_detached(&argv, &scratch, &log).unwrap();
+            for _ in 0..20 {
+                if !Path::new(&format!("/proc/{pid}")).exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(text.contains("out-1"), "{text}");
+        assert!(text.contains("err-1"), "{text}");
+        assert!(text.contains("out-2"), "{text}");
+        assert!(text.contains("err-2"), "{text}");
+        assert!(text.contains("out-3"), "{text}");
+        assert!(text.contains("err-3"), "{text}");
+        assert!(text.matches("[supervise] spawn at").count() >= 3, "{text}");
     }
 
     #[test]
