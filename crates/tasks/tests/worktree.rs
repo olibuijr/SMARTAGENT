@@ -122,8 +122,13 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     worktree::ensure_for_doing("T-903").unwrap();
     let a = d.join("worktrees/T-902/crates/demo/src/lib.rs");
     let b = d.join("worktrees/T-903/crates/demo/src/lib.rs");
+    let escaped = d.join("worktrees/T-902/../T-903/crates/demo/src/lib.rs");
     assert!(worktree::path_allowed_for_task("T-902", &a).unwrap());
     assert!(!worktree::path_allowed_for_task("T-902", &b).unwrap());
+    assert!(
+        !worktree::path_allowed_for_task("T-902", &escaped).unwrap(),
+        "lexical ../ traversal must not escape the task worktree"
+    );
 
     // Change-detection powers the done-gate: a fresh worktree has no changes
     // (the false-done fingerprint); an edited or committed one counts as work.
