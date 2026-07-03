@@ -5,7 +5,7 @@
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 
-use httpc::json::{self, Value};
+use httpc::json;
 
 use crate::server::{role_of, Agents};
 
@@ -61,52 +61,16 @@ pub(crate) fn last_activity(name: &str) -> (String, String) {
 
 #[derive(Default)]
 pub(crate) struct TokenTotals {
-    input: u64,
-    output: u64,
-    cache_read: u64,
-    cache_write: u64,
+    pub(crate) input: u64,
+    pub(crate) output: u64,
+    pub(crate) cache_read: u64,
+    pub(crate) cache_write: u64,
 }
 
 impl TokenTotals {
     pub(crate) fn total(&self) -> u64 {
         self.input + self.output + self.cache_read + self.cache_write
     }
-}
-
-pub(crate) fn tokens_today(agent: Option<&str>) -> TokenTotals {
-    let path = semdb::config::Config::load()
-        .data_dir()
-        .join("medvitund.semdb");
-    let Ok(db) = semdb::storage::Db::open(&path) else {
-        return TokenTotals::default();
-    };
-    let today = crate::beat::human_day_prefix();
-    let mut out = TokenTotals::default();
-    for entry in db.index.values() {
-        let Ok(v) = json::parse(&entry.meta) else {
-            continue;
-        };
-        if v.get("kind").and_then(Value::as_str) != Some("turn") {
-            continue;
-        }
-        if let Some(a) = agent {
-            if v.get("agent").and_then(Value::as_str) != Some(a) {
-                continue;
-            }
-        }
-        if v.get("day").and_then(Value::as_str) != Some(today.as_str()) {
-            continue;
-        }
-        out.input += meta_u64(&v, "input");
-        out.output += meta_u64(&v, "output");
-        out.cache_read += meta_u64(&v, "cacheRead");
-        out.cache_write += meta_u64(&v, "cacheWrite");
-    }
-    out
-}
-
-fn meta_u64(v: &Value, key: &str) -> u64 {
-    v.get(key).and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64
 }
 
 pub(crate) fn status_line(
@@ -151,7 +115,7 @@ pub(crate) fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
             .map(|t| t.elapsed().as_secs())
             .unwrap_or(0);
         let (tools, words) = last_activity(&agent.name);
-        let tokens = tokens_today(Some(&agent.name));
+        let tokens = agent.beat.lock().unwrap().tokens_today(Some(&agent.name));
         let data = agent_tsv_line(
             &json::escape(&agent.name),
             state,

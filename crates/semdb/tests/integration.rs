@@ -11,9 +11,17 @@ use semdb::vector;
 fn tmp(name: &str) -> PathBuf {
     // In-repo scratch only. Keep this relative so Unix socket paths stay below
     // SUN_LEN even when the repo is checked out in a long task worktree path.
-    let dir = PathBuf::from("target/test-scratch");
+    let dir = PathBuf::from(".scratch/s");
     let _ = std::fs::create_dir_all(&dir);
-    let p = dir.join(format!("semdb-it-{name}-{}", std::process::id()));
+    let p = dir.join(format!("s-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_file(&p);
+    p
+}
+
+fn sock_tmp(name: &str) -> PathBuf {
+    let dir = PathBuf::from(".scratch/semdb-socks");
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join(format!("{name}-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p
 }
@@ -36,7 +44,7 @@ fn cli_roundtrip() {
     // client↔daemon roundtrip: an isolated daemon subprocess (its own socket,
     // no clash with production) and CLI subprocesses pointed at it via env.
     let path = tmp("cli");
-    let sock = path.with_extension("sock");
+    let sock = sock_tmp("cli");
     let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
@@ -156,7 +164,7 @@ fn brute_force_matches_manual_cosine() {
 fn kill9_recovery() {
     let path = tmp("kill9");
     Db::create(&path).unwrap();
-    let sock = path.with_extension("sock");
+    let sock = sock_tmp("kill9");
     let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();

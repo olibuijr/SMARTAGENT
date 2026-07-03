@@ -10,25 +10,33 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use httpc::json;
+use httpc::json::{self, Value};
 use semdb::storage::Db;
 
 use crate::child::Usage;
 
 const PLACEHOLDER_VEC: [f32; 1] = [0.0];
+const MEDVITUND_KEEP_ROWS: usize = 5_000;
+const MEDVITUND_COMPACT_EVERY_WRITES: u64 = 100;
 
 pub struct Beat {
     repo_root: PathBuf,
     db_path: PathBuf,
+    db: Option<Db>,
+    writes_since_prune: u64,
     started: Instant,
     pub last_beat: Option<String>,
 }
 
 impl Beat {
     pub fn new(repo_root: &Path, data_dir: &Path) -> Beat {
+        let db_path = data_dir.join("medvitund.semdb");
+        let db = open_or_create_medvitund(&db_path).ok();
         Beat {
             repo_root: repo_root.to_path_buf(),
-            db_path: data_dir.join("medvitund.semdb"),
+            db_path,
+            db,
+            writes_since_prune: 0,
             started: Instant::now(),
             last_beat: None,
         }
@@ -79,16 +87,16 @@ impl Beat {
     }
 
     /// Append a row to the medvitund table. Row without meaning-vector (v1).
-    pub fn log(&self, agent: &str, kind: &str, state: &str, text: &str) {
+    pub fn log(&mut self, agent: &str, kind: &str, state: &str, text: &str) {
         self.log_with_usage(agent, kind, state, text, None);
     }
 
-    pub fn log_turn(&self, agent: &str, text: &str, usage: Usage) {
+    pub fn log_turn(&mut self, agent: &str, text: &str, usage: Usage) {
         self.log_with_usage(agent, "turn", "idle", text, Some(usage));
     }
 
     fn log_with_usage(
-        &self,
+        &mut self,
         agent: &str,
         kind: &str,
         state: &str,
@@ -117,15 +125,101 @@ impl Beat {
             json::escape(&excerpt)
         );
         let id = format!("mv-{ts}");
-        let db = if self.db_path.exists() {
-            Db::open(&self.db_path)
-        } else {
-            Db::create(&self.db_path)
-        };
-        if let Ok(mut db) = db {
-            let _ = db.put(&id, &meta, PLACEHOLDER_VEC.to_vec());
+        if self.db.is_none() {
+            self.db = open_or_create_medvitund(&self.db_path).ok();
+        }
+        if let Some(db) = self.db.as_mut() {
+            if db.put(&id, &meta, PLACEHOLDER_VEC.to_vec()).is_ok() {
+                self.writes_since_prune += 1;
+                if self.writes_since_prune >= MEDVITUND_COMPACT_EVERY_WRITES
+                    || db.index.len() > MEDVITUND_KEEP_ROWS
+                {
+                    prune_medvitund(db, MEDVITUND_KEEP_ROWS);
+                    self.writes_since_prune = 0;
+                }
+            }
         }
     }
+
+    pub fn tokens_today(&self, agent: Option<&str>) -> crate::agents_view::TokenTotals {
+        let Some(db) = self.db.as_ref() else {
+            return crate::agents_view::TokenTotals::default();
+        };
+        tokens_today_in_db(db, agent)
+    }
+
+    pub fn medvitund_records(&self) -> (usize, u64) {
+        self.db
+            .as_ref()
+            .map(|db| (db.index.len(), db.records))
+            .unwrap_or((0, 0))
+    }
+}
+
+fn open_or_create_medvitund(path: &Path) -> Result<Db, String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if path.exists() {
+        Db::open(path)
+    } else {
+        Db::create(path)
+    }
+}
+
+fn prune_medvitund(db: &mut Db, keep_rows: usize) {
+    if db.index.len() <= keep_rows {
+        return;
+    }
+    let mut rows = db
+        .index
+        .iter()
+        .map(|(id, entry)| (medvitund_ts(id, &entry.meta), id.clone()))
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|(ts, _)| *ts);
+    let remove = rows.len().saturating_sub(keep_rows);
+    for (_, id) in rows.into_iter().take(remove) {
+        let _ = db.delete(&id);
+    }
+    let _ = db.compact();
+}
+
+fn medvitund_ts(id: &str, meta: &str) -> u128 {
+    json::parse(meta)
+        .ok()
+        .and_then(|v| v.get("ts").and_then(Value::as_f64).map(|n| n.max(0.0) as u128))
+        .or_else(|| id.strip_prefix("mv-").and_then(|s| s.parse::<u128>().ok()))
+        .unwrap_or(0)
+}
+
+pub(crate) fn tokens_today_in_db(db: &Db, agent: Option<&str>) -> crate::agents_view::TokenTotals {
+    let today = human_day_prefix();
+    let mut out = crate::agents_view::TokenTotals::default();
+    for entry in db.index.values() {
+        let Ok(v) = json::parse(&entry.meta) else {
+            continue;
+        };
+        if v.get("kind").and_then(Value::as_str) != Some("turn") {
+            continue;
+        }
+        if let Some(a) = agent {
+            if v.get("agent").and_then(Value::as_str) != Some(a) {
+                continue;
+            }
+        }
+        if v.get("day").and_then(Value::as_str) != Some(today.as_str()) {
+            continue;
+        }
+        out.input += meta_u64(&v, "input");
+        out.output += meta_u64(&v, "output");
+        out.cache_read += meta_u64(&v, "cacheRead");
+        out.cache_write += meta_u64(&v, "cacheWrite");
+    }
+    out
+}
+
+fn meta_u64(v: &Value, key: &str) -> u64 {
+    v.get(key).and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64
 }
 
 /// Run a workspace tool binary with a hard deadline; None on any failure.
@@ -318,6 +412,67 @@ fn human_dur(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn medvitund_logs_reuse_held_db_and_tokens_read_from_handle() {
+        let d = scratch("gateway-medvitund-held-db");
+        let mut beat = Beat::new(&d, &d);
+        beat.log_turn(
+            "ada",
+            "turn complete",
+            Usage {
+                input: 1,
+                output: 2,
+                cache_read: 3,
+                cache_write: 4,
+            },
+        );
+        let before = beat.medvitund_records();
+        std::fs::remove_file(d.join("medvitund.semdb")).unwrap();
+        beat.log_turn(
+            "ada",
+            "second turn still uses held handle",
+            Usage {
+                input: 10,
+                output: 20,
+                cache_read: 30,
+                cache_write: 40,
+            },
+        );
+        let after = beat.medvitund_records();
+        assert_eq!(before.0 + 1, after.0);
+        assert_eq!(beat.tokens_today(Some("ada")).total(), 110);
+    }
+
+    #[test]
+    fn medvitund_prune_keeps_latest_rows_and_compacts() {
+        let d = scratch("gateway-medvitund-prune");
+        let mut db = Db::create(&d.join("medvitund.semdb")).unwrap();
+        for i in 0..12 {
+            let meta = format!(
+                r#"{{"ts":{},"day":"{}","agent":"ada","kind":"beat","state":"idle","text":"row"}}"#,
+                i,
+                human_day_prefix()
+            );
+            db.put(&format!("mv-{i}"), &meta, PLACEHOLDER_VEC.to_vec())
+                .unwrap();
+        }
+        prune_medvitund(&mut db, 5);
+        assert_eq!(db.index.len(), 5);
+        assert!(db.get("mv-6").is_none());
+        assert!(db.get("mv-7").is_some());
+        assert!(db.records <= 5, "records after compact: {}", db.records);
+    }
 
     #[test]
     fn board_summary_keeps_doing_ready_only() {

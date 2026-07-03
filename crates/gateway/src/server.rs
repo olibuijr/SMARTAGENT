@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use httpc::json::{self, Value};
 
-use crate::agents_view::{status_line, tokens_today, write_agents};
+use crate::agents_view::{status_line, write_agents};
 use crate::beat::Beat;
 use crate::child::{Event, PiChild};
 
@@ -270,7 +270,6 @@ fn spawn_agent(
     start_event_pump(
         name.to_string(),
         clients,
-        data_dir.to_path_buf(),
         transcript,
         events,
         beat.clone(),
@@ -303,7 +302,6 @@ fn spawn_agent(
 fn start_event_pump(
     agent: String,
     clients: Clients,
-    data_dir: std::path::PathBuf,
     tpath: std::path::PathBuf,
     events: std::sync::mpsc::Receiver<Event>,
     beat: Arc<Mutex<Beat>>,
@@ -343,12 +341,6 @@ fn start_event_pump(
                         empty_turns += 1;
                     }
                     beat.lock().unwrap().log_turn(&agent, &text, usage);
-                    if let Some(reason) = goal_turn_check(&data_dir, &agent) {
-                        beat.lock()
-                            .unwrap()
-                            .log(&agent, "goal", "continue", &reason);
-                        let _ = child.lock().unwrap().command("prompt", Some(&reason));
-                    }
                     match action {
                         MuteAction::Clear => {}
                         MuteAction::Observe => {}
@@ -390,23 +382,6 @@ fn start_event_pump(
             }
         }
     });
-}
-
-fn goal_turn_check(data_dir: &std::path::Path, agent: &str) -> Option<String> {
-    let repo_root = data_dir.parent()?;
-    let goal = repo_root.join("target/release/goal");
-    let session = format!("gw-{agent}");
-    let out = std::process::Command::new(goal)
-        .args(["check", "--session", &session])
-        .current_dir(repo_root)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let v = json::parse(stdout.trim()).ok()?;
-    v.get("reason").and_then(Value::as_str).map(str::to_string)
 }
 
 fn start_heartbeat(
@@ -685,15 +660,15 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
         }
         "status" => {
             let busy = agent.child.lock().unwrap().is_busy();
-            let (last, doing) = {
+            let (last, doing, tokens) = {
                 let b = agent.beat.lock().unwrap();
                 (
                     b.last_beat.clone().unwrap_or_else(|| "never".into()),
                     b.doing_short(),
+                    b.tokens_today(Some(&agent.name)).total(),
                 )
             };
             let queued = agent.queued_beat.lock().unwrap().is_some();
-            let tokens = tokens_today(Some(&agent.name)).total();
             write_info_done(
                 write_side,
                 &status_line(&agent.name, busy, &last, queued, &doing, tokens),
