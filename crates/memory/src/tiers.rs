@@ -125,6 +125,7 @@ impl Memory {
         }
         out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         out.truncate(k);
+        bump_hits_for_recalled(&self.dir, &out)?;
         Ok(out)
     }
 
@@ -195,6 +196,30 @@ fn validate_tier(tier: &str) -> Result<(), String> {
     } else {
         Err(format!("unknown tier '{tier}' (working|episodic|semantic)"))
     }
+}
+
+fn bump_hits_for_recalled(root: &Path, recalled: &[Recalled]) -> Result<(), String> {
+    for tier in TIERS {
+        let ids: Vec<&str> = recalled.iter().filter(|r| r.tier == tier).map(|r| r.id.as_str()).collect();
+        if ids.is_empty() {
+            continue;
+        }
+        let path = root.join(format!("{tier}.semdb"));
+        if !path.exists() {
+            continue;
+        }
+        let mut db = Db::open(&path)?;
+        for id in ids {
+            let Some(entry) = db.get(id).cloned() else { continue };
+            let v = semdb::json::parse(&entry.meta).ok();
+            let text = v.as_ref().and_then(|v| v.get("text").and_then(|x| x.as_str())).unwrap_or("");
+            let ts = v.as_ref().and_then(|v| v.get("ts").and_then(|x| x.as_f64())).unwrap_or(0.0) as i64;
+            let hits = v.as_ref().and_then(|v| v.get("hits").and_then(|x| x.as_f64())).unwrap_or(0.0) as i64 + 1;
+            let meta = format!(r#"{{"text":"{}","ts":{ts},"hits":{hits}}}"#, esc(text));
+            db.put(id, &meta, entry.vector)?;
+        }
+    }
+    Ok(())
 }
 
 fn evict_over_cap(db: &mut Db) -> Result<(), String> {
@@ -291,6 +316,42 @@ mod tests {
         // oldest (0000) evicted
         let hits = m.recall(&[0.0], WORKING_CAP, &vec!["working".into()]).unwrap();
         assert!(hits.iter().all(|h| h.id != "0000"));
+    }
+
+    #[test]
+    fn recall_increments_hits_on_returned_rows() {
+        let m = Memory::new(&scratch("mem-hit-bump"));
+        m.remember_vec("working", "w1", "golf handicap is 3.5", vec![1.0, 0.0]).unwrap();
+        m.remember_vec("working", "w2", "depill likes walks", vec![0.0, 1.0]).unwrap();
+
+        let hits = m.recall(&[1.0, 0.0], 1, &vec!["working".into()]).unwrap();
+        assert_eq!(hits[0].id, "w1");
+
+        let db = Db::open(&m.tier_path("working")).unwrap();
+        let w1 = semdb::json::parse(&db.get("w1").unwrap().meta).unwrap();
+        let w2 = semdb::json::parse(&db.get("w2").unwrap().meta).unwrap();
+        assert_eq!(w1.get("hits").and_then(|x| x.as_f64()), Some(1.0));
+        assert_eq!(w2.get("hits").and_then(|x| x.as_f64()), Some(0.0));
+    }
+
+    #[test]
+    fn working_cap_preserves_recalled_row_over_equally_old_rows() {
+        let m = Memory::new(&scratch("mem-cap-hit-bump"));
+        for i in 0..WORKING_CAP {
+            let mut v = vec![0.0; WORKING_CAP + 1];
+            v[i] = 1.0;
+            m.remember_vec("working", &format!("{i:04}"), "x", v).unwrap();
+        }
+        let mut query = vec![0.0; WORKING_CAP + 1];
+        query[0] = 1.0;
+        m.recall(&query, 1, &vec!["working".into()]).unwrap();
+        let mut new_vec = vec![0.0; WORKING_CAP + 1];
+        new_vec[WORKING_CAP] = 1.0;
+        m.remember_vec("working", "new", "x", new_vec).unwrap();
+
+        let db = Db::open(&m.tier_path("working")).unwrap();
+        assert!(db.get("0000").is_some(), "recalled oldest row should survive due to hit bump");
+        assert_eq!(db.index.len(), WORKING_CAP);
     }
 
     #[test]
