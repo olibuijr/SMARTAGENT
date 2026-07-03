@@ -41,6 +41,30 @@ pub fn discover(root: &Path) -> Result<Vec<Skill>, String> {
     Ok(skills)
 }
 
+/// Merge global + project discovery: a project skill overrides a global
+/// skill of the same `name` ("local wins" — the Hermes per-project
+/// accumulation rule). `project_root` not existing yet is not an error — a
+/// project's first self-created skill has no dir.
+pub fn discover_merged(
+    global_root: &Path,
+    project_root: Option<&Path>,
+) -> Result<Vec<Skill>, String> {
+    let mut by_name: std::collections::BTreeMap<String, Skill> = std::collections::BTreeMap::new();
+    for s in discover(global_root)? {
+        by_name.insert(s.name.clone(), s);
+    }
+    if let Some(p) = project_root {
+        if p.exists() {
+            for s in discover(p)? {
+                by_name.insert(s.name.clone(), s); // project wins on collision
+            }
+        }
+    }
+    let mut out: Vec<Skill> = by_name.into_values().collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
 pub fn load_body(path: &Path) -> Result<String, String> {
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     Ok(parse_body(&content))
@@ -124,5 +148,54 @@ mod tests {
         assert!(skills.iter().all(|s| s.name != "leaked"));
         assert_eq!(skills[0].name, "alpha");
         assert_eq!(skills[1].description, "second");
+    }
+
+    #[test]
+    fn discover_merged_project_wins_on_collision() {
+        let base = scratch("skills-merged");
+        let global = base.join("global");
+        let project = base.join("project");
+        std::fs::create_dir_all(global.join("shared")).unwrap();
+        std::fs::create_dir_all(global.join("global-only")).unwrap();
+        std::fs::create_dir_all(project.join("shared")).unwrap();
+        std::fs::create_dir_all(project.join("project-only")).unwrap();
+        std::fs::write(
+            global.join("shared/SKILL.md"),
+            "---\nname: shared\ndescription: global version\n---\nglobal body",
+        )
+        .unwrap();
+        std::fs::write(
+            global.join("global-only/SKILL.md"),
+            "---\nname: global-only\ndescription: only in global\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("shared/SKILL.md"),
+            "---\nname: shared\ndescription: project version\n---\nproject body",
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("project-only/SKILL.md"),
+            "---\nname: project-only\ndescription: only in project\n---\n",
+        )
+        .unwrap();
+
+        // A missing project dir must not error — it just contributes nothing.
+        let missing_project = base.join("no-such-project-dir");
+        let global_only = discover_merged(&global, Some(&missing_project)).unwrap();
+        assert_eq!(global_only.len(), 2);
+
+        let merged = discover_merged(&global, Some(&project)).unwrap();
+        let names: Vec<&str> = merged.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["global-only", "project-only", "shared"]);
+        let shared = merged.iter().find(|s| s.name == "shared").unwrap();
+        assert_eq!(
+            shared.description, "project version",
+            "project skill must win on a name collision"
+        );
+
+        // No project root at all: pure global discovery.
+        let global_alone = discover_merged(&global, None).unwrap();
+        assert_eq!(global_alone.len(), 2);
     }
 }
