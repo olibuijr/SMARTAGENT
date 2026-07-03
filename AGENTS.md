@@ -2,6 +2,8 @@
 
 Frontier-level personal AI agent, rebuilt lean: **pi as the spine, every capability a pi extension, every tool a pure-Rust zero-dependency binary.**
 
+The public landing page at **smartagent.olibuijr.com** lives in `site/`: it is a playable pixel-world rendered with three.js WebGPU, deployed with `site/deploy.sh`, and includes a Game Boy-style mobile frame; treat this as documentation-only context unless a task explicitly asks for site implementation work.
+
 ## Fusion workflow (mandatory)
 
 Every feature follows the same loop: **Claude implements → codex CLI tests → codex reports → Claude verifies the report against reality.** The tester is always non-interactive codex: `codex exec --sandbox workspace-write -m gpt-5.4-mini -c model_reasoning_effort=low "<test instructions, PASS/FAIL per check, one-line verdict>" < /dev/null`. **The `< /dev/null` is MANDATORY — without it codex exec blocks forever on "Reading additional input from stdin..." (same gotcha as `./pi -p`).** Claude never self-certifies: a crate is done only after the codex verdict is PASS *and* Claude spot-checks the evidence (verdicts can hallucinate — verify at least one claim with a direct probe).
