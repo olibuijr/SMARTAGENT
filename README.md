@@ -80,7 +80,7 @@ From the repo root:
 # The stdin redirect is required or pi waits for more input.
 ./pi -p 'search the web for Icelandic golf courses' < /dev/null
 
-# Optional cockpit: pi, live gateway attach, board, and transcript in tmux.
+# Optional cockpit: pi, live gateway chat attach, board, and transcript in tmux.
 ./tui
 ```
 
@@ -278,7 +278,7 @@ detail that needs attention.
 `./tui` opens the cockpit in tmux:
 
 - top-left: interactive `./pi`
-- top-right: live gateway attach
+- top-right: live gateway chat attach (`jeeves` by default; override with `SMARTAGENT_TUI_GATEWAY_AGENT`)
 - bottom-left: board watch
 - bottom-right: medvitund transcript
 

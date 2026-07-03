@@ -135,7 +135,7 @@ Moved to [CATALOG.md](./CATALOG.md) (token efficiency: this file is injected int
 
 ## Cockpit (`./tui`)
 
-`./tui` opens the 2x2 tmux cockpit on a private socket (`tmux -L smartagent`): **top-left** the interactive `./pi` TUI · **top-right** `gateway attach` (live DA stream — type to interview mid-work, Ctrl-D detaches the client only) · **bottom-left** the board (`watch -n5 tasks board`) · **bottom-right** the meðvitund transcript (`tail -F data/gateway/main.log`). Keys (root table, no prefix): `Ctrl+Alt+q/w/e/r` select panes by position, `Alt+Enter` toggles fullscreen zoom on the active pane. Re-running `./tui` re-attaches to the live cockpit; the private socket keeps these bindings out of normal tmux sessions.
+`./tui` opens the 2x2 tmux cockpit on a private socket (`tmux -L smartagent`): **top-left** the interactive `./pi` TUI · **top-right** `gateway attach --agent jeeves` by default (override with `SMARTAGENT_TUI_GATEWAY_AGENT`; live DA stream — type to interview mid-work, Ctrl-D detaches the client only) · **bottom-left** the board (`watch -n5 tasks board`) · **bottom-right** the meðvitund transcript (`tail -F data/gateway/main.log`). Keys (root table, no prefix): `Ctrl+Alt+q/w/e/r` select panes by position, `Alt+Enter` toggles fullscreen zoom on the active pane. Re-running `./tui` re-attaches to the live cockpit; the private socket keeps these bindings out of normal tmux sessions.
 
 ## Worktree lifecycle for fleet agents
 
