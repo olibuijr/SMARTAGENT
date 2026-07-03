@@ -8,6 +8,7 @@
 //! interviewable self-history.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use httpc::json::{self, Value};
@@ -26,6 +27,8 @@ pub struct Beat {
     writes_since_prune: u64,
     started: Instant,
     pub last_beat: Option<String>,
+    board_cache: Mutex<Option<(Instant, String)>>,
+    workflow_cache: Mutex<Option<(Instant, String)>>,
 }
 
 impl Beat {
@@ -39,6 +42,8 @@ impl Beat {
             writes_since_prune: 0,
             started: Instant::now(),
             last_beat: None,
+            board_cache: Mutex::new(None),
+            workflow_cache: Mutex::new(None),
         }
     }
 
@@ -46,10 +51,12 @@ impl Beat {
     pub fn compose(&mut self, busy: bool) -> String {
         let now = human_now();
         let up = human_dur(self.started.elapsed());
-        let board = run_local(&self.repo_root, "tasks", &["board", "--dir", "."], 5)
+        let board = self
+            .board_snapshot()
             .map(|out| summarize_board(&out))
             .unwrap_or_else(|| "board unavailable".into());
-        let wf = run_local(&self.repo_root, "workflow", &["runs", "--dir", "."], 5)
+        let wf = self
+            .workflow_snapshot()
             .map(|out| first_active_line(&out))
             .unwrap_or_default();
         let state = if busy { "working" } else { "idle" };
@@ -66,14 +73,14 @@ impl Beat {
     /// (pull), BACKLOG (triage/promote), or a REVIEW row assigned to this
     /// agent/role. Other review rows are handoffs for other agents.
     pub fn has_autonomous_work_for(&self, agent: &str, role: &str) -> bool {
-        run_local(&self.repo_root, "tasks", &["board", "--dir", "."], 5)
+        self.board_snapshot()
             .map(|out| board_has_autonomous_work_for(&out, agent, role))
             .unwrap_or(true)
     }
 
     /// First task in the DOING column, shortened — "what am I on right now".
     pub fn doing_short(&self) -> String {
-        run_local(&self.repo_root, "tasks", &["board", "--dir", "."], 5)
+        self.board_snapshot()
             .and_then(|out| first_doing_for(&out, None))
             .unwrap_or_else(|| "nothing".into())
     }
@@ -81,7 +88,7 @@ impl Beat {
     /// This agent's own DOING task, shortened. Idle agents must not inherit
     /// some other agent's board slot in the team panel.
     pub fn doing_short_for(&self, owner: &str) -> String {
-        run_local(&self.repo_root, "tasks", &["board", "--dir", "."], 5)
+        self.board_snapshot()
             .and_then(|out| first_doing_for(&out, Some(owner)))
             .unwrap_or_else(|| "nothing".into())
     }
@@ -93,6 +100,26 @@ impl Beat {
 
     pub fn log_turn(&mut self, agent: &str, text: &str, usage: Usage) {
         self.log_with_usage(agent, "turn", "idle", text, Some(usage));
+    }
+
+    fn board_snapshot(&self) -> Option<String> {
+        cached_or_run(
+            &self.board_cache,
+            &self.repo_root,
+            "tasks",
+            &["board", "--dir", "."],
+            5,
+        )
+    }
+
+    fn workflow_snapshot(&self) -> Option<String> {
+        cached_or_run(
+            &self.workflow_cache,
+            &self.repo_root,
+            "workflow",
+            &["runs", "--dir", "."],
+            5,
+        )
     }
 
     fn log_with_usage(
@@ -220,6 +247,27 @@ pub(crate) fn tokens_today_in_db(db: &Db, agent: Option<&str>) -> crate::agents_
 
 fn meta_u64(v: &Value, key: &str) -> u64 {
     v.get(key).and_then(Value::as_f64).unwrap_or(0.0).max(0.0) as u64
+}
+
+fn cached_or_run(
+    cache: &Mutex<Option<(Instant, String)>>,
+    repo_root: &Path,
+    bin: &str,
+    args: &[&str],
+    deadline_secs: u64,
+) -> Option<String> {
+    if let Ok(guard) = cache.lock() {
+        if let Some((at, text)) = guard.as_ref() {
+            if at.elapsed() <= Duration::from_secs(1) {
+                return Some(text.clone());
+            }
+        }
+    }
+    let out = run_local(repo_root, bin, args, deadline_secs)?;
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((Instant::now(), out.clone()));
+    }
+    Some(out)
 }
 
 /// Run a workspace tool binary with a hard deadline; None on any failure.
