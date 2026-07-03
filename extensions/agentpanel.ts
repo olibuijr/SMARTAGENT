@@ -121,6 +121,8 @@ let gatewayUp = false;
 let tuiRef: any;
 let frame = 0;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const F1_KEYS = new Set(["\x1bOP", "\x1b[11~", "\x1b[[A"]);
+const isF1 = (data: string): boolean => F1_KEYS.has(data);
 
 function humanTokens(raw: string): string {
 	const n = Number(raw);
@@ -354,6 +356,7 @@ export default function (pi: ExtensionAPI) {
 	let finish: ((r: unknown) => void) | undefined;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let spinTimer: ReturnType<typeof setInterval> | undefined;
+	let unlistenF1: (() => void) | undefined;
 	let active = false;
 
 	function open(ctx: any): string {
@@ -419,14 +422,26 @@ export default function (pi: ExtensionAPI) {
 		return "agent team sidebar off";
 	}
 
+	function toggle(ctx: any): string {
+		return active ? close() : open(ctx);
+	}
+
 	pi.registerCommand("team", {
-		description: "Toggle the AGENT TEAM sidebar (gateway fleet, GOAGENT-style)",
-		handler: async (_args: string, ctx: any) => (active ? close() : open(ctx)),
+		description: "Toggle the AGENT TEAM sidebar (gateway fleet, GOAGENT-style; F1 also toggles)",
+		handler: async (_args: string, ctx: any) => toggle(ctx),
 	});
 
 	pi.on("session_start", async (_e, ctx: any) => {
 		ctxRef = ctx;
-		if (ctx.mode === "tui" && !active) open(ctx);
+		if (ctx.mode !== "tui") return;
+		if (!unlistenF1) {
+			unlistenF1 = ctx.ui.onTerminalInput((data: string) => {
+				if (!isF1(data)) return undefined;
+				toggle(ctx);
+				return { consume: true };
+			});
+		}
+		if (!active) open(ctx);
 	});
 	pi.on("tool_execution_end", async (_e, ctx: any) => {
 		ctxRef = ctx;
@@ -441,6 +456,8 @@ export default function (pi: ExtensionAPI) {
 		tuiRef?.requestRender();
 	});
 	pi.on("session_shutdown", async () => {
+		unlistenF1?.();
+		unlistenF1 = undefined;
 		close();
 	});
 }
