@@ -169,8 +169,14 @@ mod tests {
         d
     }
 
+    // Serializes the two tests that toggle the process-global fail-injection env
+    // var, so it can never leak into a concurrent index_project() call (that race
+    // made index_status_reindex_roundtrip flaky-panic under parallel test runs).
+    static REINDEX_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn failed_reindex_keeps_previous_index_readable() {
+        let _env = REINDEX_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let ws = scratch("ci-project-failed-reindex");
         let proj = ws.join("demo");
         std::fs::create_dir_all(proj.join("src")).unwrap();
@@ -212,6 +218,7 @@ mod tests {
 
     #[test]
     fn index_status_reindex_roundtrip() {
+        let _env = REINDEX_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let ws = scratch("ci-project");
         let proj = ws.join("demo");
         std::fs::create_dir_all(proj.join("src")).unwrap();
