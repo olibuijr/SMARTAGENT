@@ -142,6 +142,7 @@ Moved to [CATALOG.md](./CATALOG.md) (token efficiency: this file is injected int
 
 ## Gotchas (learned the hard way — read before building/testing)
 
+- **Gateway agents must not restart their own host service in split steps.** If a T-79-style verification needs `gateway` restarted, use one atomic `supervise restart gateway` as the final action, or hand restart+verify to a peer/orchestrator agent outside the service being restarted. Do not run `supervise down gateway` from inside a gateway-hosted agent and expect to run the `up` half afterward.
 - **`session_shutdown` fires in headless `./pi -p` mode too**, not just interactive quit — so the `session-memory.ts` extension captures the session intent to episodic memory on every run, including one-shot `-p` invocations. Verified end-to-end 2026-07-02: a unique-marker prompt round-tripped intent-capture → episodic store (count +1) → recall-injection into the next session's context.
 - **`.gitignore` inline comments do NOT work.** `.refrepos/ # note` makes the whole line (spaces + `#…`) the pattern, so the dir is NOT ignored — this nearly committed `.pi/agent/auth.json`. Keep comments on their own lines.
 - **`./pi -p '<prompt>' < /dev/null`** — the stdin redirect is MANDATORY; without it pi hangs. Same for **`codex exec … < /dev/null`** (blocks on "Reading additional input from stdin…").

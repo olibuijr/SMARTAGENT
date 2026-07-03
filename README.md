@@ -9,8 +9,12 @@ The result is an agent you can run locally, inspect, and verify:
 - one launcher: `./pi`
 - one build gate: `./build.sh`
 - one storage layer: `semdb`
-- many focused tools: memory, code search, browser control, tasks, workflows,
-  sandboxing, RAG, secrets, scheduling, notifications, and more
+- many focused tools: memory, code search, browser control (text + a visual
+  high-DPI TUI pane), tasks, workflows, sandboxing, RAG, secrets, scheduling,
+  notifications, and more
+- an autonomous 8-agent fleet (the meðvitund gateway) with a dedicated chat
+  agent reachable over a **Telegram bot** — streaming replies, slash commands,
+  and task-completion broadcasts
 
 No `npm install`, no `pip install`, and no crates.io dependency tree inside the
 tool crates. The system borrows proven patterns from popular agent projects and
@@ -132,8 +136,9 @@ concepts, not the dependency stacks.
 <details>
 <summary><strong>Tool Catalog</strong></summary>
 
-Every active tool is a standalone Rust binary exposed to pi by an extension.
-Voice is built but disabled until an external speech server is deployed.
+The core active tool catalog is 20 standalone Rust binaries exposed to pi by thin extensions. Additional shared/event extensions support the TUI and lifecycle, but are not counted as core tools. Voice is built but disabled until an external speech server is deployed.
+
+### Core active tools (20)
 
 | Tool | Reference pattern | What it does |
 |------|-------------------|--------------|
@@ -148,7 +153,6 @@ Voice is built but disabled until an external speech server is deployed.
 | `notify` | [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications |
 | `secrets` | [Infisical](https://github.com/Infisical/infisical) | Policy-gated, audited secret store |
 | `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open, click, type, wait, scroll, snapshot |
-| `sa-browser` | browser-use + TUI pane | Visual browser pane for the pi TUI plus DOM snapshots |
 | `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out headless-pi subagents with persisted results |
 | `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers |
 | `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution with secret masking and resource caps |
@@ -158,6 +162,18 @@ Voice is built but disabled until an external speech server is deployed.
 | `tasks` | kanban | Board with WIP limits and criteria-gated done |
 | `workflow` | PAI-style process | Markdown-defined evidence-gated process engine |
 | `supervise` | process supervisor | Process manager for scheduler, gateway, and Chromium services |
+
+### Additional active extension tools
+
+| Tool | Role |
+|------|------|
+| `sa-browser` | Visual browser pane for the pi TUI plus DOM snapshots |
+
+### Built but disabled
+
+| Tool | Status |
+|------|--------|
+| `voice` | Delisted/disabled until a titan speech server exists; not an active pi tool |
 
 Shared libraries include `httpc` for HTTP/HTTPS and JSON, plus extension-only
 pieces such as session memory, hooks, commands, and the statusline.
@@ -189,9 +205,9 @@ work observable and prevents accidental drive-by changes.
 The TUI statusline shows live health under the input in three rows:
 
 ```text
-⌂ workspace: code graph, project index, tasks, workflow
-▦ data: memory, rag, schedule, evals, orchestration
-⛭ infra: services, sandbox, secrets, Chrome, search, hooks
+⌂ workspace: code graph, project index, tasks, workflow, gateway
+▦ data: memory, Corpus, schedule, evals, orchestration
+⛭ infra: services (scheduler/gateway/chromium), sandbox, secrets, Chrome, search, hooks
 ```
 
 Healthy segments collapse to `Name ✓`; warnings and errors expand with the

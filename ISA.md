@@ -148,7 +148,7 @@ Engine-drives-pi (2026-07-02):
 - [x] ISC-72: README reflects 3-line statusline, workspace layer, operating loop, 20-tool gate (was 18/two-row)
 
 Skill coverage + platform expertise + slash commands (2026-07-02, 3× Fable agents):
-- [x] ISC-73: every active tool covered by a matching skill (coverage table; skills validate 14/14)
+- [x] ISC-73: every active tool covered by a matching skill (coverage table; `skills validate` passes for the live skill set)
 - [x] ISC-74: `platform` skill answers SMARTAGENT×pi questions, rank-1 on "what can this platform do" etc.
 - [x] ISC-75: new domain skills (code-nav, memory-recall, web-research, ops, orchestration) rank-1 on realistic trigger queries
 - [x] ISC-76: skills discovery skip-list — `.refrepos`/dot-dirs/target/node_modules/workspaces never surface as skills
