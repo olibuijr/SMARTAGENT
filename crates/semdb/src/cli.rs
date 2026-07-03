@@ -8,7 +8,6 @@ use httpc::args::flag;
 
 use crate::client;
 use crate::config::Config;
-use crate::hnsw::Hnsw;
 use crate::http;
 use crate::storage::Db;
 use crate::vector;
@@ -179,38 +178,21 @@ pub fn run(args: &[String]) -> Result<String, String> {
     }
 }
 
-/// Shared search core: brute-force cosine or HNSW. Returns (id, score, meta).
+/// Shared search core: brute-force cosine. Returns (id, score, meta).
 /// Runs inside the daemon against the in-memory index (see `server`).
-pub fn search(db: &Db, query: &[f32], k: usize, exact: bool) -> Vec<(String, f32, String)> {
-    // Rebuilding HNSW from scratch per query costs MORE than brute force
-    // until the graph is persisted — auto-exact below 10k rows makes the
-    // common case both faster and exactly correct.
-    let exact = exact || db.index.len() < 10_000;
-    if exact {
-        let mut scored: Vec<(String, f32, String)> = db
-            .index
-            .iter()
-            .map(|(id, e)| (id.clone(), vector::cosine(query, &e.vector), e.meta.clone()))
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(k);
-        return scored;
-    }
-    let mut hnsw = Hnsw::new();
-    let mut ids = Vec::with_capacity(db.index.len());
-    for (id, e) in &db.index {
-        hnsw.insert(vector::normalized(&e.vector));
-        ids.push(id.clone());
-    }
-    let q = vector::normalized(query);
-    hnsw.search(&q, k, (k * 4).max(64))
-        .into_iter()
-        .map(|(node, score)| {
-            let id = &ids[node];
-            let meta = db.index.get(id).map(|e| e.meta.clone()).unwrap_or_default();
-            (id.clone(), score, meta)
-        })
-        .collect()
+///
+/// `exact` is retained for CLI/API compatibility, but both modes are exact:
+/// rebuilding HNSW from scratch per query costs more than a linear scan at the
+/// current SMARTAGENT corpus sizes and can return approximate results.
+pub fn search(db: &Db, query: &[f32], k: usize, _exact: bool) -> Vec<(String, f32, String)> {
+    let mut scored: Vec<(String, f32, String)> = db
+        .index
+        .iter()
+        .map(|(id, e)| (id.clone(), vector::cosine(query, &e.vector), e.meta.clone()))
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(k);
+    scored
 }
 
 fn required(args: &[String], idx: usize, what: &str) -> Result<String, String> {

@@ -1,4 +1,4 @@
-//! Integration tests: end-to-end store behavior, ANN recall vs brute force,
+//! Integration tests: end-to-end store behavior, exact brute-force search,
 //! and crash recovery with a real killed writer process.
 
 use std::path::PathBuf;
@@ -120,35 +120,21 @@ fn cli_help_flags_work_after_subcommands() {
 }
 
 #[test]
-fn ann_recall_vs_brute_force() {
-    let path = tmp("recall");
+fn approximate_flag_uses_exact_brute_force_at_10k_rows() {
+    let path = tmp("brute-10k");
     let mut db = Db::create(&path).unwrap();
     let mut seed = 1234u64;
-    let n = 1000;
+    let n = 10_000;
     let dim = 32;
     for i in 0..n {
         db.put(&format!("v{i}"), "", rand_vec(&mut seed, dim))
             .unwrap();
     }
 
-    let k = 10;
-    let queries = 20;
-    let mut total_overlap = 0usize;
-    for _ in 0..queries {
-        let q = rand_vec(&mut seed, dim);
-        let exact: Vec<String> = cli::search(&db, &q, k, true)
-            .into_iter()
-            .map(|r| r.0)
-            .collect();
-        let approx: Vec<String> = cli::search(&db, &q, k, false)
-            .into_iter()
-            .map(|r| r.0)
-            .collect();
-        total_overlap += approx.iter().filter(|id| exact.contains(id)).count();
-    }
-    let recall = total_overlap as f64 / (queries * k) as f64;
-    println!("HNSW recall@{k} over {queries} queries on {n} vectors: {recall:.3}");
-    assert!(recall >= 0.9, "recall {recall:.3} below 0.9");
+    let q = rand_vec(&mut seed, dim);
+    let exact = cli::search(&db, &q, 10, true);
+    let approximate_flag = cli::search(&db, &q, 10, false);
+    assert_eq!(approximate_flag, exact);
     std::fs::remove_file(&path).unwrap();
 }
 
