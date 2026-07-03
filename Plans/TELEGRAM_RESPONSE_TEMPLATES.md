@@ -221,6 +221,6 @@ Use Markdown tables when:
 
 - There are 2–4 columns with short stable values, such as run id, task id, step, and state.
 - The table has at most about 8 rows.
-- The final message is sent with Markdown enabled and has been clipped to Telegram's 4096-character cap.
+- The final message is sent as Telegram plain text after SMARTAGENT formatting owns headings, bullets, code, and tables; chunks stay within Telegram's 4096-character cap.
 
 Avoid tables in live progress frames; use bullets or a single status line instead.
