@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use workflow::cli;
 
 fn scratch(name: &str) -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("workflows")).unwrap();
     d
@@ -10,7 +12,12 @@ fn scratch(name: &str) -> PathBuf {
 
 fn s(v: &[&str], root: &PathBuf) -> Vec<String> {
     let mut a: Vec<String> = v.iter().map(|x| x.to_string()).collect();
-    a.extend(["--root".into(), root.display().to_string(), "--db".into(), root.join("workflow.semdb").display().to_string()]);
+    a.extend([
+        "--root".into(),
+        root.display().to_string(),
+        "--db".into(),
+        root.join("workflow.semdb").display().to_string(),
+    ]);
     a
 }
 
@@ -22,24 +29,88 @@ fn evidence_gated_engine_end_to_end() {
     std::fs::write(root.join("workflows/mini.md"), WF).unwrap();
     // discovery from workflows/ AND skills/*/Workflows/
     std::fs::create_dir_all(root.join("skills/Kanban/Workflows")).unwrap();
-    std::fs::write(root.join("skills/Kanban/Workflows/Triage.md"), "## sort\nGo through backlog.\n").unwrap();
+    std::fs::write(
+        root.join("skills/Kanban/Workflows/Triage.md"),
+        "## sort\nGo through backlog.\n",
+    )
+    .unwrap();
     let list = cli::run(&s(&["list"], &root)).unwrap();
     assert!(list.contains("mini") && list.contains("triage"), "{list}");
     // start prints step 1 with skill routing
     let step1 = cli::run(&s(&["start", "mini", "--task", "T-7"], &root)).unwrap();
-    assert!(step1.contains("step 1/2: observe") && step1.contains("use: memory") && step1.contains("T-7"), "{step1}");
+    assert!(
+        step1.contains("step 1/2: observe")
+            && step1.contains("use: memory")
+            && step1.contains("T-7"),
+        "{step1}"
+    );
     // trivial evidence rejected
     let e = cli::run(&s(&["advance", "--evidence", "done"], &root)).unwrap_err();
     assert!(e.contains("evidence required"), "{e}");
     // real evidence advances to step 2
-    let step2 = cli::run(&s(&["advance", "--evidence", "recalled 3 memories about the task"], &root)).unwrap();
-    assert!(step2.contains("step 2/2: verify") && step2.contains("use: evals"), "{step2}");
+    let step2 = cli::run(&s(
+        &[
+            "advance",
+            "--evidence",
+            "recalled 3 memories about the task",
+        ],
+        &root,
+    ))
+    .unwrap();
+    assert!(
+        step2.contains("step 2/2: verify") && step2.contains("use: evals"),
+        "{step2}"
+    );
     // finishing the last step completes the run and points back at the board
-    let fin = cli::run(&s(&["advance", "--evidence", "probe returned expected output x=42"], &root)).unwrap();
-    assert!(fin.contains("W-1 complete") && fin.contains("tasks move T-7"), "{fin}");
+    let fin = cli::run(&s(
+        &[
+            "advance",
+            "--evidence",
+            "probe returned expected output x=42",
+        ],
+        &root,
+    ))
+    .unwrap();
+    assert!(
+        fin.contains("W-1 complete") && fin.contains("tasks move T-7"),
+        "{fin}"
+    );
     let runs = cli::run(&s(&["runs"], &root)).unwrap();
     assert!(runs.contains("done"), "{runs}");
     // statusline idle again
     let sl = cli::run(&s(&["statusline"], &root)).unwrap();
     assert_eq!(sl, "ok|▶ idle");
+}
+
+#[test]
+fn edited_workflow_with_missing_current_step_errors_cleanly() {
+    let root = scratch("wf-missing-step");
+    std::fs::write(root.join("workflows/mini.md"), WF).unwrap();
+    cli::run(&s(&["start", "mini"], &root)).unwrap();
+    cli::run(&s(
+        &["advance", "--evidence", "observed the first step output"],
+        &root,
+    ))
+    .unwrap();
+
+    let shorter =
+        "---\nname: mini\ndescription: shortened\n---\n## observe\nOnly one step remains.\n";
+    std::fs::write(root.join("workflows/mini.md"), shorter).unwrap();
+
+    let step_err = cli::run(&s(&["step"], &root)).unwrap_err();
+    assert!(
+        step_err.contains("run W-1 step 2 no longer exists in workflow mini")
+            && step_err.contains("abort and restart"),
+        "{step_err}"
+    );
+    let advance_err = cli::run(&s(
+        &["advance", "--evidence", "verified missing step handling"],
+        &root,
+    ))
+    .unwrap_err();
+    assert!(
+        advance_err.contains("run W-1 step 2 no longer exists in workflow mini")
+            && advance_err.contains("abort and restart"),
+        "{advance_err}"
+    );
 }

@@ -37,8 +37,22 @@ fn find_def(root: &Path, name: &str) -> Result<Def, String> {
 
 /// Print one step as agent instructions, including which skill to load —
 /// the PAI "different skill per phase" routing, as data.
-fn render_step(d: &Def, r: &Run) -> String {
-    let s = &d.steps[r.step];
+fn missing_step_error(d: &Def, r: &Run) -> String {
+    format!(
+        "run {} step {} no longer exists in workflow {} (definition has {} steps) — abort and restart",
+        r.id,
+        r.step + 1,
+        d.name,
+        d.steps.len()
+    )
+}
+
+fn current_step<'a>(d: &'a Def, r: &Run) -> Result<&'a crate::def::Step, String> {
+    d.steps.get(r.step).ok_or_else(|| missing_step_error(d, r))
+}
+
+fn render_step(d: &Def, r: &Run) -> Result<String, String> {
+    let s = current_step(d, r)?;
     let mut out = vec![format!(
         "{} · {} — step {}/{}: {}",
         r.id,
@@ -65,7 +79,7 @@ fn render_step(d: &Def, r: &Run) -> String {
         "when done: workflow advance --run {} --evidence '<what you verified>'",
         r.id
     ));
-    out.join("\n")
+    Ok(out.join("\n"))
 }
 
 fn task_owner_state(task: &str) -> Option<(String, String)> {
@@ -237,7 +251,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             };
             store.put(&r)?;
             post_workflow_telegram("started", &r, "Next: observe the first step.");
-            Ok(render_step(&d, &r))
+            render_step(&d, &r)
         }
         Some("step") => {
             let r = resolve_run(&store, args)?;
@@ -245,7 +259,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 return Err(format!("{} is {}", r.id, r.status));
             }
             let d = find_def(&root(args), &r.wf)?;
-            Ok(render_step(&d, &r))
+            render_step(&d, &r)
         }
         Some("advance") => {
             let mut r = resolve_run(&store, args)?;
@@ -255,7 +269,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let d = find_def(&root(args), &r.wf)?;
             // Verification mandate: no advance without real evidence.
             let ev = valid_evidence(&flag(args, "--evidence").unwrap_or_default())?;
-            r.evidence.push(format!("{}: {}", d.steps[r.step].name, ev));
+            let step_name = current_step(&d, &r)?.name.clone();
+            r.evidence.push(format!("{}: {}", step_name, ev));
             r.updated = now();
             if r.step + 1 >= d.steps.len() {
                 r.status = "done".into();
@@ -276,7 +291,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 r.step += 1;
                 store.put(&r)?;
                 post_workflow_telegram("advanced", &r, &format!("Evidence: {ev}"));
-                Ok(render_step(&d, &r))
+                render_step(&d, &r)
             }
         }
         Some("drive") => {
