@@ -14,7 +14,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -316,14 +316,30 @@ pub fn main_checkout_path() -> Result<PathBuf, String> {
 
 pub fn path_allowed_for_task(id: &str, path: &Path) -> Result<bool, String> {
     let dir = current_task_path(id)?;
-    if path.starts_with(&dir) {
-        return Ok(true);
+    let root = repo_root()?;
+    let dir = normalize_path(&dir, &root);
+    let path = normalize_path(path, &root);
+    Ok(path.starts_with(dir))
+}
+
+fn normalize_path(path: &Path, cwd: &Path) -> PathBuf {
+    let full = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    let canonical = full.canonicalize().unwrap_or(full);
+    let mut out = PathBuf::new();
+    for component in canonical.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
     }
-    let canon_dir = dir.canonicalize().unwrap_or(dir);
-    Ok(path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .starts_with(canon_dir))
+    out
 }
 
 pub fn reap_abandoned(max_age_secs: u64) -> Result<String, String> {
