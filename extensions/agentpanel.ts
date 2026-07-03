@@ -115,6 +115,10 @@ type Run = { id: string; def: string; step: string; task: string };
 let agents: Agent[] = [];
 let runs: Run[] = [];
 let gatewayUp = false;
+// Module-scoped so the module-level refresh() callbacks can request a render.
+// (Was function-local, which made refresh() throw "tuiRef is not defined" and
+// crashed pi via an uncaughtException in the execFile exit handler.)
+let tuiRef: any;
 let frame = 0;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -347,7 +351,6 @@ function render(width: number): string[] {
 }
 
 export default function (pi: ExtensionAPI) {
-	let tuiRef: any;
 	let finish: ((r: unknown) => void) | undefined;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let spinTimer: ReturnType<typeof setInterval> | undefined;
