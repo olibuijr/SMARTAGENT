@@ -13,6 +13,34 @@ fn shared_registry_marks_telegram_and_tui_commands_in_parity() {
 }
 
 #[test]
+fn group_mentions_are_recognized_and_cleaned_for_gateway_prompt() {
+    assert!(super::is_group_mention(
+        "supergroup",
+        "@olafurs_bot can you answer?",
+        "olafurs_bot"
+    ));
+    assert!(super::is_group_mention(
+        "group",
+        "hey @Olafurs_Bot, status?",
+        "olafurs_bot"
+    ));
+    assert!(!super::is_group_mention(
+        "private",
+        "@olafurs_bot status?",
+        "olafurs_bot"
+    ));
+    assert!(!super::is_group_mention(
+        "supergroup",
+        "hello everyone",
+        "olafurs_bot"
+    ));
+    assert_eq!(
+        super::strip_bot_mention("hey @olafurs_bot, status?", "olafurs_bot"),
+        "hey status?"
+    );
+}
+
+#[test]
 fn telegram_agent_assignment_keyboard_is_multiple_choice() {
     let markup = super::agent_assignment_menu_markup();
     assert!(markup.contains("inline_keyboard"), "{markup}");

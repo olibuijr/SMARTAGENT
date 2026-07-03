@@ -44,6 +44,15 @@ pub fn call(token: &str, method: &str, body: &str) -> Result<Value, String> {
     Ok(v.get("result").cloned().unwrap_or(Value::Null))
 }
 
+/// getMe → returns the bot username, used to recognize @mentions in groups.
+pub fn get_me_username(token: &str) -> Result<String, String> {
+    let r = call(token, "getMe", "{}")?;
+    r.get("username")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "getMe: no username".into())
+}
+
 /// getUpdates (short-poll by default) — returns the raw `result` array value.
 pub fn get_updates(token: &str, offset: u64, timeout: u64) -> Result<Value, String> {
     let url =
