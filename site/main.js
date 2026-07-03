@@ -1,11 +1,6 @@
-// SMARTAGENT pixel world — a playable 8-bit night level built on three.js
-// WebGPU (WebGL fallback is automatic). All art is generated at runtime:
-// the agent faces are the exact TUI sidebar sprites (faces.js port of
-// gen-faces.ts), everything else is drawn onto canvas textures. No DOM UI.
 import * as THREE from "three";
 import { faceGrid, FACE_W, FACE_H } from "./faces.js";
-
-// ── Brand data ──────────────────────────────────────────────────────────────
+import { disposeMaterialsOnce } from "./materials.js";
 const AGENTS = [
 	{ key: "linus", name: "LINUS TORVALDS", spec: "TEAM LEAD", accent: "#ffaf5f", line: "Coordinates the fleet. Merges nothing without taste." },
 	{ key: "ada", name: "ADA LOVELACE", spec: "BACKEND EXPERT", accent: "#ff87d7", line: "Wrote the first program. Now writes your APIs." },
@@ -16,31 +11,15 @@ const AGENTS = [
 	{ key: "turing", name: "ALAN TURING", spec: "VERIFICATION EXPERT", accent: "#5fd7d7", line: "Decides what halts. Approves what ships." },
 	{ key: "ken", name: "KEN THOMPSON", spec: "INFRASTRUCTURE EXPERT", accent: "#ffaf5f", line: "Keeps the pipes named well and running." },
 ];
-const FACTS = [
-	"27 PURE-RUST CRATES",
-	"ZERO DEPENDENCIES",
-	"22 AGENT TOOLS",
-	"OWN VECTOR DB: SEMDB",
-	"8 AUTONOMOUS AGENTS",
-	"KANBAN-DRIVEN FLEET",
-	"SELF-CREATED SKILLS",
-	"STD-ONLY. FROM SCRATCH.",
-];
+const FACTS = ["27 PURE-RUST CRATES", "ZERO DEPENDENCIES", "22 AGENT TOOLS", "OWN VECTOR DB: SEMDB", "8 AUTONOMOUS AGENTS", "KANBAN-DRIVEN FLEET", "SELF-CREATED SKILLS", "STD-ONLY. FROM SCRATCH."];
 const REPO = "https://github.com/olibuijr/SMARTAGENT";
 const INSTALL_CMD = "git clone https://github.com/olibuijr/SMARTAGENT && SMARTAGENT/install.sh my-agent";
 const BG = "#161620", PANEL = "#262626", SKINC = "#fccda5";
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isTouch = matchMedia("(pointer: coarse)").matches;
-
-// ── Level metrics (world units = pixels) ────────────────────────────────────
-const VIEW_H = 270;
-const GROUND = 48;            // ground top y
-const STATION_GAP = 340;
-const LEVEL_START = 300;
+const VIEW_H = 270, GROUND = 48, STATION_GAP = 340, LEVEL_START = 300;
 const LEVEL_END = LEVEL_START + AGENTS.length * STATION_GAP + 420;
 const BLOCK_Y = GROUND + 88;  // ?-block altitude (reachable by jump)
-
-// ── Canvas-texture helpers ──────────────────────────────────────────────────
 function cv(w, h) {
 	const c = document.createElement("canvas");
 	c.width = w; c.height = h;
@@ -65,8 +44,6 @@ function plane(canvas, scale = 1, transparent = true) {
 	return m;
 }
 function overlay(mesh, z = 40) {
-	// speech/UI planes: pull forward and skip the depth test so 3D world
-	// geometry (blocks, lamps, buildings) can never clip them
 	mesh.position.z = z;
 	mesh.material.depthTest = false;
 	mesh.renderOrder = 10;
@@ -79,8 +56,6 @@ function textCanvas(str, size, color, { bg = null, pad = 0, glow = null } = {}) 
 	const w = Math.ceil(mx.measureText(str).width) + pad * 2;
 	let h = size + pad * 2 + Math.ceil(size * 0.3);
 	if (h % 2) h++; // even height — odd sizes sit on half-texels and garble
-	// WebGPU texture uploads need 256-byte-aligned rows; odd canvas widths
-	// skew into garbled glyphs. Pad to 64px (RGBA) and center the box.
 	const cw = Math.ceil(w / 64) * 64;
 	const [c, x] = cv(cw, h);
 	const ox = Math.floor((cw - w) / 2);
@@ -102,14 +77,10 @@ function gridCanvas(g, w, h) {
 	}
 	return c;
 }
-
-// ── Sprite art (all procedural) ─────────────────────────────────────────────
 function agentSprite(key, accent) {
-	// face 24x21 at 2x + pixel body → 48x76 sprite
 	const face = gridCanvas(faceGrid(key), FACE_W, FACE_H);
 	const [c, x] = cv(48, 76);
 	x.drawImage(face, 0, 0, 24, 21, 0, 0, 48, 42);
-	// body: hoodie in the agent's accent, dark trousers
 	x.fillStyle = accent;
 	x.fillRect(10, 42, 28, 20);          // torso
 	x.fillRect(4, 44, 6, 12); x.fillRect(38, 44, 6, 12); // arms
@@ -122,7 +93,6 @@ function agentSprite(key, accent) {
 	return c;
 }
 function playerFrames() {
-	// The visiting agent: a small terminal-green robot, 3 frames (idle/step)
 	const frames = [];
 	for (let f = 0; f < 3; f++) {
 		const [c, x] = cv(26, 32);
@@ -207,7 +177,6 @@ function castle() {
 function skylineStrip() {
 	const [c, x] = cv(480, 100);
 	let bx = 0;
-	// deterministic pseudo-random so every load is the same city
 	let seed = 7;
 	const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 	while (bx < 480) {
@@ -253,15 +222,11 @@ function signBoard(w, h, accent) {
 	x.strokeRect(1, 1, w - 2, h - 2);
 	return [c, x];
 }
-
-// ── Boot ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById("g");
 const renderer = new THREE.WebGPURenderer({ canvas, antialias: false });
 try {
 	await renderer.init();
 } catch (e) {
-	// No WebGPU and no WebGL2 (ancient browser / headless): reveal the
-	// semantic content instead of a black screen.
 	document.querySelector(".sr").removeAttribute("class");
 	canvas.remove();
 	document.body.style.cssText = "background:#161620;color:#fccda5;font:14px/1.7 monospace;padding:2rem;overflow:auto";
@@ -269,16 +234,11 @@ try {
 }
 await document.fonts.load(`8px ${FONT}`).catch(() => {});
 renderer.setClearColor(new THREE.Color(BG));
-
 const scene = new THREE.Scene();
-// Perspective diorama: the gameplay plane sits at z=0 and spans VIEW_H
-// vertically, exactly like the old ortho view — but depth is now real.
 const FOV = 38;
 const TAN = Math.tan((FOV / 2) * Math.PI / 180);
 const camera = new THREE.PerspectiveCamera(FOV, 16 / 9, 10, 2600);
 scene.add(camera);
-// landscape: 270-tall retro view. portrait: hold world WIDTH at 420 and let
-// the view grow tall — more sky and street, nothing stretches.
 let hudRef = null; // set once the HUD group exists; resize() repositions it
 let ctrlBand = 0;  // reserved controller shelf height (touch portrait)
 let topBand = 0;   // console bezel above the screen (touch portrait)
@@ -286,8 +246,6 @@ let rebuildShellFn = null;
 const pillZones = []; // START/SELECT hit zones in world coords
 let viewW = 480, viewH = VIEW_H, DIST = (VIEW_H / 2) / TAN, CAM_Y = VIEW_H / 2 - 24;
 function resize() {
-	// measure the CANVAS, not the window: on phones 100vh ≠ innerHeight
-	// (URL bar), and that mismatch silently offset every touch hit-test
 	const rect = canvas.getBoundingClientRect();
 	const aspect = (rect.width || innerWidth) / (rect.height || innerHeight);
 	camera.aspect = aspect;
@@ -299,8 +257,6 @@ function resize() {
 		viewH = VIEW_H;
 		viewW = Math.round(Math.min(760, Math.max(340, viewH * aspect)));
 	}
-	// Game-Boy layout on touch portrait: the world sits above a dedicated
-	// controller shelf instead of the pads floating over the street
 	ctrlBand = isTouch && aspect < .9 ? Math.round(Math.min(260, viewH * .29)) : 0;
 	topBand = ctrlBand > 0 ? 46 : 0;
 	DIST = (viewH / 2) / TAN;
@@ -315,12 +271,8 @@ addEventListener("resize", resize);
 window.visualViewport?.addEventListener("resize", resize);
 resize();
 camera.position.set(0, CAM_Y, DIST);
-
-// ── Build world ─────────────────────────────────────────────────────────────
 const world = new THREE.Group();
 scene.add(world);
-
-// sky bands (deep background — fog-exempt)
 {
 	const bands = [["#12121c", 2400, 1200], ["#161624", 420, 210], ["#1a1a2c", 230, -10]];
 	for (const [col, h, y] of bands) {
@@ -332,7 +284,6 @@ scene.add(world);
 		scene.add(m);
 	}
 }
-// stars
 const stars = [];
 {
 	let seed = 31;
@@ -347,24 +298,18 @@ const stars = [];
 		scene.add(s); stars.push(s);
 	}
 }
-// city: a detailed 2.5D night skyline — real boxes, textured on front AND
-// sides, rooftop props, crate-name neon signs, blinking antennas, a moon.
 const blinkers = [], neons = [];
 {
 	let seed = 13;
 	const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 	const flat = (col) => new THREE.MeshBasicMaterial({ color: col });
-	// muted facade palette — night-blue, warm-gray, brown-gray
 	const FACADES = ["#20202c", "#242028", "#1e222c", "#262229", "#1c1f28"];
 	const WINDOW_COLS = ["#43536b", "#3f4c40", "#6b5a43", "#4a4358"];
-
 	function facade(w, h, { storefront = false } = {}) {
 		const [c, x] = cv(Math.ceil(w / 4) * 4, Math.ceil(h / 4) * 4);
 		const base = FACADES[Math.floor(rnd() * FACADES.length)];
 		x.fillStyle = base; x.fillRect(0, 0, c.width, c.height);
-		// cornice + roofline trim
 		x.fillStyle = "#2c2c3a"; x.fillRect(0, 0, w, 3);
-		// per-building window style
 		const ww = rnd() > .5 ? 4 : 3, wh = rnd() > .5 ? 5 : 6;
 		const gx = ww + 4 + Math.floor(rnd() * 4), gy = wh + 6 + Math.floor(rnd() * 3);
 		const litCol = WINDOW_COLS[Math.floor(rnd() * WINDOW_COLS.length)];
@@ -382,7 +327,6 @@ const blinkers = [], neons = [];
 			}
 		}
 		if (storefront) {
-			// lit ground floor: awning band + door + shop windows
 			x.fillStyle = "#101018"; x.fillRect(0, h - 20, w, 20);
 			x.fillStyle = rnd() > .5 ? "#6b5a43" : "#43536b";
 			for (let wx = 4; wx < w - 12; wx += 18) x.fillRect(wx, h - 16, 10, 10);
@@ -391,7 +335,6 @@ const blinkers = [], neons = [];
 		return c;
 	}
 	function sideFace(w, h) {
-		// sparser, dimmer windows on the flank — reads as depth when tilting
 		const [c, x] = cv(Math.ceil(w / 4) * 4, Math.ceil(h / 4) * 4);
 		x.fillStyle = "#181822"; x.fillRect(0, 0, c.width, c.height);
 		x.fillStyle = "#242c3a";
@@ -406,7 +349,6 @@ const blinkers = [], neons = [];
 		["RUST", "#ffaf5f"],
 	];
 	let neonIdx = 0;
-
 	for (let i = 0; i < 46; i++) {
 		const near = i % 3 === 0; // every third building sits in the near row
 		const bw = (near ? 60 : 44) + rnd() * 70;
@@ -421,8 +363,6 @@ const blinkers = [], neons = [];
 		b.position.set(bx, GROUND + bh / 2 - 6, z - bd / 2);
 		scene.add(b);
 		const roofY = GROUND + bh - 6, roofZ = z - bd / 2;
-
-		// rooftop furniture: water tank, AC boxes, antenna with blinker
 		if (rnd() > .45) {
 			const tank = new THREE.Mesh(new THREE.BoxGeometry(10, 12, 10), flat("#2a2530"));
 			tank.position.set(bx - bw / 4, roofY + 6, roofZ);
@@ -447,7 +387,6 @@ const blinkers = [], neons = [];
 			scene.add(lamp);
 			blinkers.push(lamp);
 		}
-		// crate-name neon on select mid-height near buildings
 		if (near && neonIdx < NEON_WORDS.length && bh > 120 && rnd() > .35) {
 			const [word, col] = NEON_WORDS[neonIdx++];
 			const sign = plane(textCanvas(word, 8, col, { glow: col, pad: 4 }));
@@ -462,8 +401,6 @@ const blinkers = [], neons = [];
 			scene.add(halo);
 		}
 	}
-
-	// pixel moon with craters + halo
 	{
 		const R = 26;
 		const [mc, mx] = cv(R * 2, R * 2);
@@ -487,8 +424,6 @@ const blinkers = [], neons = [];
 		halo.position.set(moon.position.x, moon.position.y, -781);
 		scene.add(halo);
 	}
-
-	// soft hills silhouette behind the city
 	const hil = hillsStrip();
 	for (let px = -480; px < LEVEL_END + 960; px += 480) {
 		const h = plane(hil, 2.2);
@@ -496,7 +431,6 @@ const blinkers = [], neons = [];
 		h.position.set(px + 240, GROUND + 44, -560);
 		scene.add(h);
 	}
-	// drifting clouds between city and sky
 	const cl = cloud();
 	for (let i = 0; i < 14; i++) {
 		const c = plane(cl, 1.6);
@@ -505,8 +439,6 @@ const blinkers = [], neons = [];
 		scene.add(c);
 	}
 }
-
-// ground: one long slab with real depth — front face bricks, walkable top
 {
 	const g = groundStrip(480);
 	const front = new THREE.MeshBasicMaterial({ map: tex(g) });
@@ -521,8 +453,6 @@ const blinkers = [], neons = [];
 	slab.position.set(LEVEL_END / 2, GROUND / 2, -260);
 	world.add(slab);
 }
-
-// agents + lamps + signs
 const stations = [];
 AGENTS.forEach((a, i) => {
 	const ax = LEVEL_START + (i + 1) * STATION_GAP;
@@ -546,16 +476,13 @@ AGENTS.forEach((a, i) => {
 	glow.material.depthWrite = false;
 	glow.position.set(ax - 60, GROUND + 88, -1);
 	world.add(glow);
-	// nameplate (always visible, small)
 	const np = overlay(plane(textCanvas(a.name, 8, a.accent, { bg: PANEL, pad: 5 })));
 	np.position.set(ax, GROUND + 90, 40);
 	world.add(np);
-	// dialog card (hidden until near)
 	const [dc, dx] = signBoard(256, 64, a.accent);
 	dx.font = `8px ${FONT}`; dx.textBaseline = "top";
 	dx.fillStyle = a.accent; dx.fillText(a.spec, 8, 9);
 	dx.fillStyle = "#e8e2d8";
-	// word-wrap the flavor line
 	const words = a.line.split(" ");
 	let line = "", ly = 26;
 	for (const w of words) {
@@ -569,8 +496,6 @@ AGENTS.forEach((a, i) => {
 	world.add(card);
 	stations.push({ x: ax, spr, card, bob: Math.random() * 6.28 });
 });
-
-// ?-blocks with facts
 const blocks = [];
 FACTS.forEach((fact, i) => {
 	const bx = LEVEL_START + (i + 1) * STATION_GAP - STATION_GAP / 2;
@@ -590,8 +515,6 @@ FACTS.forEach((fact, i) => {
 	world.add(cn);
 	blocks.push({ x: bx, mesh: b, toast, coin: cn, hit: false, anim: 0 });
 });
-
-// install terminal: one keypress copies the install command
 const INSTALL_X = LEVEL_END - 330;
 let copied = 0;
 {
@@ -636,8 +559,6 @@ async function copyInstall() {
 	copied = performance.now();
 	coinSound();
 }
-
-// castle + flag at the end
 {
 	const cfront = new THREE.MeshBasicMaterial({ map: tex(castle()), transparent: true });
 	const cside = new THREE.MeshBasicMaterial({ color: "#2c2733" });
@@ -657,26 +578,19 @@ async function copyInstall() {
 	world.add(hint);
 	window.__castleHint = hint;
 }
-
-// ── Player ──────────────────────────────────────────────────────────────────
 const frames = playerFrames().map((c) => tex(c));
 const player = new THREE.Mesh(
 	new THREE.PlaneGeometry(26, 32),
-	// DoubleSide: scale.x = -1 (facing left) inverts winding and would
-	// otherwise get back-face culled — the character vanished walking left.
 	new THREE.MeshBasicMaterial({ map: frames[0], transparent: true, side: THREE.DoubleSide })
 );
 player.position.set(60, GROUND + 16, 3);
 world.add(player);
 const spawnX = 60;
 const P = { x: spawnX, y: 0, vx: 0, vy: 0, onGround: true, face: 1, coins: 0 };
-
-// ── HUD (camera-space) ──────────────────────────────────────────────────────
 const hud = new THREE.Group();
 camera.add(hud);
 hudRef = hud;
 resize(); // positions the HUD for the current aspect
-// Title: the generated pixel logo (billboard style); text fallback if it fails
 const logoTex = await new Promise((res) => {
 	const img = new Image();
 	img.onload = () => {
@@ -700,14 +614,12 @@ title.position.set(0, 70, 5);
 subtitle.position.set(0, 44, 5);
 hintCtl.position.set(0, 22, 5);
 hud.add(title, subtitle, hintCtl);
-// ── Game Boy controller overlay ──
 function pxCircle(x, cx2, cy, r, col) {
 	x.fillStyle = col;
 	for (let y = -r; y <= r; y++) for (let x2 = -r; x2 <= r; x2++)
 		if (x2 * x2 + y * y <= r * r) x.fillRect(cx2 + x2, cy + y, 1, 1);
 }
 function dpadCanvas(pressed = null) {
-	// classic cross: dark body, beveled arms, engraved arrows, center dimple
 	const S = 96, A = 32;                    // size, arm thickness
 	const [c, x] = cv(S + 32, S);            // row-aligned width
 	const ox = 16, m = (S - A) / 2;
@@ -726,7 +638,6 @@ function dpadCanvas(pressed = null) {
 	arm(S - Math.floor(S / 3), m, Math.floor(S / 3), A, "right");
 	arm(m, 0, A, Math.floor(S / 3), "jump");
 	arm(m, S - Math.floor(S / 3), A, Math.floor(S / 3), "down");
-	// engraved arrows
 	x.fillStyle = "#0e0e14";
 	const t = (cx2, cy, dx, dy) => { for (let i = 0; i < 6; i++) x.fillRect(ox + cx2 + dx * i - (dy ? 6 - i : 0), cy + dy * i - (dx ? 6 - i : 0), dy ? 2 * (6 - i) : 2, dx ? 2 * (6 - i) : 2); };
 	t(12, S / 2 - 1, -1, 0); t(S - 14, S / 2 - 1, 1, 0); t(S / 2 - 1, 12, 0, -1); t(S / 2 - 1, S - 14, 0, 1);
@@ -735,7 +646,6 @@ function dpadCanvas(pressed = null) {
 	return c;
 }
 function roundBtn(label, pressed = false) {
-	// Game Boy magenta face button, engraved letter
 	const R = 25;
 	const [c, x] = cv(64, 56);
 	pxCircle(x, 32, 28, R + 2, "#0a0a10");                       // outline
@@ -756,9 +666,6 @@ if (isTouch) {
 	shellMesh.renderOrder = 11;
 	shellMesh.visible = false;
 	hud.add(shellMesh);
-	// Draws the whole console around the screen hole: pinstriped top bezel
-	// with brand + power LED, inset screen bezel, tagline, START/SELECT
-	// pills, speaker grille. Rebuilt on resize/rotation.
 	rebuildShellFn = function rebuildShell() {
 		pillZones.length = 0;
 		if (ctrlBand <= 0) { shellMesh.visible = false; return; }
@@ -776,7 +683,6 @@ if (isTouch) {
 		x.fillText("SMARTAGENT", ox + Math.floor((w - x.measureText("SMARTAGENT").width) / 2), 22);
 		pxCircle(x, ox + 20, 27, 4, "#3a1218");                                 // power LED
 		pxCircle(x, ox + 20, 26, 2, "#ff4f4f");
-		// screen bezel inset
 		x.fillStyle = "#0d0d12"; x.fillRect(ox + holeX - 8, holeY - 8, holeW + 16, holeH + 16);
 		x.fillStyle = "#050508"; x.fillRect(ox + holeX - 8, holeY - 8, holeW + 16, 2);
 		x.fillStyle = "#33333f"; x.fillRect(ox + holeX - 8, holeY + holeH + 4, holeW + 16, 2);
@@ -784,7 +690,6 @@ if (isTouch) {
 		const tag = "LEGENDARY DEV SYSTEM";
 		x.fillStyle = "#6a6a7a";
 		x.fillText(tag, ox + Math.floor((w - x.measureText(tag).width) / 2), holeY + holeH + 12);
-		// START / SELECT pills + engraved labels
 		const pillY = h - 34;
 		for (const [cx2, label, act] of [[w / 2 - 44, "SELECT", "select"], [w / 2 + 44, "START", "start"]]) {
 			x.fillStyle = "#0a0a10";
@@ -797,7 +702,6 @@ if (isTouch) {
 			x.fillText(label, ox + cx2 - Math.floor(x.measureText(label).width / 2), pillY + 10);
 			pillZones.push({ x: cx2 - w / 2, y: CAM_Y + viewH / 2 - pillY, act });
 		}
-		// speaker grille: stepped diagonal slots, bottom-right
 		for (let i = 0; i < 5; i++)
 			for (let j = 0; j < 9; j++) {
 				x.fillStyle = "#14141c";
@@ -833,7 +737,6 @@ if (isTouch) {
 		pads.push({ ...d, mesh: m, up, down, held: false });
 	}
 }
-// Always-visible install CTA: copy the command from anywhere, any time.
 function installBtnCanvas(copiedState) {
 	const w = 92, h = 24;
 	const [c, x] = cv(128, h);
@@ -860,8 +763,6 @@ function refreshCoinHud() {
 	coinHud = plane(textCanvas(`FACTS ${P.coins}/8`, 8, "#ffd75f", { pad: 3 }));
 	hud.add(coinHud);
 }
-
-// ── Audio (created on first gesture) ───────────────────────────────────────
 let AC = null;
 function beep(freq, dur = .08, type = "square", vol = .04) {
 	if (!AC) return;
@@ -873,8 +774,6 @@ function beep(freq, dur = .08, type = "square", vol = .04) {
 	o.start(); o.stop(AC.currentTime + dur);
 }
 const coinSound = () => { beep(988, .07); setTimeout(() => beep(1319, .18), 70); };
-
-// ── Input ───────────────────────────────────────────────────────────────────
 const keys = {};
 let started = false, lastInput = 0;
 let lastStart = 0;
@@ -894,11 +793,8 @@ addEventListener("keydown", (e) => {
 	if (["Space", "ArrowUp", "KeyW"].includes(e.code)) e.preventDefault();
 });
 addEventListener("keyup", (e) => (keys[e.code] = false));
-// touch: on-screen controller (multi-touch — walk while jumping)
 let touchDir = 0, touchJump = false;
 const activePointers = new Map(); // pointerId -> pad
-// map through the canvas rect — NOT innerWidth/innerHeight, which drift
-// from the painted canvas when mobile URL bars show/hide
 function toView(clientX, clientY) {
 	const r = canvas.getBoundingClientRect();
 	return [
@@ -967,10 +863,7 @@ canvas.addEventListener("pointermove", (e) => {
 });
 for (const ev of ["pointerup", "pointercancel"])
 	addEventListener(ev, (e) => { activePointers.delete(e.pointerId); recomputeTouch(); });
-
 function nearCastle() { return P.x > LEVEL_END - 260; }
-
-// ── Game loop ───────────────────────────────────────────────────────────────
 const GRAV = 900, SPEED = 150, JUMP = 350;
 let last = performance.now(), walkT = 0, demoDir = 1, camX = spawnX;
 let pointerNX = 0, pointerNY = 0, tiltX = 0, tiltY = 0;
@@ -987,61 +880,49 @@ if (isTouch && "DeviceOrientationEvent" in window)
 		pointerNX = Math.max(-1, Math.min(1, e.gamma / 28));
 		pointerNY = Math.max(-1, Math.min(1, (e.beta - 42) / 32));
 	});
-
 function step(dt, now) {
-	// input → velocity
 	let dir = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0) + touchDir;
 	const jump = keys.Space || keys.ArrowUp || keys.KeyW || touchJump;
-	// auto-demo: after 6s idle, the robot wanders on its own (not with reduced motion)
 	if (!reduceMotion && now - lastInput > 6000 && started) {
 		if (P.x > LEVEL_END - 300) demoDir = -1;
 		if (P.x < 200) demoDir = 1;
 		dir = demoDir * .6;
 	}
 	if (dir) lastInput = keys.ArrowRight || keys.ArrowLeft || keys.KeyA || keys.KeyD || touchDir ? now : lastInput;
-
 	P.vx = dir * SPEED;
 	if (jump && P.onGround) { P.vy = JUMP; P.onGround = false; beep(523, .1, "triangle"); }
 	P.vy -= GRAV * dt;
 	P.x = Math.max(20, Math.min(LEVEL_END - 30, P.x + P.vx * dt));
 	P.y += P.vy * dt;
-
-	// block head-bump: player top crossing block bottom while rising
 	if (P.vy > 0) {
 		for (const b of blocks) {
 			if (b.hit) continue;
 			const playerTop = GROUND + P.y + 32;
 			if (Math.abs(P.x - b.x) < 22 && playerTop > BLOCK_Y - 12 && playerTop < BLOCK_Y + 10) {
 				b.hit = true; b.anim = 1; P.coins++; refreshCoinHud(); coinSound();
+				const oldMaterials = b.mesh.material;
 				const dead = new THREE.MeshBasicMaterial({ map: tex(qBlock(false)) });
 				b.mesh.material = [dead, dead, dead, dead, dead, dead];
+				disposeMaterialsOnce(oldMaterials);
 				P.vy = -60;
 			}
 		}
 	}
-	// ground
 	if (P.y <= 0) { P.y = 0; P.vy = 0; P.onGround = true; }
 	if (dir) P.face = dir > 0 ? 1 : -1;
-
-	// animate player
 	walkT += Math.abs(P.vx) * dt * .08;
 	const frame = !P.onGround ? 1 : Math.abs(P.vx) > 1 ? 1 + (Math.floor(walkT) % 2) : 0;
 	player.material.map = frames[frame];
 	player.scale.x = P.face;
 	player.position.set(Math.round(P.x), Math.round(GROUND + 16 + P.y), 3);
-
-	// camera follow
 	const target = Math.max(viewW / 2 - 40, Math.min(LEVEL_END - viewW / 2 + 40, P.x + P.face * 40));
 	camX += (target - camX) * Math.min(1, dt * 3);
-	// perspective drift: pointer (or walking) tilts the diorama in 3D
 	tiltX += ((reduceMotion ? 0 : pointerNX) - tiltX) * Math.min(1, dt * 2.5);
 	tiltY += ((reduceMotion ? 0 : pointerNY) - tiltY) * Math.min(1, dt * 2.5);
 	const lean = Math.max(-1, Math.min(1, P.vx / SPEED));
 	camera.position.x = camX + tiltX * 26 + lean * 10;
 	camera.position.y = CAM_Y + 6 - tiltY * 16;
 	camera.lookAt(camX - tiltX * 22, CAM_Y - 8 + tiltY * 10, 0);
-	// title: lower-third at rest, parks top-left after the first input —
-	// positions derive from viewH so portrait and landscape both compose
 	{
 		const topY = CAM_Y + viewH / 2 - topBand;
 		const startY = viewH * .26, parkY = topY - 66;
@@ -1061,8 +942,6 @@ function step(dt, now) {
 	installBtn.material.map = copied && now - copied < 2000 ? installBtnMaps.copied : installBtnMaps.idle;
 	{
 		const bottom = CAM_Y - viewH / 2;
-		// controls row sits in the upper half of the shell shelf, above the
-		// START/SELECT pills and speaker grille the shell texture draws
 		const row = bottom + ctrlBand - 88;
 		if (dpadMesh) {
 			dpadMesh.position.x = -viewW / 2 + 72;
@@ -1070,7 +949,6 @@ function step(dt, now) {
 		}
 		for (const p of pads) {
 			p.mesh.position.x = viewW / 2 - p.off;
-			// A rides higher than B — the Game Boy diagonal
 			p.mesh.position.y = ctrlBand > 0
 				? row + (p.act === "jump" ? 14 : -10)
 				: bottom + p.lift;
@@ -1078,14 +956,11 @@ function step(dt, now) {
 			p.mesh.material.opacity = p.held ? 1 : .92;
 		}
 	}
-
-	// stations: bob + dialog proximity
 	for (const s of stations) {
 		if (!reduceMotion) s.spr.position.y = GROUND + 38 + Math.round(Math.sin(now / 400 + s.bob) * 2);
 		const near = Math.abs(P.x - s.x) < 70;
 		s.card.material.opacity += ((near ? 1 : 0) - s.card.material.opacity) * Math.min(1, dt * (reduceMotion ? 60 : 8));
 	}
-	// blocks: bump anim, toast + coin
 	for (const b of blocks) {
 		if (b.anim > 0) {
 			b.anim = Math.max(0, b.anim - dt * 2);
@@ -1096,21 +971,16 @@ function step(dt, now) {
 		}
 		if (b.hit) b.toast.material.opacity += (1 - b.toast.material.opacity) * Math.min(1, dt * 6);
 	}
-	// castle hint
 	window.__castleHint.material.opacity += ((nearCastle() ? 1 : 0) - window.__castleHint.material.opacity) * Math.min(1, dt * 6);
-	// install terminal: reveal command + copy hint when near, toast after copy
 	{
 		const inst = window.__install, near = nearInstall() ? 1 : 0;
-		// keep the long command line inside the visible screen width
 		inst.cmd.scale.setScalar(Math.min(.62, (viewW - 36) / inst.cmd.userData.canvas.width));
 		inst.cmd.material.opacity += (near - inst.cmd.material.opacity) * Math.min(1, dt * 6);
 		inst.copyHint.material.opacity += (near - inst.copyHint.material.opacity) * Math.min(1, dt * 6);
 		const showToast = copied && now - copied < 2500 ? 1 : 0;
 		inst.copiedToast.material.opacity += (showToast - inst.copiedToast.material.opacity) * Math.min(1, dt * 8);
 	}
-	// stars twinkle
 	if (!reduceMotion) for (const s of stars) s.material.opacity = .4 + .4 * Math.sin(now / 900 + s.userData.tw);
-	// antenna blinkers: slow red pulse; neon signs: occasional flicker dip
 	if (!reduceMotion) {
 		for (const l of blinkers) l.material.opacity = Math.sin(now / 700 + l.userData.ph) > .1 ? 1 : .12;
 		for (const n of neons) {
@@ -1120,7 +990,6 @@ function step(dt, now) {
 		}
 	}
 }
-
 function loop(now) {
 	const dt = Math.min(.05, (now - last) / 1000);
 	last = now;
