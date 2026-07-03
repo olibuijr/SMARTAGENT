@@ -55,10 +55,14 @@ impl Beat {
         // One cached board fetch, reused for both the summary and the
         // work-availability check (T-251) — no second `tasks board` spawn.
         let board_out = self.board_snapshot();
+        // Fail QUIET: an unreadable board (semdb restart, binary swap, lock
+        // contention) must not read as "work available" — that default once
+        // stampeded all eight agents at every transient hiccup. A missed
+        // prompt self-heals on the next beat.
         let has_work = board_out
             .as_deref()
             .map(|out| board_has_autonomous_work_for(out, agent, role))
-            .unwrap_or(true);
+            .unwrap_or(false);
         let board = board_out
             .as_deref()
             .map(summarize_board)

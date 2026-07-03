@@ -26,6 +26,7 @@ USAGE:
   gateway attach [--agent NAME]                  stream output; stdin lines are sent
   gateway status [--agent NAME]                  agent state, uptime, last beat
   gateway agents                                list hosted agents
+  gateway autonomy [on|off]                     fleet-wide autonomous pickup switch
   gateway stop [--agent NAME|--all]              stop one agent or the daemon
 
 Socket: config gateway_socket (default .pi/gateway.sock). Config keys:
@@ -65,6 +66,7 @@ fn main() {
             client_send("status", &agent, "")
         }
         "agents" => client_send("agents", "", ""),
+        "autonomy" => client_send("autonomy", "", rest.first().map(String::as_str).unwrap_or("")),
         "statusline" => statusline(),
         "stop" => {
             let (agent, _) = parse_client_args(&rest);

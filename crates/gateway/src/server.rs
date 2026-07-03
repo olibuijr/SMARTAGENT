@@ -289,7 +289,7 @@ fn spawn_agent(
         child.clone(),
         busy_since.clone(),
     );
-    let prompt_gate = Arc::new(Mutex::new(PromptGate::default()));
+    let prompt_gate = Arc::new(Mutex::new(PromptGate { last: None, cooldown_secs: 20 }));
     if autonomous {
         start_work_chaser(
             name.to_string(),
@@ -408,10 +408,17 @@ fn start_heartbeat(
     pending_prompts: Arc<Mutex<VecDeque<String>>>,
 ) {
     let period = Duration::from_secs(heartbeat_secs.max(10));
+    // Stable per-agent phase offset (0..72s by name hash): beats spread over
+    // the period instead of all firing together — a restart or a new task no
+    // longer wakes the whole fleet in the same instant.
+    let stagger = {
+        let h: u32 = agent.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+        Duration::from_secs((h % 8) as u64 * 9)
+    };
     std::thread::spawn(move || {
         // T-79: startup beat ~10s after serve — a restart must not cost a
         // full period of dead air before in-doing work resumes.
-        let mut next = Duration::from_secs(10);
+        let mut next = Duration::from_secs(10) + stagger;
         loop {
             std::thread::sleep(next);
             next = period;
@@ -430,7 +437,7 @@ fn start_heartbeat(
                     queue_prompt(&pending_prompts, text);
                 }
                 HeartbeatAction::Prompt => {
-                    if prompt_gate.lock().unwrap().allow() {
+                    if autonomous_allowed(&prompt_gate) {
                         let auto = autonomous_prompt(&text);
                         let _ = child.lock().unwrap().command("prompt", Some(&auto));
                     }
@@ -450,13 +457,14 @@ fn autonomous_prompt(text: &str) -> String {
 #[derive(Default)]
 struct PromptGate {
     last: Option<std::time::Instant>,
+    cooldown_secs: u64,
 }
 
 impl PromptGate {
     fn allow(&mut self) -> bool {
         let ok = self
             .last
-            .map(|t| t.elapsed() >= Duration::from_secs(20))
+            .map(|t| t.elapsed() >= Duration::from_secs(self.cooldown_secs))
             .unwrap_or(true);
         if ok {
             self.last = Some(std::time::Instant::now());
@@ -495,7 +503,7 @@ fn start_work_chaser(
                 let role = role_of(&agent);
                 b.compose_with_work(false, &agent, role)
             };
-            if has_work && prompt_gate.lock().unwrap().allow() {
+            if has_work && autonomous_allowed(&prompt_gate) {
                 beat.lock().unwrap().log(
                     &agent,
                     "chase",
@@ -546,6 +554,23 @@ fn heartbeat_action(busy: bool, autonomous: bool, has_work: bool) -> HeartbeatAc
     }
 }
 
+/// Fleet-wide autonomy switch: `gateway autonomy off` silences all
+/// autonomous prompting (heartbeat pickup + work-chaser) without touching
+/// running turns or chat agents. Deliberate work keeps flowing via send/steer.
+static AUTONOMY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Fleet-wide dispatch gate: at most ONE autonomous wake-up per 15s across
+/// ALL agents. One new task wakes one agent; the next agent's beat sees the
+/// task already claimed. Kills the thundering herd without slowing a deep
+/// queue much (8 pickups still start within ~2 minutes).
+static GLOBAL_DISPATCH: Mutex<PromptGate> = Mutex::new(PromptGate { last: None, cooldown_secs: 15 });
+
+fn autonomous_allowed(per_agent: &Arc<Mutex<PromptGate>>) -> bool {
+    AUTONOMY.load(std::sync::atomic::Ordering::Relaxed)
+        && GLOBAL_DISPATCH.lock().unwrap().allow()
+        && per_agent.lock().unwrap().allow()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MuteAction {
     Clear,
@@ -584,6 +609,16 @@ fn handle_client(stream: UnixStream, agents: Agents) {
         let requested = v.get("agent").and_then(Value::as_str).unwrap_or("");
         match op {
             "agents" => write_agents(&mut write_side, &agents),
+            "autonomy" => {
+                use std::sync::atomic::Ordering;
+                match msg {
+                    "on" => AUTONOMY.store(true, Ordering::Relaxed),
+                    "off" => AUTONOMY.store(false, Ordering::Relaxed),
+                    _ => {}
+                }
+                let state = if AUTONOMY.load(Ordering::Relaxed) { "on" } else { "off" };
+                write_info_done(&mut write_side, &format!("fleet autonomy: {state}"));
+            }
             "send" | "steer" | "attach" | "ask" | "status" | "stop" => {
                 let Some(agent) = select_agent(&agents, requested) else {
                     write_info_done(&mut write_side, &format!("unknown agent {requested}"));
