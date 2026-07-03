@@ -36,11 +36,39 @@ fn run(args: &[String]) -> Result<String, String> {
                 tags: flag(args, "--tags"),
                 click: flag(args, "--click"),
                 markdown: args.iter().any(|a| a == "--markdown"),
-                auth: std::env::var("NTFY_TOKEN").ok(),
+                auth: ntfy_token_from_secrets()?,
             };
             ntfy::send(&msg)
         }
         _ => Ok(HELP.trim().into()),
+    }
+}
+
+fn ntfy_token_from_secrets() -> Result<Option<String>, String> {
+    let out = std::process::Command::new("target/release/secrets")
+        .args(["get", "--store", "data/secrets", "--name", "ntfy_token", "--as", "pi"])
+        .output()
+        .map_err(|e| format!("run secrets get: {e}"))?;
+    if out.status.success() {
+        let token = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Ok((!token.is_empty()).then_some(token));
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    if err.contains("DENIED") || err.contains("not found") || err.contains("no such") {
+        Ok(None)
+    } else {
+        Err(err.trim().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_points_to_policy_gated_secret_not_env_token() {
+        assert!(HELP.contains("policy-gated secret `ntfy_token`"), "{HELP}");
+        assert!(!HELP.contains("NTFY_TOKEN"), "{HELP}");
     }
 }
 
@@ -50,5 +78,7 @@ notify — push notifications (ntfy protocol, HTTP/HTTPS)
 USAGE:
   notify send --topic T --message M [--title X] [--priority 1-5]
               [--tags tag1,tag2] [--click URL] [--markdown]
-              [--server http(s)://host:port]   (bearer auth via $NTFY_TOKEN)
+              [--server http(s)://host:port]
+
+Bearer auth, when configured, is read from policy-gated secret `ntfy_token`.
 "#;
