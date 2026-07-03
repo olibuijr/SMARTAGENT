@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
 use httpc::json::{self, Value};
@@ -20,7 +20,8 @@ use crate::storage::Db;
 use crate::wire;
 
 type DbHandle = Arc<RwLock<Db>>;
-type Registry = Arc<RwLock<HashMap<PathBuf, DbHandle>>>;
+type OpenSlot = Arc<OnceLock<DbHandle>>;
+type Registry = Arc<RwLock<HashMap<PathBuf, OpenSlot>>>;
 
 /// Compaction fires only for genuinely bloated logs: many records relative to
 /// live entries AND past a floor, so small/healthy dbs never pay for it.
@@ -248,22 +249,30 @@ fn parse_rows(req: &Value) -> Result<Vec<(String, String, Vec<f32>)>, String> {
 fn handle(reg: &Registry, db: &str) -> Result<DbHandle, String> {
     let key = normalize(db);
     refuse_library_reserved(&key)?;
-    {
-        // Scoped so the read guard is released BEFORE we request the write
-        // lock below — std RwLock is not upgradeable, and holding a read guard
-        // while acquiring the write guard on the same lock self-deadlocks.
-        let map = rlock_reg(reg);
-        if let Some(h) = map.get(&key) {
-            return Ok(h.clone());
+    let slot = {
+        // Only the map lookup/insert is protected by the registry lock. The
+        // potentially slow full-file open/replay happens below, outside that
+        // global lock, so one cold db cannot stall unrelated db access.
+        let mut map = wlock_reg(reg);
+        map.entry(key.clone())
+            .or_insert_with(|| Arc::new(OnceLock::new()))
+            .clone()
+    };
+    if let Some(h) = slot.get() {
+        return Ok(h.clone());
+    }
+    let db = match Db::open(&key) {
+        Ok(db) => db,
+        Err(e) => {
+            let mut map = wlock_reg(reg);
+            if map.get(&key).is_some_and(|current| Arc::ptr_eq(current, &slot)) {
+                map.remove(&key);
+            }
+            return Err(e);
         }
-    }
-    let mut map = wlock_reg(reg);
-    if let Some(h) = map.get(&key) {
-        return Ok(h.clone()); // opened by another thread while we waited
-    }
-    let db = Db::open(&key)?;
-    let h: DbHandle = Arc::new(RwLock::new(db));
-    map.insert(key, h.clone());
+    };
+    let h = Arc::new(RwLock::new(db));
+    let _ = slot.set(h.clone());
     Ok(h)
 }
 
@@ -274,7 +283,9 @@ fn create_db(reg: &Registry, key: &Path) -> Result<(), String> {
         return Err(format!("{}: already exists", key.display()));
     }
     let db = Db::create(key)?;
-    map.insert(key.to_path_buf(), Arc::new(RwLock::new(db)));
+    let slot = Arc::new(OnceLock::new());
+    let _ = slot.set(Arc::new(RwLock::new(db)));
+    map.insert(key.to_path_buf(), slot);
     Ok(())
 }
 
@@ -321,7 +332,7 @@ fn background_compactor(reg: Registry) {
         std::thread::sleep(Duration::from_secs(COMPACT_SWEEP_SECS));
         let handles: Vec<(PathBuf, DbHandle)> = rlock_reg(&reg)
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .filter_map(|(k, slot)| slot.get().map(|h| (k.clone(), h.clone())))
             .collect();
         for (path, h) in handles {
             let mut db = wlock(&h);
@@ -353,10 +364,10 @@ fn rlock(h: &DbHandle) -> std::sync::RwLockReadGuard<'_, Db> {
 fn wlock(h: &DbHandle) -> std::sync::RwLockWriteGuard<'_, Db> {
     h.write().unwrap_or_else(|e| e.into_inner())
 }
-fn rlock_reg(reg: &Registry) -> std::sync::RwLockReadGuard<'_, HashMap<PathBuf, DbHandle>> {
+fn rlock_reg(reg: &Registry) -> std::sync::RwLockReadGuard<'_, HashMap<PathBuf, OpenSlot>> {
     reg.read().unwrap_or_else(|e| e.into_inner())
 }
-fn wlock_reg(reg: &Registry) -> std::sync::RwLockWriteGuard<'_, HashMap<PathBuf, DbHandle>> {
+fn wlock_reg(reg: &Registry) -> std::sync::RwLockWriteGuard<'_, HashMap<PathBuf, OpenSlot>> {
     reg.write().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -384,5 +395,21 @@ mod tests {
         assert!(err.contains("medvitund.semdb"));
         assert!(err.contains("library-reserved"));
         assert!(rlock_reg(&reg).is_empty());
+    }
+
+    #[test]
+    fn handle_removes_slot_after_failed_open() {
+        let reg: Registry = Arc::new(RwLock::new(HashMap::new()));
+        let missing = normalize("target/test-scratch/server-missing.semdb");
+        let err = match handle(&reg, missing.to_str().unwrap()) {
+            Ok(_) => panic!("missing db opened"),
+            Err(e) => e,
+        };
+        assert!(err.contains("open"), "{err}");
+
+        assert!(
+            rlock_reg(&reg).get(&missing).is_none(),
+            "failed open slot should be removed so a later create/open can retry"
+        );
     }
 }
