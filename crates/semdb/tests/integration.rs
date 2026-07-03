@@ -19,6 +19,14 @@ fn tmp(name: &str) -> PathBuf {
     p
 }
 
+fn sock_tmp(name: &str) -> PathBuf {
+    let dir = PathBuf::from(".scratch/semdb-socks");
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join(format!("{name}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&p);
+    p
+}
+
 fn rand_vec(seed: &mut u64, dim: usize) -> Vec<f32> {
     let mut v = Vec::with_capacity(dim);
     for _ in 0..dim {
@@ -37,7 +45,7 @@ fn cli_roundtrip() {
     // client↔daemon roundtrip: an isolated daemon subprocess (its own socket,
     // no clash with production) and CLI subprocesses pointed at it via env.
     let path = tmp("cli");
-    let sock = path.with_extension("sock");
+    let sock = sock_tmp("cli");
     let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
@@ -157,7 +165,7 @@ fn brute_force_matches_manual_cosine() {
 fn kill9_recovery() {
     let path = tmp("kill9");
     Db::create(&path).unwrap();
-    let sock = path.with_extension("sock");
+    let sock = sock_tmp("kill9");
     let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();

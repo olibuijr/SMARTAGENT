@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use httpc::json::{self, Value};
 
-use crate::agents_view::{status_line, tokens_today, write_agents};
+use crate::agents_view::{status_line, write_agents};
 use crate::beat::Beat;
 use crate::child::{Event, PiChild};
 
@@ -685,15 +685,15 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
         }
         "status" => {
             let busy = agent.child.lock().unwrap().is_busy();
-            let (last, doing) = {
+            let (last, doing, tokens) = {
                 let b = agent.beat.lock().unwrap();
                 (
                     b.last_beat.clone().unwrap_or_else(|| "never".into()),
                     b.doing_short(),
+                    b.tokens_today(Some(&agent.name)).total(),
                 )
             };
             let queued = agent.queued_beat.lock().unwrap().is_some();
-            let tokens = tokens_today(Some(&agent.name)).total();
             write_info_done(
                 write_side,
                 &status_line(&agent.name, busy, &last, queued, &doing, tokens),
