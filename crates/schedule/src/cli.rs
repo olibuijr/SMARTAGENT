@@ -31,7 +31,9 @@ fn build_notify_cmd(msg: &str) -> String {
 /// the offset is subtracted here. Impossible dates (Feb 30, Apr 31) are
 /// rejected — they would never match and the one-shot job would leak forever.
 fn cron_from_at(at: &str, offset_min: i64) -> Result<String, String> {
-    let (date, time) = at.split_once(['T', ' ']).ok_or("--at must be YYYY-MM-DDTHH:MM")?;
+    let (date, time) = at
+        .split_once(['T', ' '])
+        .ok_or("--at must be YYYY-MM-DDTHH:MM")?;
     let d: Vec<&str> = date.split('-').collect();
     let t: Vec<&str> = time.split(':').collect();
     if d.len() != 3 || t.len() < 2 {
@@ -42,6 +44,9 @@ fn cron_from_at(at: &str, offset_min: i64) -> Result<String, String> {
     let day: u32 = d[2].parse().map_err(|_| "bad day")?;
     let hour: u32 = t[0].parse().map_err(|_| "bad hour")?;
     let min: u32 = t[1].parse().map_err(|_| "bad minute")?;
+    if !(1970..=9999).contains(&year) {
+        return Err("--at year must be in range 1970..=9999".into());
+    }
     if month == 0 || month > 12 || hour > 23 || min > 59 {
         return Err("--at has an out-of-range field".into());
     }
@@ -49,7 +54,10 @@ fn cron_from_at(at: &str, offset_min: i64) -> Result<String, String> {
         return Err(format!("--at date {date} does not exist"));
     }
     let utc = Civil::from_unix(Civil::to_unix(year, month, day, hour, min) - offset_min * 60);
-    Ok(format!("{} {} {} {} *", utc.minute, utc.hour, utc.day, utc.month))
+    Ok(format!(
+        "{} {} {} {} *",
+        utc.minute, utc.hour, utc.day, utc.month
+    ))
 }
 
 /// Local-time offset in minutes from config/env (default 0 = UTC).
@@ -80,7 +88,10 @@ pub fn run(args: &[String]) -> Result<String, String> {
             // (self-removes after firing); otherwise --cron for a recurring job.
             let (cron_expr, once) = match flag(args, "--at") {
                 Some(at) => (cron_from_at(&at, utc_offset())?, true),
-                None => (flag(args, "--cron").ok_or("--cron or --at required")?, false),
+                None => (
+                    flag(args, "--cron").ok_or("--cron or --at required")?,
+                    false,
+                ),
             };
             // A scheduled job runs a shell command on a recurring timer — the
             // highest-value persistence primitive for a prompt-injected agent.
@@ -103,19 +114,34 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 let n = journal.replay().map(|j| j.len()).unwrap_or(0);
                 format!("job{}", n + 1)
             });
-            journal.append(&Event::Scheduled { id: id.clone(), cron: cron_expr, cmd: cmd_str, once })?;
-            Ok(format!("added {id}{}", if once { " (one-shot)" } else { "" }))
+            journal.append(&Event::Scheduled {
+                id: id.clone(),
+                cron: cron_expr,
+                cmd: cmd_str,
+                once,
+            })?;
+            Ok(format!(
+                "added {id}{}",
+                if once { " (one-shot)" } else { "" }
+            ))
         }
         "pause" | "resume" => {
-            let id = flag(args, "--id").or_else(|| args.get(1).cloned()).ok_or("--id required")?;
+            let id = flag(args, "--id")
+                .or_else(|| args.get(1).cloned())
+                .ok_or("--id required")?;
             if !journal.replay()?.contains_key(&id) {
                 return Err(format!("no job '{id}'"));
             }
-            journal.append(&Event::SetEnabled { id: id.clone(), enabled: cmd == "resume" })?;
+            journal.append(&Event::SetEnabled {
+                id: id.clone(),
+                enabled: cmd == "resume",
+            })?;
             Ok(format!("{}d {id}", cmd))
         }
         "rm" => {
-            let id = flag(args, "--id").or_else(|| args.get(1).cloned()).ok_or("--id required")?;
+            let id = flag(args, "--id")
+                .or_else(|| args.get(1).cloned())
+                .ok_or("--id required")?;
             if !journal.replay()?.contains_key(&id) {
                 return Err(format!("no job '{id}'"));
             }
@@ -140,7 +166,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
             Ok(match soonest {
                 Some((t, id)) => {
                     let mins = (t - now).max(0) / 60;
-                    let eta = if mins >= 120 { format!("{}h", mins / 60) } else { format!("{mins}m") };
+                    let eta = if mins >= 120 {
+                        format!("{}h", mins / 60)
+                    } else {
+                        format!("{mins}m")
+                    };
                     format!("ok|⏰ {id} in {eta}")
                 }
                 None => "warn|⏰ no jobs".to_string(),
@@ -160,7 +190,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
                         j.cron,
                         j.cmd,
                         j.last_fire.map_or("never".into(), fmt_time),
-                        j.last_exit.map_or(String::new(), |e| format!(" (exit {e})"))
+                        j.last_exit
+                            .map_or(String::new(), |e| format!(" (exit {e})"))
                     )
                 })
                 .collect();
@@ -211,9 +242,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
 
 fn fmt_time(t: i64) -> String {
     let c = Civil::from_unix(t);
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", c.year, c.month, c.day, c.hour, c.minute)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        c.year, c.month, c.day, c.hour, c.minute
+    )
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -225,7 +258,10 @@ mod tests {
         // UTC+120min local 15:00 → 13:00 UTC
         assert_eq!(cron_from_at("2026-08-01T15:00", 120).unwrap(), "0 13 1 8 *");
         // offset crossing midnight shifts the day too
-        assert_eq!(cron_from_at("2026-08-01T00:30", 60).unwrap(), "30 23 31 7 *");
+        assert_eq!(
+            cron_from_at("2026-08-01T00:30", 60).unwrap(),
+            "30 23 31 7 *"
+        );
     }
 
     #[test]
@@ -233,6 +269,17 @@ mod tests {
         assert!(cron_from_at("2026-02-30T10:00", 0).is_err());
         assert!(cron_from_at("2026-04-31T10:00", 0).is_err());
         assert!(cron_from_at("2028-02-29T10:00", 0).is_ok()); // leap year
+    }
+
+    #[test]
+    fn rejects_absurd_year_before_unix_conversion() {
+        let err = cron_from_at("999999999999999999999999-01-01T00:00", 0).unwrap_err();
+        assert!(
+            err.contains("bad year") || err.contains("year must be in range"),
+            "{err}"
+        );
+        let err = cron_from_at("10000-01-01T00:00", 0).unwrap_err();
+        assert!(err.contains("year must be in range"), "{err}");
     }
 }
 
