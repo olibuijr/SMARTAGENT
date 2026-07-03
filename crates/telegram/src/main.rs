@@ -81,12 +81,16 @@ fn send(args: &[String]) -> Result<String, String> {
 /// task-completion hook: `telegram broadcast --text "..."`.
 fn broadcast(args: &[String]) -> Result<String, String> {
     let text = flag(args, "--text").ok_or("--text required")?;
+    let kind = flag(args, "--kind").unwrap_or_else(|| "normal".into());
     let token = bot_token()?;
     let chats = Config::load()
         .resolve("telegram_allowed_chats", "SMARTAGENT_TELEGRAM_CHATS", None)
         .unwrap_or_default();
     let mut n = 0;
     for chat in chats.split(',').map(str::trim).filter(|c| !c.is_empty()) {
+        if !notification_allowed(chat, "", "*", &kind) {
+            continue;
+        }
         for c in chunks(&text, 4096) {
             let _ = api::send_message(&token, chat, &c, true);
         }

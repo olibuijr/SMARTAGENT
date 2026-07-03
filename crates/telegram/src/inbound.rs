@@ -374,10 +374,16 @@ pub(crate) fn stream_reply(
 ) -> Result<(), String> {
     let token = bot_token()?;
     let prompt = build_gateway_prompt(from, user, text, chat, thread);
+    let verbosity = verbosity(chat, thread, user);
+    let show_progress = verbosity >= VerbosityLevel::Normal;
     let mid = send_message_retry(
         &token,
         chat,
-        ProgressEvent::Planning.telegram_message(),
+        if show_progress {
+            ProgressEvent::Planning.telegram_message()
+        } else {
+            "Working…"
+        },
         false,
     )?;
     let stream_started = std::time::Instant::now();
@@ -442,16 +448,21 @@ pub(crate) fn stream_reply(
                     "",
                 );
                 eprintln!("[tg] tool marker scope={chat}/{thread} marker={status}");
-                let preview = stream_preview(&latest, &status);
-                let _ = edit_message_retry(&token, chat, mid, &clip_tg(&preview), false);
-                shown = preview;
-                last_edit = std::time::Instant::now();
+                if show_progress {
+                    let preview = stream_preview(&latest, &status);
+                    let _ = edit_message_retry(&token, chat, mid, &clip_tg(&preview), false);
+                    shown = preview;
+                    last_edit = std::time::Instant::now();
+                }
             }
             continue;
         }
         if line.starts_with(GATEWAY_STREAM_THINKING_PREFIX) {
             let frame = thinking_fallback().to_string();
-            if frame != shown && should_emit_progress(Some(0), last_edit.elapsed().as_millis()) {
+            if show_progress
+                && frame != shown
+                && should_emit_progress(Some(0), last_edit.elapsed().as_millis())
+            {
                 let _ = api::edit_message(&token, chat, mid, &frame, false);
                 shown = frame;
                 last_edit = std::time::Instant::now();
@@ -462,7 +473,10 @@ pub(crate) fn stream_reply(
         let event = progress_event_for_stream_line(&latest);
         let frame = progress_frame(event, &latest);
         // Throttle: edit at most every 1.5s, only when the text grew.
-        if frame != shown && should_emit_progress(Some(0), last_edit.elapsed().as_millis()) {
+        if show_progress
+            && frame != shown
+            && should_emit_progress(Some(0), last_edit.elapsed().as_millis())
+        {
             let _ = edit_message_retry(&token, chat, mid, &frame, false);
             shown = frame;
             last_edit = std::time::Instant::now();

@@ -776,3 +776,56 @@ fn gateway_prompt_names_current_chat_scope() {
     assert!(!p1.contains("chat-b"), "{p1}");
     assert!(!p2.contains("chat-a"), "{p2}");
 }
+
+#[test]
+fn verbosity_command_is_listed_and_stores_scope_local_preference() {
+    let help = command_help();
+    assert!(help.contains("/verbosity"), "{help}");
+    assert_eq!(
+        slash_name("/verbosity@smartagent_bot quiet"),
+        Some("verbosity")
+    );
+    let mut db = test_db("telegram-verbosity-pref");
+    super::set_verbosity_in_db(
+        &mut db,
+        "chat-a",
+        "main",
+        "u1",
+        super::VerbosityLevel::Quiet,
+    )
+    .unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main", "u1"),
+        super::VerbosityLevel::Quiet
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main", "u2"),
+        super::VerbosityLevel::Normal
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-b", "main", "u1"),
+        super::VerbosityLevel::Normal
+    );
+}
+
+#[test]
+fn verbosity_filters_progress_task_workflow_notifications() {
+    let mut db = test_db("telegram-verbosity-filter");
+    super::set_verbosity_in_db(&mut db, "chat-a", "", "*", super::VerbosityLevel::Quiet).unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "", "*"),
+        super::VerbosityLevel::Quiet
+    );
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "progress"
+    ));
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "task"
+    ));
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "workflow"
+    ));
+    assert!(super::notification_allowed_in_db(
+        &db, "chat-b", "", "*", "task"
+    ));
+}
