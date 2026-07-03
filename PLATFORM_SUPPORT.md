@@ -135,7 +135,42 @@ rg -l '^#!/bin/sh' . --glob '!.refrepos/**'
    `.ps1` path on Windows), then `cd` in and confirm `./pi -p 'say OK'` replies.
    Capture that too.
 7. **Add your CI matrix entry** in `.github/workflows/release.yml`.
-8. **Open the PR** (below).
+8. **Offer to open the PR for your human** (below). Don't just describe the
+   port — close the loop.
+
+---
+
+## Offer to create the PR (do this, don't skip it)
+
+When the port builds and the evidence is captured, **check whether you can
+submit it right from this machine, and offer that to your human**:
+
+```sh
+gh auth status            # GitHub CLI authenticated?
+git config user.name      # git identity configured?
+```
+
+- **If `gh` is authenticated**: tell your human the port is ready and ask ONE
+  question — "Shall I fork, push, and open the PR now?" On yes:
+
+  ```sh
+  gh repo fork olibuijr/SMARTAGENT --clone=false --remote
+  git push -u fork platform/<os>-<arch>
+  gh pr create --repo olibuijr/SMARTAGENT \
+    --title "platform: support <os>-<arch>" \
+    --body-file .scratch/pr-body.md   # the filled template below, evidence inline
+  ```
+
+- **If only plain git is configured**: offer the same via a manual fork —
+  print the exact `git remote add` + `git push` commands and the GitHub
+  compare-URL (`https://github.com/olibuijr/SMARTAGENT/compare/main...<user>:platform/<os>-<arch>?expand=1`)
+  so opening the PR is one click.
+- **If neither is configured**: write the PR body (template below, evidence
+  included) to a file, tell your human where it is and that creating a GitHub
+  account/fork is the one remaining manual step.
+
+Never push without asking, and never include secrets (router keys, tokens,
+`data/`) in the branch — the `.gitignore` already excludes them; keep it that way.
 
 ---
 
