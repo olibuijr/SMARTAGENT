@@ -74,7 +74,17 @@ pub fn get_updates(token: &str, offset: u64, timeout: u64) -> Result<Value, Stri
 
 /// sendMessage → returns the new message_id (for later edits).
 pub fn send_message(token: &str, chat: &str, text: &str, markdown: bool) -> Result<i64, String> {
-    send_message_with_markup(token, chat, text, markdown, None)
+    send_message_in_thread(token, chat, "", text, markdown)
+}
+
+pub fn send_message_in_thread(
+    token: &str,
+    chat: &str,
+    thread: &str,
+    text: &str,
+    markdown: bool,
+) -> Result<i64, String> {
+    send_message_with_markup_in_thread(token, chat, thread, text, markdown, None)
 }
 
 /// sendMessage with optional raw JSON reply_markup (for inline keyboards).
@@ -85,18 +95,35 @@ pub fn send_message_with_markup(
     markdown: bool,
     reply_markup: Option<&str>,
 ) -> Result<i64, String> {
+    send_message_with_markup_in_thread(token, chat, "", text, markdown, reply_markup)
+}
+
+pub fn send_message_with_markup_in_thread(
+    token: &str,
+    chat: &str,
+    thread: &str,
+    text: &str,
+    markdown: bool,
+    reply_markup: Option<&str>,
+) -> Result<i64, String> {
     let pm = if markdown {
         r#","parse_mode":"Markdown""#
     } else {
         ""
     };
+    let mt = if thread.trim().is_empty() {
+        String::new()
+    } else {
+        format!(r#","message_thread_id":{}"#, thread.trim())
+    };
     let rm = reply_markup
         .map(|m| format!(r#","reply_markup":{}"#, m))
         .unwrap_or_default();
     let body = format!(
-        r#"{{"chat_id":"{}","text":"{}"{}{}}}"#,
+        r#"{{"chat_id":"{}","text":"{}"{}{}{}}}"#,
         json::escape(chat),
         json::escape(text),
+        mt,
         pm,
         rm
     );

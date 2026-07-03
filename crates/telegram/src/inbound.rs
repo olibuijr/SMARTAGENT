@@ -271,7 +271,7 @@ pub(crate) fn stream_text_response(
     text: &str,
 ) -> Result<String, String> {
     let token = bot_token()?;
-    let mid = send_message_retry(&token, chat, &format!("💭 {label} …"), false)?;
+    let mid = send_message_retry(&token, chat, thread, &format!("💭 {label} …"), false)?;
     let preview = streaming_preview(label, text);
     let _ = edit_message_retry(&token, chat, mid, &preview, false);
     let final_text = if text.trim().is_empty() {
@@ -431,6 +431,7 @@ pub(crate) fn stream_reply(
     let mid = send_message_retry(
         &token,
         chat,
+        thread,
         if show_progress {
             ProgressEvent::Planning.telegram_message()
         } else {
@@ -762,16 +763,17 @@ pub(crate) fn scoped_memories(chat: &str, thread: &str, text: &str) -> Option<St
 pub(crate) fn send_message_retry(
     token: &str,
     chat: &str,
+    thread: &str,
     text: &str,
     markdown: bool,
 ) -> Result<i64, String> {
-    match retry_telegram(|| api::send_message(token, chat, text, markdown)) {
+    match retry_telegram(|| api::send_message_in_thread(token, chat, thread, text, markdown)) {
         Ok(v) => Ok(v),
         Err(e) => {
             let _ = log_observation(
                 "send",
                 chat,
-                "",
+                thread,
                 "sendMessage",
                 "error",
                 0,
@@ -859,7 +861,7 @@ pub(crate) fn finish_streamed_message(
     edit_message_retry(token, chat, message_id, first, markdown)
         .or_else(|_| edit_message_retry(token, chat, message_id, first, false))?;
     for chunk in chunks.iter().skip(1) {
-        send_message_retry(token, chat, chunk, false)?;
+        send_message_retry(token, chat, "", chunk, false)?;
     }
     Ok(())
 }
