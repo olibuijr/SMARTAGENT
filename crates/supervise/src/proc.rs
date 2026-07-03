@@ -4,7 +4,8 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 /// Scan /proc for the lowest live pid matching this service in this repo
 /// instance, excluding this process. Lets the supervisor ADOPT an
@@ -70,7 +71,11 @@ fn service_process_matches(pid: u32, needle: &str, argv: &[String], workdir: &Pa
 
 fn resolve_program(program: &str, workdir: &Path) -> PathBuf {
     let path = Path::new(program);
-    let full = if path.is_absolute() { path.to_path_buf() } else { workdir.join(path) };
+    let full = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workdir.join(path)
+    };
     std::fs::canonicalize(&full).unwrap_or(full)
 }
 
@@ -80,9 +85,35 @@ fn same_path(left: &Path, right: &Path) -> bool {
     l == r
 }
 
+static DETACHED_CHILDREN: OnceLock<Mutex<Vec<Child>>> = OnceLock::new();
+
+fn detached_children() -> &'static Mutex<Vec<Child>> {
+    DETACHED_CHILDREN.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Reap any exited children spawned by this supervisor process. Long-running
+/// `supervise watch` must call this opportunistically; otherwise quick-crashing
+/// services become zombies because std's `Child` only reaps on `wait`/`try_wait`.
+pub fn reap_detached_children() -> usize {
+    let mut reaped = 0usize;
+    let mut children = detached_children()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let mut live = Vec::with_capacity(children.len());
+    for mut child in children.drain(..) {
+        match child.try_wait() {
+            Ok(Some(_)) => reaped += 1,
+            Ok(None) | Err(_) => live.push(child),
+        }
+    }
+    *children = live;
+    reaped
+}
+
 /// Spawn a detached child: stdout/stderr appended to `log`, stdin from
 /// /dev/null. Appending preserves crash-loop forensics across restarts. The
-/// handle is dropped so we never wait on it; if this supervisor later exits,
+/// Child handle is retained in this process and reaped by `reap_detached_children`
+/// so long-running watch loops do not leak zombies; if this supervisor exits,
 /// the child is reparented to init and keeps running (we track it by pid).
 /// Returns the child pid.
 pub fn spawn_detached(argv: &[String], workdir: &Path, log: &Path) -> Result<u32, String> {
@@ -107,7 +138,12 @@ pub fn spawn_detached(argv: &[String], workdir: &Path, log: &Path) -> Result<u32
         .stderr(Stdio::from(err))
         .spawn()
         .map_err(|e| format!("spawn '{program}': {e}"))?;
-    Ok(child.id())
+    let pid = child.id();
+    detached_children()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(child);
+    Ok(pid)
 }
 
 pub fn unix_secs() -> i64 {
@@ -147,7 +183,6 @@ pub fn terminate(pid: u32) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,27 +197,35 @@ mod tests {
 
     #[test]
     fn spawn_detached_appends_repeated_startup_failures() {
-        let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/supervise-append-log");
+        let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch/supervise-append-log");
         let _ = std::fs::remove_dir_all(&scratch);
         std::fs::create_dir_all(&scratch).unwrap();
         let script = scratch.join("fail.sh");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\necho out-$1\necho err-$1 >&2\nexit 7\n",
-        )
-        .unwrap();
+        std::fs::write(&script, "#!/bin/sh\necho out-$1\necho err-$1 >&2\nexit 7\n").unwrap();
         let _ = Command::new("chmod").arg("+x").arg(&script).status();
         let log = scratch.join("svc.log");
         for i in 1..=3 {
             let argv = vec![script.to_string_lossy().to_string(), i.to_string()];
-            let pid = spawn_detached(&argv, &scratch, &log).unwrap();
-            for _ in 0..20 {
-                if !Path::new(&format!("/proc/{pid}")).exists() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
+            let _pid = spawn_detached(&argv, &scratch, &log).unwrap();
         }
+        let mut reaped = 0;
+        for _ in 0..20 {
+            reaped += reap_detached_children();
+            if reaped >= 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(
+            reaped >= 3,
+            "spawned quick-exit children must be reaped, got {reaped}"
+        );
+        assert_eq!(
+            reap_detached_children(),
+            0,
+            "reaping should drain exited child handles"
+        );
         let text = std::fs::read_to_string(&log).unwrap();
         assert!(text.contains("out-1"), "{text}");
         assert!(text.contains("err-1"), "{text}");
@@ -204,12 +247,18 @@ mod tests {
     fn is_alive_needle_guards_against_reuse() {
         // Live pid, but a needle that won't appear in this process's cmdline.
         let me = std::process::id();
-        assert!(!is_alive(me, "definitely-not-in-this-cmdline-xyzzy", &["definitely-not-in-this-cmdline-xyzzy".into()], Path::new(".")));
+        assert!(!is_alive(
+            me,
+            "definitely-not-in-this-cmdline-xyzzy",
+            &["definitely-not-in-this-cmdline-xyzzy".into()],
+            Path::new(".")
+        ));
     }
 
     #[test]
     fn pid_by_service_scopes_same_binary_to_workdir() {
-        let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/supervise-instance-scope");
+        let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch/supervise-instance-scope");
         let one = scratch.join("one");
         let two = scratch.join("two");
         let _ = std::fs::remove_dir_all(&scratch);
