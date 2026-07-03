@@ -238,12 +238,21 @@ fn spawn_agent(
     heartbeat_secs: u64,
     autonomous: bool,
 ) -> Result<AgentRuntime, String> {
-    let static_prompt = if autonomous {
-        Some(AUTONOMOUS_RULES)
-    } else {
+    // Per-agent identity (full name + specialty) plus the autonomous rules.
+    let mut prompt_parts: Vec<String> = Vec::new();
+    if let Some(identity) = crate::roster::identity_prompt(name) {
+        prompt_parts.push(identity);
+    }
+    if autonomous {
+        prompt_parts.push(AUTONOMOUS_RULES.to_string());
+    }
+    let static_prompt = if prompt_parts.is_empty() {
         None
+    } else {
+        Some(prompt_parts.join("\n\n"))
     };
-    let mut child = PiChild::spawn(repo_root, name, static_prompt)?;
+    let model = crate::roster::model_for(&semdb::config::Config::load(), name);
+    let mut child = PiChild::spawn(repo_root, name, static_prompt.as_deref(), model)?;
     let clients: Clients = Arc::new(Mutex::new(Vec::new()));
     let beat = Beat::new(repo_root, data_dir);
     let queued_beat = Mutex::new(None);
@@ -681,19 +690,7 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
     }
 }
 
-/// Role by agent name — mirrors MULTIROLE.md's default team.
-pub(crate) fn role_of(name: &str) -> &'static str {
-    match name {
-        // Fleet roster: famous developers/geeks (distinct initials — the
-        // sidebar avatars are circled first letters).
-        "linus" | "main" => "Coordinator",
-        "ada" | "dennis" | "woz" | "builder" => "Builder",
-        "grace" | "turing" | "qa" => "QA",
-        "ken" | "margaret" | "ops" => "Ops",
-        "jeeves" => "Assistant",
-        _ => "Agent",
-    }
-}
+pub(crate) use crate::roster::role_of;
 
 /// Structured last activity from the agent's own transcript: the recent tool
 /// chain ("tasks→memory→codeindex") and its last words (clean word-boundary

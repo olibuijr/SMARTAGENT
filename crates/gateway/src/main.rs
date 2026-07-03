@@ -8,6 +8,7 @@
 mod agents_view;
 mod beat;
 mod child;
+mod roster;
 mod server;
 
 use std::io::ErrorKind;

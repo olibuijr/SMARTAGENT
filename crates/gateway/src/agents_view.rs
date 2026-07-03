@@ -7,7 +7,8 @@ use std::os::unix::net::UnixStream;
 
 use httpc::json;
 
-use crate::server::{role_of, Agents};
+use crate::roster::display_role;
+use crate::server::Agents;
 
 pub(crate) fn last_activity(name: &str) -> (String, String) {
     let path = semdb::config::Config::load()
@@ -120,7 +121,7 @@ pub(crate) fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
             &json::escape(&agent.name),
             state,
             &json::escape(&own_task),
-            role_of(&agent.name),
+            &display_role(&agent.name),
             busy_secs,
             tokens.total(),
             &json::escape(&tools),

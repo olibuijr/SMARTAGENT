@@ -102,8 +102,15 @@ const KAOMOJI: Record<string, string> = {
 	linus: "(◕‿◕)", ada: "(◠‿◠)", grace: "(■‿■)", ken: "(•‿•)",
 	dennis: "(◔‿◔)", margaret: "(☉‿☉)", turing: "(¬‿¬)", woz: "(^ω^)",
 };
-const faceArt = (name: string): string[] => FACE_ART[name] ?? FACE_ART.linus;
-const kaomoji = (name: string): string => KAOMOJI[name] ?? "(◉‿◉)";
+// Full-name roster ids → the short avatar keys the art was generated under.
+const AVATAR_ALIAS: Record<string, string> = {
+	"linus-torvalds": "linus", "ada-lovelace": "ada", "grace-hopper": "grace",
+	"ken-thompson": "ken", "dennis-ritchie": "dennis", "margaret-hamilton": "margaret",
+	"alan-turing": "turing", "steve-wozniak": "woz",
+};
+const avatarKey = (name: string): string => AVATAR_ALIAS[name] ?? name;
+const faceArt = (name: string): string[] => FACE_ART[avatarKey(name)] ?? FACE_ART.linus;
+const kaomoji = (name: string): string => KAOMOJI[avatarKey(name)] ?? "(◉‿◉)";
 
 // Captured extension context — lets the panel read live session state
 // (context-window usage) without owning any logic.

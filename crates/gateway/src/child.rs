@@ -44,6 +44,8 @@ pub struct PiChild {
     tx: Sender<Event>,
     repo_root: PathBuf,
     agent: String,
+    /// Per-agent model override (`provider/model`), None → pi default.
+    model: Option<String>,
     generation: u64,
     pub events: Receiver<Event>,
     pub busy: Arc<Mutex<bool>>,
@@ -55,16 +57,26 @@ impl PiChild {
         repo_root: &std::path::Path,
         agent: &str,
         static_prompt: Option<&str>,
+        model: Option<String>,
     ) -> Result<PiChild, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         let busy = Arc::new(Mutex::new(false));
-        let (child, stdin) = spawn_process(repo_root, agent, 0, static_prompt, &tx, busy.clone())?;
+        let (child, stdin) = spawn_process(
+            repo_root,
+            agent,
+            0,
+            static_prompt,
+            model.as_deref(),
+            &tx,
+            busy.clone(),
+        )?;
         Ok(PiChild {
             child,
             stdin: Arc::new(Mutex::new(stdin)),
             tx,
             repo_root: repo_root.to_path_buf(),
             agent: agent.to_string(),
+            model,
             generation: 0,
             events: rx,
             busy,
@@ -81,6 +93,7 @@ impl PiChild {
             &self.agent,
             self.generation,
             None,
+            self.model.as_deref(),
             &self.tx,
             self.busy.clone(),
         )?;
@@ -121,6 +134,7 @@ fn spawn_process(
     agent: &str,
     generation: u64,
     static_prompt: Option<&str>,
+    model: Option<&str>,
     tx: &Sender<Event>,
     busy: Arc<Mutex<bool>>,
 ) -> Result<(Child, std::process::ChildStdin), String> {
@@ -130,7 +144,7 @@ fn spawn_process(
     } else {
         format!("gw-{agent}-recovered-{generation}")
     };
-    let args = spawn_args(&session, static_prompt);
+    let args = spawn_args(&session, static_prompt, model);
     let mut child = Command::new(&launcher)
         .args(&args)
         // Board ownership: tasks current_owner() reads this, so pulls made by
@@ -151,7 +165,7 @@ fn spawn_process(
     Ok((child, stdin))
 }
 
-fn spawn_args(session: &str, static_prompt: Option<&str>) -> Vec<String> {
+fn spawn_args(session: &str, static_prompt: Option<&str>, model: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "--mode".to_string(),
         "rpc".to_string(),
@@ -161,6 +175,10 @@ fn spawn_args(session: &str, static_prompt: Option<&str>) -> Vec<String> {
     if let Some(prompt) = static_prompt {
         args.push("--append-system-prompt".to_string());
         args.push(prompt.to_string());
+    }
+    if let Some(model) = model {
+        args.push("--model".to_string());
+        args.push(model.to_string());
     }
     args
 }
@@ -261,7 +279,7 @@ mod tests {
 
     #[test]
     fn spawn_args_append_static_prompt_once() {
-        let args = spawn_args("gw-main", Some("static autonomous rules"));
+        let args = spawn_args("gw-main", Some("static autonomous rules"), None);
         assert_eq!(
             args,
             vec![
@@ -274,8 +292,16 @@ mod tests {
             ]
         );
         assert_eq!(
-            spawn_args("gw-main", None),
+            spawn_args("gw-main", None, None),
             vec!["--mode", "rpc", "--session-id", "gw-main"]
+        );
+    }
+
+    #[test]
+    fn spawn_args_model_override_appended() {
+        assert_eq!(
+            spawn_args("gw-a", None, Some("codex/gpt-5.4-mini")),
+            vec!["--mode", "rpc", "--session-id", "gw-a", "--model", "codex/gpt-5.4-mini"]
         );
     }
 

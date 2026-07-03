@@ -49,7 +49,7 @@ pub fn registry(chromium_bin: &str, chrome_profile: &str) -> Vec<Service> {
                 "target/release/gateway",
                 "serve",
                 "--agents",
-                "linus,ada,grace,ken,dennis,margaret,turing,woz",
+                "linus-torvalds,ada-lovelace,dennis-ritchie,steve-wozniak,margaret-hamilton,grace-hopper,alan-turing,ken-thompson",
                 "--chat",
                 "jeeves",
                 "--autonomous",
