@@ -42,10 +42,12 @@ impl Cron {
     }
 
     /// Next fire time strictly after `after` (unix seconds, UTC).
-    /// Scans minute-by-minute — bounded to 5 years to guarantee termination.
+    /// Scans minute-by-minute — bounded to 9 years to guarantee termination.
+    /// The horizon must exceed the 8-year Feb-29 gap across skipped-century
+    /// years such as 2100 (2096-02-29 → 2104-02-29).
     pub fn next_after(&self, after: i64) -> Option<i64> {
         let mut t = (after / 60 + 1) * 60; // next whole minute
-        let limit = after + 5 * 366 * 86_400;
+        let limit = after + 9 * 366 * 86_400;
         while t < limit {
             let c = Civil::from_unix(t);
             // If the date (month/day) can't match, skip the whole rest of the
@@ -258,5 +260,15 @@ mod tests {
         let start = 1_782_952_200; // 2026-07-02
         let civ = Civil::from_unix(c.next_after(start).unwrap());
         assert_eq!((civ.year, civ.month, civ.day), (2028, 2, 29));
+    }
+
+    #[test]
+    fn leap_day_crosses_skipped_century_boundary() {
+        // 2100 is divisible by 100 but not 400, so the next Feb 29 after
+        // 2096 is 2104: an 8-year gap that a 5-year scan horizon missed.
+        let c = Cron::parse("0 0 29 2 *").unwrap();
+        let start = Civil::to_unix(2096, 3, 1, 0, 0);
+        let civ = Civil::from_unix(c.next_after(start).unwrap());
+        assert_eq!((civ.year, civ.month, civ.day, civ.hour, civ.minute), (2104, 2, 29, 0, 0));
     }
 }
