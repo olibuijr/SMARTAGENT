@@ -52,16 +52,39 @@ impl Decision {
     }
 }
 
+const SPAWN_BUSY_RETRIES: u32 = 10;
+const SPAWN_BUSY_BACKOFF_MS: u64 = 5;
+
+/// Spawn a hook's process, retrying past a transient `ExecutableFileBusy`
+/// (ETXTBSY, "Text file busy"). A hook script is often written to disk
+/// (`fs::write` → close) an instant before it is exec'd. Under concurrent
+/// hook dispatch (multiple fleet agents firing hooks at once, or a hook
+/// re-materialized just before each run) the kernel can briefly still
+/// consider the just-closed file "busy" from the writer's fd, and exec
+/// spuriously fails with ETXTBSY even though the write is already done and
+/// the script is otherwise perfectly runnable. That's the exact fingerprint
+/// of this error — it always self-clears within milliseconds once the
+/// writer's fd is gone, so a short bounded retry is the correct fix (not a
+/// real, permanent spawn failure to surface to the caller).
+fn spawn_hook(cmd_path: &Path, repo: &Path) -> std::io::Result<std::process::Child> {
+    let mut attempt = 0u32;
+    loop {
+        match Command::new(cmd_path).current_dir(repo).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+            Ok(child) => return Ok(child),
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < SPAWN_BUSY_RETRIES => {
+                attempt += 1;
+                std::thread::sleep(Duration::from_millis(SPAWN_BUSY_BACKOFF_MS * attempt as u64));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Run one hook. Returns (exit_code, stdout, stderr, timed_out).
 fn run_hook(h: &Hook, repo: &Path, payload: &str) -> Result<(i32, String, String, bool), String> {
     let cmd_path = repo.join(&h.command);
-    let mut child = Command::new(&cmd_path)
-        .current_dir(repo)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("hook '{}': spawn {}: {e}", h.name, cmd_path.display()))?;
+    let mut child =
+        spawn_hook(&cmd_path, repo).map_err(|e| format!("hook '{}': spawn {}: {e}", h.name, cmd_path.display()))?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(payload.as_bytes());
     }
