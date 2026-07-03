@@ -676,7 +676,20 @@ const hud = new THREE.Group();
 camera.add(hud);
 hudRef = hud;
 resize(); // positions the HUD for the current aspect
-const title = plane(textCanvas("SMARTAGENT", 26, SKINC, { glow: "#ffaf5f", pad: 8 }));
+// Title: the generated pixel logo (billboard style); text fallback if it fails
+const logoTex = await new Promise((res) => {
+	const img = new Image();
+	img.onload = () => {
+		const [c, x] = cv(img.width, img.height);
+		x.drawImage(img, 0, 0);
+		res(tex(c));
+	};
+	img.onerror = () => res(null);
+	img.src = "logo.png";
+});
+const title = logoTex
+	? new THREE.Mesh(new THREE.PlaneGeometry(384, 128), new THREE.MeshBasicMaterial({ map: logoTex, transparent: true }))
+	: plane(textCanvas("SMARTAGENT", 26, SKINC, { glow: "#ffaf5f", pad: 8 }));
 const subtitle = plane(textCanvas("THE LEGENDARY DEVELOPER TEAM", 9, "#87d7ff", { pad: 4 }));
 const hintCtl = plane(textCanvas(
 	matchMedia("(pointer: coarse)").matches
@@ -1032,13 +1045,14 @@ function step(dt, now) {
 	{
 		const topY = CAM_Y + viewH / 2 - topBand;
 		const startY = viewH * .26, parkY = topY - 66;
+		const fit = Math.min(1, (viewW - 24) / 384); // logo never overflows narrow views
 		const k = !started ? 0 : reduceMotion ? 1 : Math.min(1, (now - lastStart) / 800);
 		const e = 1 - Math.pow(1 - k, 4); // ease-out-quart
-		title.scale.setScalar(1 - .6 * e);
+		title.scale.setScalar((1 - .6 * e) * fit);
 		title.position.x = (-viewW / 2 + 86) * e;
 		title.position.y = startY + (parkY - startY) * e;
-		subtitle.position.y = startY - 26;
-		hintCtl.position.y = startY - 48;
+		subtitle.position.y = startY - (logoTex ? 80 : 26) * fit;
+		hintCtl.position.y = startY - (logoTex ? 102 : 48) * fit;
 		subtitle.material.opacity = 1 - e;
 		hintCtl.material.opacity = Math.max(0, 1 - e * 1.2);
 	}
