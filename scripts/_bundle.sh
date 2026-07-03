@@ -208,13 +208,13 @@ bundle_extract() {
     fi
 }
 
-# Verify a tarball's sha256 appears in a SHA256SUMS file.
+# Verify a tarball's sha256 is bound to this artifact's basename in SHA256SUMS.
 bundle_verify() {
     _tar="$1"; _sums="$2"
-    command -v sha256sum >/dev/null 2>&1 || { echo "bundle_verify: sha256sum missing — skipping" >&2; return 0; }
+    command -v sha256sum >/dev/null 2>&1 || { echo "bundle_verify: sha256sum missing" >&2; return 1; }
     _have=$(sha256sum "$_tar" | awk '{print $1}')
     _base=$(basename "$_tar")
-    if grep -q "$_have" "$_sums" 2>/dev/null; then
+    if grep -qE "^$_have( \*| )+$_base$" "$_sums" 2>/dev/null; then
         return 0
     fi
     echo "bundle_verify: checksum mismatch for $_base" >&2
