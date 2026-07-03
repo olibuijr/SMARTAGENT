@@ -48,7 +48,7 @@ impl Ctx {
             let mut adopted = rec.clone();
             adopted.pid = pid;
             if adopted.started_at == 0 {
-                adopted.started_at = procutil::unix_secs();
+                adopted.started_at = proc::unix_secs();
             }
             let _ = self.store.put(svc.name, &adopted);
             return true;
@@ -84,7 +84,7 @@ impl Ctx {
             desired_up: true,
             pid,
             cmd: svc.argv.join(" "),
-            started_at: procutil::unix_secs(),
+            started_at: proc::unix_secs(),
             restarts: self.store.get(svc.name).restarts,
         };
         self.store.put(svc.name, &rec)?;
@@ -221,12 +221,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 for svc in ctx.registry.iter().filter(|s| s.enabled) {
                     let rec = ctx.store.get(svc.name);
                     if ctx.alive(svc, &rec) {
-                        if procutil::unix_secs() - rec.started_at > 60 {
+                        if proc::unix_secs() - rec.started_at > 60 {
                             delay.insert(svc.name, 15);
                         }
                         continue;
                     }
-                    let now = procutil::unix_secs();
+                    let now = proc::unix_secs();
                     if !watch_should_restart(&rec, ctx.store.names().contains(&svc.name.to_string()), now, *next_try.get(svc.name).unwrap_or(&0)) {
                         continue; // intentionally off or backing off
                     }
@@ -238,7 +238,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                             let _ = ctx.store.put(svc.name, &bumped);
                             let d = if quick_death { (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480) } else { 15 };
                             delay.insert(svc.name, d);
-                            next_try.insert(svc.name, procutil::unix_secs() + d as i64);
+                            next_try.insert(svc.name, proc::unix_secs() + d as i64);
                             eprintln!("[supervise] restarted {} (pid {}, next retry window {d}s)", svc.name, bumped.pid);
                         }
                         Err(e) => eprintln!("[supervise] failed to restart {}: {e}", svc.name),
