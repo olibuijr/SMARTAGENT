@@ -88,7 +88,11 @@ fn broadcast(args: &[String]) -> Result<String, String> {
     let kind = flag(args, "--kind").unwrap_or_else(|| "normal".into());
     let token = bot_token()?;
     let chats = Config::load()
-        .resolve("telegram_allowed_chats", "SMARTAGENT_TELEGRAM_ALLOWED_CHATS", None)
+        .resolve(
+            "telegram_allowed_chats",
+            "SMARTAGENT_TELEGRAM_ALLOWED_CHATS",
+            None,
+        )
         .unwrap_or_default();
     let mut n = 0;
     for chat in chats.split(',').map(str::trim).filter(|c| !c.is_empty()) {
@@ -330,6 +334,18 @@ fn poll(args: &[String]) -> Result<String, String> {
             // the bot. Now a non-allow-listed chat is always rejected; within an
             // allowed group we additionally require the bot be addressed.
             if allow_chat(&chat).is_err() {
+                let title = msg
+                    .get("chat")
+                    .and_then(|c| c.get("title"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                eprintln!(
+                    "[tg] ignored unallowed chat={} type={} title={} text={}",
+                    chat,
+                    chat_type,
+                    title,
+                    raw_text.chars().take(80).collect::<String>()
+                );
                 continue;
             }
             let is_group = matches!(chat_type, "group" | "supergroup" | "channel");
@@ -437,10 +453,13 @@ fn is_group_mention(chat_type: &str, text: &str, bot_username: &str) -> bool {
 }
 
 fn contains_bot_mention(text: &str, bot_username: &str) -> bool {
-    let needle = format!("@{}", bot_username.trim_start_matches('@')).to_ascii_lowercase();
+    let username = bot_username.trim_start_matches('@').to_ascii_lowercase();
+    let needle = format!("@{}", username);
     text.split_whitespace().any(|part| {
-        part.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '@')
-            .eq_ignore_ascii_case(&needle)
+        let cleaned = part
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '@' && c != '/')
+            .to_ascii_lowercase();
+        cleaned.eq_ignore_ascii_case(&needle) || cleaned.ends_with(&needle)
     })
 }
 
