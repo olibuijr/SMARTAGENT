@@ -217,9 +217,8 @@ impl eframe::App for App {
         let mut emits: Vec<Emit> = Vec::new();
 
         egui::SidePanel::left("sidebar")
-            .resizable(false)
-            .min_width(250.0)
-            .max_width(250.0)
+            .default_width(260.0)
+            .min_width(180.0)
             .frame(egui::Frame {
                 fill: theme::SIDEBAR(),
                 inner_margin: egui::Margin::same(0),
@@ -229,9 +228,8 @@ impl eframe::App for App {
 
         if self.inspector_open {
             egui::SidePanel::right("inspector")
-                .resizable(false)
-                .min_width(290.0)
-                .max_width(290.0)
+                .default_width(290.0)
+                .min_width(200.0)
                 .frame(egui::Frame {
                     fill: theme::SIDEBAR(),
                     inner_margin: egui::Margin::same(0),

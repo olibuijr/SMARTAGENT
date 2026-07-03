@@ -18,6 +18,7 @@ pub fn render(ui: &mut egui::Ui, conn: &mut AgentConn, username: &str, emits: &m
             Vec2::new(width, avail.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
+                ui.add_space(14.0);
                 transcript::banners(ui, &conn.state);
 
                 if conn.state.items.is_empty() {

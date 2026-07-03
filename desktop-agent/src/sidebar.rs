@@ -185,18 +185,29 @@ fn row2(
     color: Color32,
     selected: bool,
 ) -> egui::Response {
-    let bg = if selected { theme::SELECTED() } else { Color32::TRANSPARENT };
-    ui.horizontal(|ui| {
-        ui.add_space(12.0);
-        let text = format!("{title}\n{time}");
-        ui.add(
-            egui::Button::new(
-                egui::RichText::new(text).size(13.0).color(color),
-            )
-            .fill(bg)
-            .corner_radius(6)
-            .min_size(Vec2::new(width - 24.0, 44.0)),
-        )
-    })
-    .inner
+    let desired = Vec2::new(width, 44.0);
+    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let bg = if selected {
+            theme::SELECTED()
+        } else if response.hovered() {
+            theme::HOVER()
+        } else {
+            Color32::TRANSPARENT
+        };
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(6), bg);
+
+        let galley = ui.painter().layout(
+            format!("{title}\n{time}"),
+            egui::FontId::proportional(13.0),
+            color,
+            rect.width() - 20.0,
+        );
+        let text_pos = egui::pos2(rect.left() + 12.0, rect.top() + 5.0);
+        ui.painter().galley(text_pos, galley, Color32::TRANSPARENT);
+    }
+
+    response
 }
