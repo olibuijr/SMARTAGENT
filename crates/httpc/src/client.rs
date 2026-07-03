@@ -10,6 +10,11 @@ use std::time::Duration;
 use crate::json::{self, Value};
 use crate::url::Url;
 
+/// Hard ceiling on a single response (headers + body). Protects against
+/// memory-exhaustion from a hostile or misconfigured server.
+const MAX_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
+
+
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: String,
@@ -308,6 +313,15 @@ fn read_response_bytes<R: Read>(stream: &mut R) -> Result<Vec<u8>, String> {
             return Ok(raw); // EOF — server closed
         }
         raw.extend_from_slice(&buf[..n]);
+        // Total-size ceiling: a hostile server advertising a huge Content-Length,
+        // an endless chunked stream, or an UntilClose body that never closes
+        // would otherwise grow `raw` until the process OOMs.
+        if raw.len() > MAX_RESPONSE_BYTES {
+            return Err(format!(
+                "response exceeds {}MB cap",
+                MAX_RESPONSE_BYTES / (1024 * 1024)
+            ));
+        }
 
         if framing.is_none() {
             if let Some(he) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
@@ -433,7 +447,14 @@ pub fn dechunk(data: &[u8]) -> Result<Vec<u8>, String> {
             return Ok(out);
         }
         let start = line_end + 2;
-        if start + size + 2 > data.len() {
+        // Checked arithmetic: `size` is attacker-controlled hex (up to
+        // usize::MAX). `start + size + 2` could overflow, wrap to a small value,
+        // pass a naive bounds check, then panic on the out-of-range slice below.
+        let end = start
+            .checked_add(size)
+            .and_then(|v| v.checked_add(2))
+            .ok_or("chunk size overflow")?;
+        if end > data.len() {
             return Err("truncated chunk".into());
         }
         out.extend_from_slice(&data[start..start + size]);

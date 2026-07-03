@@ -59,7 +59,7 @@ pub fn escape(s: &str) -> String {
 
 pub fn parse(input: &str) -> Result<Value, String> {
     let bytes = input.as_bytes();
-    let mut p = Parser { b: bytes, i: 0 };
+    let mut p = Parser { b: bytes, i: 0, depth: 0 };
     p.skip_ws();
     let v = p.value()?;
     p.skip_ws();
@@ -72,7 +72,13 @@ pub fn parse(input: &str) -> Result<Value, String> {
 struct Parser<'a> {
     b: &'a [u8],
     i: usize,
+    /// Current nesting depth — bounded so a hostile `[[[[…` payload (any
+    /// network/MCP response) can't recurse the parser into a stack-overflow
+    /// abort (an unrecoverable crash, not a catchable error).
+    depth: usize,
 }
+
+const MAX_DEPTH: usize = 512;
 
 impl<'a> Parser<'a> {
     fn skip_ws(&mut self) {
@@ -96,8 +102,21 @@ impl<'a> Parser<'a> {
 
     fn value(&mut self) -> Result<Value, String> {
         match self.peek() {
-            Some(b'{') => self.object(),
-            Some(b'[') => self.array(),
+            Some(b'{') | Some(b'[') => {
+                // Depth is managed here so every container path — including all
+                // early error returns inside object()/array() — decrements.
+                self.depth += 1;
+                if self.depth > MAX_DEPTH {
+                    return Err("json nesting too deep".into());
+                }
+                let v = if self.peek() == Some(b'{') {
+                    self.object()
+                } else {
+                    self.array()
+                };
+                self.depth -= 1;
+                v
+            }
             Some(b'"') => Ok(Value::Str(self.string()?)),
             Some(b't') => self.lit("true", Value::Bool(true)),
             Some(b'f') => self.lit("false", Value::Bool(false)),
@@ -196,6 +215,12 @@ impl<'a> Parser<'a> {
                                 if self.b[self.i..].starts_with(b"\\u") {
                                     self.i += 2;
                                     let lo = self.hex4()?;
+                                    // The low unit MUST be a low surrogate; without
+                                    // this check `lo - 0xDC00` underflows (panic in
+                                    // debug, garbage codepoint in release).
+                                    if !(0xDC00..0xE000).contains(&lo) {
+                                        return Err("bad low surrogate".into());
+                                    }
                                     let c = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
                                     char::from_u32(c).ok_or("bad surrogate pair")?
                                 } else {
@@ -326,5 +351,22 @@ mod tests {
         let big = "A1b2C3d4".repeat(512 * 1024);
         let v = parse(&format!(r#"{{"data":"{big}"}}"#)).unwrap();
         assert_eq!(v.get("data").unwrap().as_str().unwrap().len(), big.len());
+    }
+}
+
+#[cfg(test)]
+mod dos_tests {
+    use super::*;
+
+    #[test]
+    fn deep_nesting_errors_not_crashes() {
+        let deep = "[".repeat(100_000) + &"]".repeat(100_000);
+        assert!(parse(&deep).is_err(), "deep nesting must error, not stack-overflow");
+    }
+
+    #[test]
+    fn bad_low_surrogate_errors() {
+        // High surrogate followed by a non-low-surrogate \u escape.
+        assert!(parse(r#""\uD800A""#).is_err());
     }
 }
