@@ -11,14 +11,7 @@ pub struct Transcript {
     pub worker_model: String,
 }
 
-/// The newest `*.jsonl` under `sessions_dir`, condensed to the last messages
-/// that fit in `max_chars`.
-pub fn latest(sessions_dir: &Path, max_chars: usize) -> Result<Transcript, String> {
-    latest_matching(sessions_dir, max_chars, None)
-}
-
-/// Newest transcript for one session id, falling back to any newest transcript
-/// when no session is requested.
+/// Newest transcript for one session id.
 pub fn latest_for_session(
     sessions_dir: &Path,
     max_chars: usize,
