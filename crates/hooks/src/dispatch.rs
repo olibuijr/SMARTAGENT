@@ -9,6 +9,7 @@
 //! First block wins; updatedInput/context from later hooks still apply if no
 //! block occurred.
 
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,7 +20,11 @@ use semdb::storage::Db;
 
 use crate::config::Hook;
 
-const PLACEHOLDER_VEC: [f32; 1] = [0.0];
+const SEMDB_MAGIC: &[u8; 8] = b"SEMDB01\n";
+const OP_PUT: u8 = 1;
+const HOOK_AUDIT_RETAIN_MAX_DEFAULT: usize = 10_000;
+const HOOK_AUDIT_RETAIN_DAYS_DEFAULT: u64 = 14;
+
 
 #[derive(Default)]
 pub struct Decision {
@@ -148,23 +153,164 @@ fn to_text(v: &Value) -> String {
 }
 
 /// Append a firing record to data/hooks.semdb (best-effort — auditing must
-/// never break dispatch).
+/// never break dispatch). This hot path must not call `Db::open`: opening a
+/// semdb replays the full log to rebuild the index, which made every hook
+/// firing O(file) and a long-running session O(n²). We only need append-only
+/// audit durability here, so write one valid semdb PUT frame directly and let
+/// readers (`hooks audit`, status probes) pay the replay cost when they ask.
 fn audit(repo: &Path, name: &str, event: &str, subject: &str, exit: i32, ms: i64) {
-    let path = repo.join("data/hooks.semdb");
+    let path = audit_path(repo);
     let _ = std::fs::create_dir_all(repo.join("data"));
-    let db = if path.exists() { Db::open(&path) } else { Db::create(&path) };
-    if let Ok(mut db) = db {
-        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let meta = format!(
-            r#"{{"hook":"{}","event":"{}","subject":"{}","exit":{exit},"ms":{ms},"ts":{ts}}}"#,
-            json::escape(name),
-            json::escape(event),
-            json::escape(subject)
-        );
-        let _ = db.put(&format!("H-{ts}"), &meta, PLACEHOLDER_VEC.to_vec());
+    let ts = unix_nanos();
+    let meta = format!(
+        r#"{{"hook":"{}","event":"{}","subject":"{}","exit":{exit},"ms":{ms},"ts":{ts}}}"#,
+        json::escape(name),
+        json::escape(event),
+        json::escape(subject)
+    );
+    let id = format!("H-{ts}");
+    if append_audit_frame(&path, &id, &meta).is_ok() {
+        maybe_prune_audit(&path);
     }
+}
+
+fn unix_nanos() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+}
+
+fn append_audit_frame(path: &Path, id: &str, meta: &str) -> Result<(), String> {
+    let new_file = !path.exists();
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    if new_file {
+        f.write_all(SEMDB_MAGIC).map_err(|e| e.to_string())?;
+    }
+    let mut body = vec![OP_PUT];
+    put_bytes16(&mut body, id.as_bytes());
+    put_bytes32(&mut body, meta.as_bytes());
+    body.extend_from_slice(&1u32.to_le_bytes());
+    body.extend_from_slice(&0.0f32.to_le_bytes());
+    write_framed(&mut f, &body)?;
+    f.flush().map_err(|e| e.to_string())
+}
+
+fn maybe_prune_audit(path: &Path) {
+    let max_rows = audit_retain_max();
+    if max_rows == 0 {
+        return;
+    }
+    // Cheap size gate: skip the expensive replay until the log is plausibly
+    // larger than the retained live set. The exact cap is enforced when prune
+    // runs; between prunes the append path remains O(1).
+    let prune_after_bytes = (max_rows as u64).saturating_mul(200).max(32 * 1024);
+    if std::fs::metadata(path).map(|m| m.len() <= prune_after_bytes).unwrap_or(true) {
+        return;
+    }
+    let _ = prune_audit(path, max_rows, audit_retain_days());
+}
+
+fn prune_audit(path: &Path, max_rows: usize, retain_days: u64) -> Result<(), String> {
+    let db = Db::open(path)?;
+    let min_ts = unix_nanos().saturating_sub((retain_days as u128).saturating_mul(24 * 60 * 60 * 1_000_000_000));
+    let mut rows: Vec<(u128, String, String)> = db
+        .index
+        .iter()
+        .filter_map(|(id, e)| {
+            let ts = json::parse(&e.meta).ok().and_then(|v| v.get("ts").and_then(|x| x.as_f64())).unwrap_or(0.0) as u128;
+            (ts >= min_ts).then(|| (ts, id.clone(), e.meta.clone()))
+        })
+        .collect();
+    rows.sort_by_key(|(ts, _, _)| *ts);
+    if rows.len() > max_rows {
+        rows.drain(0..rows.len() - max_rows);
+    }
+    rewrite_audit(path, &rows)
+}
+
+fn rewrite_audit(path: &Path, rows: &[(u128, String, String)]) -> Result<(), String> {
+    let tmp = path.with_extension("semdb.prune");
+    {
+        let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(SEMDB_MAGIC).map_err(|e| e.to_string())?;
+        for (_, id, meta) in rows {
+            let mut body = vec![OP_PUT];
+            put_bytes16(&mut body, id.as_bytes());
+            put_bytes32(&mut body, meta.as_bytes());
+            body.extend_from_slice(&1u32.to_le_bytes());
+            body.extend_from_slice(&0.0f32.to_le_bytes());
+            write_framed(&mut f, &body)?;
+        }
+        f.sync_all().map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+}
+
+fn audit_retain_max() -> usize {
+    std::env::var("SMARTAGENT_HOOK_AUDIT_RETAIN_MAX").ok().and_then(|s| s.parse().ok()).unwrap_or(HOOK_AUDIT_RETAIN_MAX_DEFAULT)
+}
+
+fn audit_retain_days() -> u64 {
+    std::env::var("SMARTAGENT_HOOK_AUDIT_RETAIN_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(HOOK_AUDIT_RETAIN_DAYS_DEFAULT)
+}
+
+fn write_framed(f: &mut File, body: &[u8]) -> Result<(), String> {
+    f.write_all(&(body.len() as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+    f.write_all(&semdb::storage::crc32(body).to_le_bytes()).map_err(|e| e.to_string())?;
+    f.write_all(body).map_err(|e| e.to_string())
+}
+
+fn put_bytes16(out: &mut Vec<u8>, data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    out.extend_from_slice(data);
+}
+
+fn put_bytes32(out: &mut Vec<u8>, data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
 }
 
 pub fn audit_path(repo: &Path) -> PathBuf {
     repo.join("data/hooks.semdb")
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("data")).unwrap();
+        d
+    }
+
+    #[test]
+    fn audit_fast_path_writes_readable_semdb_without_replay_per_append() {
+        let root = scratch("hooks-audit-fast-path");
+        let start = Instant::now();
+        for i in 0..10_000 {
+            audit(&root, "fast", "tool_call", &format!("bash-{i}"), 0, 1);
+        }
+        let elapsed = start.elapsed();
+        let db = Db::open(&audit_path(&root)).unwrap();
+        assert_eq!(db.index.len(), 10_000);
+        assert!(elapsed.as_secs() < 10, "10k append-only audit firings took {:?}", elapsed);
+    }
+
+    #[test]
+    fn prune_audit_caps_rows_to_last_k() {
+        let root = scratch("hooks-audit-prune");
+        let path = audit_path(&root);
+        for i in 0..25 {
+            append_audit_frame(&path, &format!("H-{i:04}"), &format!(r#"{{"hook":"h","event":"e","subject":"s","exit":0,"ms":1,"ts":{i}}}"#)).unwrap();
+        }
+        prune_audit(&path, 10, 365 * 100).unwrap();
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.index.len(), 10);
+        assert!(db.get("H-0024").is_some());
+        assert!(db.get("H-0000").is_none());
+    }
 }

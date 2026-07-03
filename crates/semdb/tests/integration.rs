@@ -35,7 +35,10 @@ fn cli_roundtrip() {
     // client↔daemon roundtrip: an isolated daemon subprocess (its own socket,
     // no clash with production) and CLI subprocesses pointed at it via env.
     let path = tmp("cli");
-    let sock = path.with_extension("sock");
+    // Unix socket paths have a small SUN_LEN limit (~108 bytes). Task
+    // worktrees make CARGO_MANIFEST_DIR long, so keep the socket path relative
+    // and short while still inside the repo's target/test-scratch area.
+    let sock = PathBuf::from(format!("../../target/test-scratch/semdb-cli-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
@@ -146,7 +149,7 @@ fn brute_force_matches_manual_cosine() {
 fn kill9_recovery() {
     let path = tmp("kill9");
     Db::create(&path).unwrap();
-    let sock = path.with_extension("sock");
+    let sock = PathBuf::from(format!("../../target/test-scratch/semdb-kill9-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
