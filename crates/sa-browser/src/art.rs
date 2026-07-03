@@ -1,9 +1,11 @@
 //! RGBA → high-DPI terminal art. Three pixel modes, best DPI first:
 //!
-//! - `sextant` (default): 2×3 px per cell via Unicode Symbols for Legacy
-//!   Computing (kitty draws these natively, font-independent). Each cell
-//!   carries 2 colors — pixels are clustered to a fg/bg pair (1-step 2-means
-//!   on RGB) and the membership bitmap picks the glyph. 6 px/cell.
+//! - `braille` (default): 2×4 px per cell via Unicode Braille Patterns.
+//!   Each cell carries 2 colors — pixels are clustered to a fg/bg pair
+//!   (1-step 2-means on RGB) and the membership bitmap picks the glyph.
+//!   8 px/cell.
+//! - `sextant`: 2×3 px per cell via Unicode Symbols for Legacy Computing.
+//!   Same two-color clustering. 6 px/cell.
 //! - `quad`: 2×2 px per cell via quadrant blocks (▘▝▖▗…). 4 px/cell.
 //! - `half`: 1×2 px per cell via ▀ with truecolor fg/bg — every pixel gets
 //!   its exact color (color-true maximum). 2 px/cell.
@@ -19,6 +21,7 @@ pub enum Mode {
     Half,
     Quad,
     Sextant,
+    Braille,
 }
 
 impl Mode {
@@ -26,7 +29,8 @@ impl Mode {
         match s {
             "half" => Mode::Half,
             "quad" | "quadrant" => Mode::Quad,
-            _ => Mode::Sextant,
+            "sextant" | "sextants" => Mode::Sextant,
+            _ => Mode::Braille,
         }
     }
 
@@ -36,6 +40,7 @@ impl Mode {
             Mode::Half => (1, 2),
             Mode::Quad => (2, 2),
             Mode::Sextant => (2, 3),
+            Mode::Braille => (2, 4),
         }
     }
 }
@@ -61,7 +66,7 @@ pub fn render(img: &Image, cols: usize, max_rows: usize, mode: Mode) -> (Vec<Str
         let (mut last_fg, mut last_bg) = (None, None);
         for cx in 0..w_cells {
             // Gather this cell's pixel block.
-            let mut cell = [(0u8, 0u8, 0u8); 6];
+            let mut cell = [(0u8, 0u8, 0u8); 8];
             for py in 0..ch {
                 for pxx in 0..cw {
                     cell[py * cw + pxx] = px[(row * ch + py) * (w_cells * cw) + cx * cw + pxx];
@@ -129,7 +134,9 @@ fn two_color_cell(block: &[(u8, u8, u8)], mode: Mode) -> ((u8, u8, u8), (u8, u8,
     let bg = if bn == 0 { fg } else { ((bsum[0] / bn) as u8, (bsum[1] / bn) as u8, (bsum[2] / bn) as u8) };
     let glyph = match mode {
         Mode::Quad => QUAD[bits as usize],
-        _ => sextant_char(bits),
+        Mode::Sextant => sextant_char(bits),
+        Mode::Braille => braille_char(bits),
+        Mode::Half => '▀',
     };
     (fg, bg, glyph)
 }
@@ -160,6 +167,19 @@ pub fn sextant_char(bits: u8) -> char {
             char::from_u32(0x1FB00 + offset).unwrap_or('▒')
         }
     }
+}
+
+/// Braille glyph for a 2×4 bitmap. Input bits are row-major; Unicode braille
+/// dot order is left column dots 1–4 then right column dots 5–8.
+pub fn braille_char(bits: u8) -> char {
+    let map = [0x01u8, 0x08, 0x02, 0x10, 0x04, 0x20, 0x40, 0x80];
+    let mut dots = 0u8;
+    for (i, dot) in map.iter().enumerate() {
+        if bits & (1 << i) != 0 {
+            dots |= *dot;
+        }
+    }
+    char::from_u32(0x2800 + dots as u32).unwrap_or('⣿')
 }
 
 /// Box-filter downscale to w×h, alpha composited over white (screenshots are
