@@ -1,0 +1,24 @@
+# name	description	telegram	ui	class
+help	Show SMARTAGENT commands	true	true	user
+commands	Show SMARTAGENT commands	true	true	user
+board	Show the kanban board	true	true	admin
+tasks	List tasks	true	true	admin
+status	Show supervised service status	true	true	admin
+skills	List skills or match a query	true	true	admin
+agents	Show gateway fleet state	true	true	admin
+runs	Show active workflows	true	true	admin
+memory	Recall SMARTAGENT memory	true	true	chat
+model	Choose this chat's reply model	true	true	admin
+verbosity	Show or set notification verbosity	true	true	chat
+verbose	Alias for /verbosity	true	true	chat
+reset	Clear this chat/thread rolling context	true	true	chat
+remember	Remember a fact for this chat/channel	true	true	chat
+stop	Stop the active reply in this chat/thread	true	true	admin
+resolve	Add custom resolution text for a blocked task	true	true	chat
+index	Build workspace file index	true	true	admin
+projects	List workspace projects with index status	true	true	admin
+audit	Show recent hook firings	true	true	admin
+goal	Set, check, clear, or run a goal	true	true	admin
+team	Show agent team controls	true	true	admin
+sab	Open/control the visual browser	true	true	admin
+assign	Show Telegram multiple-choice agent assignment	true	true	admin

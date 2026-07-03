@@ -99,6 +99,15 @@ pub(crate) fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
         }
         return;
     }
+    if slash_name(&text) == Some("assign")
+        || (slash_name(&text).is_some() && text.contains(" assign"))
+    {
+        match send_agent_assignment_menu(&chat) {
+            Ok(r) => eprintln!("[tg] assign menu sent to {chat}: {r}"),
+            Err(e) => eprintln!("[tg] assign menu FAILED for {chat}: {e}"),
+        }
+        return;
+    }
     if let Some(result) = slash_command(&text, &chat, &thread, &user) {
         let reply = result.unwrap_or_else(|e| format!("command error: {e}"));
         let cmd = slash_name(&text).unwrap_or("?");

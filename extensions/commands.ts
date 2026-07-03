@@ -21,11 +21,30 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BIN, ROOT, STATUS_SEGMENTS, TASKS_DB, WORKFLOW_DB, parseLevel, statusTag } from "./lib/statusline-common.ts";
 
 const MEMORY_DIR = join(ROOT, "data", "memory");
 const SKILLS_ROOT = join(ROOT, "skills");
+const REGISTRY = join(ROOT, "config", "slash_commands.tsv");
+
+type SlashCommand = { name: string; description: string; telegram: boolean; tui: boolean; klass: string };
+function slashCommands(): SlashCommand[] {
+	return readFileSync(REGISTRY, "utf8")
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith("#"))
+		.map((line) => {
+			const [name, description, telegram, tui, klass] = line.split("\t");
+			return { name, description, telegram: telegram === "true", tui: tui === "true", klass };
+		})
+		.filter((c) => c.tui);
+}
+
+function commandHelp(): string {
+	return slashCommands().map((c) => `/${c.name} — ${c.description}`).join("\n");
+}
 
 function run(bin: string, args: string[], timeout = 60_000): string {
 	try {
@@ -125,5 +144,50 @@ export default function (pi: ExtensionAPI) {
 			}
 			show(`memory recall — ${query}`, run("memory", ["recall", "--dir", MEMORY_DIR, "--text", query, "--k", "5"]));
 		},
+	});
+
+	for (const alias of ["help", "commands"]) {
+		pi.registerCommand(alias, {
+			description: "Show SMARTAGENT commands",
+			handler: async () => show("commands", commandHelp()),
+		});
+	}
+
+	pi.registerCommand("agents", {
+		description: "Show gateway fleet state",
+		handler: async () => show("gateway agents", run("gateway", ["agents"])),
+	});
+
+	pi.registerCommand("model", {
+		description: "Choose this chat's reply model (Telegram-only persistence)",
+		handler: async () => show("model", "Model selection is chat-scoped in Telegram. In the TUI, select models with pi's model controls or launch flags."),
+	});
+
+	for (const alias of ["verbosity", "verbose"]) {
+		pi.registerCommand(alias, {
+			description: "Show or set notification verbosity",
+			handler: async () => show(alias, "Telegram notification verbosity is chat-scoped; use this command in Telegram to change that chat."),
+		});
+	}
+
+	pi.registerCommand("reset", {
+		description: "Clear this chat/thread rolling context",
+		handler: async () => show("reset", "Telegram-only chat context command; TUI context resets by starting a fresh session."),
+	});
+	pi.registerCommand("remember", {
+		description: "Remember a fact (usage: /remember fact)",
+		handler: async (args) => show("remember", args.trim() ? run("memory", ["remember", "--tier", "semantic", "--text", args.trim()]) : "usage: /remember fact"),
+	});
+	pi.registerCommand("stop", {
+		description: "Stop the active reply",
+		handler: async () => show("stop", "Use Ctrl+C/Esc in the TUI; /stop cancels Telegram streaming replies."),
+	});
+	pi.registerCommand("resolve", {
+		description: "Add custom resolution text for a blocked task",
+		handler: async () => show("resolve", "Telegram blocker-resolution helper; use tasks block/unblock in the TUI."),
+	});
+	pi.registerCommand("assign", {
+		description: "Show Telegram multiple-choice agent assignment",
+		handler: async () => show("assign", "Telegram displays an inline multiple-choice agent picker: Coordinator, Builder, QA, Ops."),
 	});
 }

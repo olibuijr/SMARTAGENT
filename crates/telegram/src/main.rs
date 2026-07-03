@@ -103,7 +103,7 @@ fn register_commands() -> Result<String, String> {
     let token = bot_token()?;
     let body = command_menu_body();
     api::call(&token, "setMyCommands", &body)?;
-    Ok(format!("registered {} Telegram command(s). If your Telegram client still shows the old menu, close and reopen the chat (or restart the app) to refresh its cached commands.", TELEGRAM_COMMANDS.len()))
+    Ok(format!("registered {} Telegram command(s). If your Telegram client still shows the old menu, close and reopen the chat (or restart the app) to refresh its cached commands.", telegram_commands().len()))
 }
 
 fn poll(args: &[String]) -> Result<String, String> {
@@ -139,7 +139,29 @@ fn poll(args: &[String]) -> Result<String, String> {
                     let _ = handle_block_callback(&token, callback_id, &chat, &message_id, action);
                     continue;
                 }
-                let Some(model) = callback_model_choice(data, date, unix_secs()) else {
+                let now = unix_secs();
+                if let Some(role) = callback_agent_assignment(data, date, now) {
+                    let callback_id = cb.get("id").and_then(Value::as_str).unwrap_or("");
+                    let _ = api::call(
+                        &token,
+                        "answerCallbackQuery",
+                        &format!(
+                            r#"{{"callback_query_id":"{}","text":"Assigned to {}"}}"#,
+                            json::escape(callback_id),
+                            json::escape(role)
+                        ),
+                    );
+                    let message_id = msg.get("message_id").map(val_s).unwrap_or_default();
+                    let _ = api::edit_message(
+                        &token,
+                        &chat,
+                        message_id.parse::<i64>().unwrap_or(0),
+                        &format!("Assigned to {role}. A coordinator can now pull this from the Telegram context."),
+                        false,
+                    );
+                    continue;
+                }
+                let Some(model) = callback_model_choice(data, date, now) else {
                     continue;
                 };
                 let from = cb
