@@ -51,6 +51,10 @@ fn run(args: &[String]) -> Result<String, String> {
         "commands" => register_commands(),
         "broadcast" => broadcast(args),
         "blocked-scan" => blocked_scan(args),
+        "diag" => diag(args),
+        "chat" => chat_info(args),
+        "member" => member_info(args),
+        "updates" => updates(args),
         "status" => telegram_status(args),
         "statusline" => Ok("ok|telegram".into()),
         _ => Ok(HELP.trim().into()),
@@ -104,6 +108,125 @@ fn register_commands() -> Result<String, String> {
     let body = command_menu_body();
     api::call(&token, "setMyCommands", &body)?;
     Ok(format!("registered {} Telegram command(s). If your Telegram client still shows the old menu, close and reopen the chat (or restart the app) to refresh its cached commands.", telegram_commands().len()))
+}
+
+fn diag(args: &[String]) -> Result<String, String> {
+    let token = bot_token()?;
+    let me = api::call(&token, "getMe", "{}")?;
+    let username = me.get("username").and_then(Value::as_str).unwrap_or("?");
+    let allowed = Config::load()
+        .resolve(
+            "telegram_allowed_chats",
+            "SMARTAGENT_TELEGRAM_ALLOWED_CHATS",
+            None,
+        )
+        .unwrap_or_default();
+    let chat = flag(args, "--chat");
+    let mut out = Vec::new();
+    out.push(format!(
+        "bot=@{username} id={} can_join_groups={} can_read_all_group_messages={}",
+        val_s(me.get("id").unwrap_or(&Value::Null)),
+        bool_s(me.get("can_join_groups")),
+        bool_s(me.get("can_read_all_group_messages"))
+    ));
+    out.push(format!(
+        "allowed_chats={}",
+        if allowed.trim().is_empty() {
+            "(none)"
+        } else {
+            allowed.trim()
+        }
+    ));
+    if let Some(chat_id) = chat {
+        match api::call(
+            &token,
+            "getChat",
+            &format!(r#"{{"chat_id":"{}"}}"#, json::escape(&chat_id)),
+        ) {
+            Ok(c) => out.push(format_chat_summary("chat", &c)),
+            Err(e) => out.push(format!("chat error: {e}")),
+        }
+        let bot_id = val_s(me.get("id").unwrap_or(&Value::Null));
+        match api::call(
+            &token,
+            "getChatMember",
+            &format!(
+                r#"{{"chat_id":"{}","user_id":{}}}"#,
+                json::escape(&chat_id),
+                bot_id
+            ),
+        ) {
+            Ok(m) => out.push(format_member_summary("bot_member", &m)),
+            Err(e) => out.push(format!("bot_member error: {e}")),
+        }
+    } else {
+        out.push("pass --chat <id-or-@username> to check getChat/getChatMember".into());
+    }
+    out.push("If group/channel mentions do not arrive, send /board@<botusername> there, then run `telegram updates --limit 10 --no-advance` to discover the real negative chat id. Invite links (t.me/+...) are not Bot API chat ids.".into());
+    Ok(out.join("\n"))
+}
+
+fn chat_info(args: &[String]) -> Result<String, String> {
+    let chat = flag(args, "--chat").ok_or("--chat required")?;
+    let token = bot_token()?;
+    let v = api::call(
+        &token,
+        "getChat",
+        &format!(r#"{{"chat_id":"{}"}}"#, json::escape(&chat)),
+    )?;
+    Ok(format_chat_summary("chat", &v))
+}
+
+fn member_info(args: &[String]) -> Result<String, String> {
+    let chat = flag(args, "--chat").ok_or("--chat required")?;
+    let user = flag(args, "--user").unwrap_or_else(|| "me".into());
+    let token = bot_token()?;
+    let user_id = if user == "me" {
+        val_s(
+            api::call(&token, "getMe", "{}")?
+                .get("id")
+                .unwrap_or(&Value::Null),
+        )
+    } else {
+        user
+    };
+    let v = api::call(
+        &token,
+        "getChatMember",
+        &format!(
+            r#"{{"chat_id":"{}","user_id":{}}}"#,
+            json::escape(&chat),
+            user_id
+        ),
+    )?;
+    Ok(format_member_summary("member", &v))
+}
+
+fn updates(args: &[String]) -> Result<String, String> {
+    let token = bot_token()?;
+    let limit = flag(args, "--limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10usize);
+    let no_advance = args.iter().any(|a| a == "--no-advance");
+    let offset_v = if no_advance { 0 } else { offset()? };
+    let result = api::get_updates(&token, offset_v, 0)?;
+    let mut lines = Vec::new();
+    let mut max_id = offset_v.saturating_sub(1);
+    if let Some(items) = result.as_arr() {
+        for it in items.iter().rev().take(limit).rev() {
+            let uid = u64v(it.get("update_id")).unwrap_or(0);
+            max_id = max_id.max(uid);
+            lines.push(format_update_summary(it));
+        }
+    }
+    if !no_advance && max_id >= offset_v {
+        set_offset(max_id + 1)?;
+    }
+    if lines.is_empty() {
+        Ok("no pending updates".into())
+    } else {
+        Ok(lines.join("\n"))
+    }
 }
 
 fn poll(args: &[String]) -> Result<String, String> {
@@ -230,6 +353,73 @@ fn poll(args: &[String]) -> Result<String, String> {
     }
     set_offset(max_id + 1)?;
     Ok(out.join("\n"))
+}
+
+fn bool_s(v: Option<&Value>) -> &'static str {
+    match v {
+        Some(Value::Bool(true)) => "true",
+        Some(Value::Bool(false)) => "false",
+        _ => "?",
+    }
+}
+
+fn format_chat_summary(label: &str, v: &Value) -> String {
+    let title = v
+        .get("title")
+        .and_then(Value::as_str)
+        .or_else(|| v.get("username").and_then(Value::as_str))
+        .unwrap_or("");
+    format!(
+        "{label}: id={} type={} title={} username=@{} forum={}",
+        val_s(v.get("id").unwrap_or(&Value::Null)),
+        v.get("type").and_then(Value::as_str).unwrap_or("?"),
+        title,
+        v.get("username").and_then(Value::as_str).unwrap_or(""),
+        bool_s(v.get("is_forum"))
+    )
+}
+
+fn format_member_summary(label: &str, v: &Value) -> String {
+    let status = v.get("status").and_then(Value::as_str).unwrap_or("?");
+    format!(
+        "{label}: status={} can_post_messages={} can_manage_chat={} can_delete_messages={}",
+        status,
+        bool_s(v.get("can_post_messages")),
+        bool_s(v.get("can_manage_chat")),
+        bool_s(v.get("can_delete_messages"))
+    )
+}
+
+fn format_update_summary(it: &Value) -> String {
+    let uid = u64v(it.get("update_id")).unwrap_or(0);
+    for key in [
+        "message",
+        "edited_message",
+        "channel_post",
+        "edited_channel_post",
+        "my_chat_member",
+    ] {
+        if let Some(v) = it.get(key) {
+            let msg = if key == "my_chat_member" { v } else { v };
+            let chat = msg.get("chat");
+            let chat_id = chat
+                .and_then(|c| c.get("id"))
+                .map(val_s)
+                .unwrap_or_default();
+            let chat_type = chat
+                .and_then(|c| c.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let title = chat
+                .and_then(|c| c.get("title"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let thread = msg.get("message_thread_id").map(val_s).unwrap_or_default();
+            let text = msg.get("text").and_then(Value::as_str).unwrap_or("");
+            return format!("update={uid} kind={key} chat={chat_id} type={chat_type} thread={thread} title={title} text={}", text.chars().take(80).collect::<String>());
+        }
+    }
+    format!("update={uid} kind=other")
 }
 
 fn is_group_mention(chat_type: &str, text: &str, bot_username: &str) -> bool {
