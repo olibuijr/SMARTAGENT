@@ -79,6 +79,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_end", async () => {
-		dispatch("stop", "", {});
+		const d = dispatch("stop", "", {});
+		// Stop hooks are advisory in the interactive TUI (pi extensions cannot
+		// auto-start a turn). Surface any block reason — e.g. an unmet /goal — so
+		// it's visible; it is also audited and seen as context on the next turn.
+		if (d.block && d.reason) console.error(d.reason);
 	});
 }
