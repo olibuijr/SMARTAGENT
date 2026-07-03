@@ -31,42 +31,54 @@ fn rand_vec(seed: &mut u64, dim: usize) -> Vec<f32> {
 
 #[test]
 fn cli_roundtrip() {
+    // The CLI is a thin client of the daemon, so this drives a real
+    // client↔daemon roundtrip: an isolated daemon subprocess (its own socket,
+    // no clash with production) and CLI subprocesses pointed at it via env.
     let path = tmp("cli");
+    let sock = path.with_extension("sock");
+    let _ = std::fs::remove_file(&sock);
+    let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
-    let s = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let run = |args: &[&str]| -> (bool, String) {
+        let out = Command::new(bin)
+            .args(args)
+            .env("SMARTAGENT_SEMDB_SOCKET", &sock)
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stdout).to_string())
+    };
 
-    cli::run(&s(&["create", &db])).unwrap();
-    cli::run(&s(&[
-        "put",
-        &db,
-        "--id",
-        "a",
-        "--vector",
-        "1,0,0",
-        "--meta",
-        r#"{"t":"first"}"#,
-    ]))
-    .unwrap();
-    cli::run(&s(&["put", &db, "--id", "b", "--vector", "0,1,0"])).unwrap();
+    let mut daemon = Command::new(bin)
+        .arg("serve")
+        .env("SMARTAGENT_SEMDB_SOCKET", &sock)
+        .spawn()
+        .unwrap();
+    for _ in 0..300 {
+        if sock.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 
-    let got = cli::run(&s(&["get", &db, "--id", "a"])).unwrap();
+    assert!(run(&["create", &db]).0);
+    assert!(run(&["put", &db, "--id", "a", "--vector", "1,0,0", "--meta", r#"{"t":"first"}"#]).0);
+    assert!(run(&["put", &db, "--id", "b", "--vector", "0,1,0"]).0);
+
+    let (ok, got) = run(&["get", &db, "--id", "a"]);
+    assert!(ok);
     assert!(got.contains("first"));
 
-    let hits = cli::run(&s(&[
-        "search",
-        &db,
-        "--vector",
-        "0.9,0.1,0",
-        "--k",
-        "1",
-        "--exact",
-    ]))
-    .unwrap();
+    let (ok, hits) = run(&["search", &db, "--vector", "0.9,0.1,0", "--k", "1", "--exact"]);
+    assert!(ok);
     assert!(hits.lines().next().unwrap().contains("\ta\t"));
 
-    cli::run(&s(&["del", &db, "--id", "a"])).unwrap();
-    assert!(cli::run(&s(&["get", &db, "--id", "a"])).is_err());
-    std::fs::remove_file(&path).unwrap();
+    assert!(run(&["del", &db, "--id", "a"]).0);
+    assert!(!run(&["get", &db, "--id", "a"]).0); // not found → non-zero exit
+
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&sock);
 }
 
 #[test]
@@ -126,48 +138,69 @@ fn brute_force_matches_manual_cosine() {
     std::fs::remove_file(&path).unwrap();
 }
 
-/// Real crash: a child process writes puts in a loop and is SIGKILLed mid-run.
-/// The database must reopen cleanly with a consistent prefix of the writes.
+/// Real crash: the daemon is the sole file-writer, so SIGKILL it mid-write.
+/// The database must reopen (directly, no daemon) with a consistent prefix.
 #[test]
 fn kill9_recovery() {
     let path = tmp("kill9");
-    {
-        Db::create(&path).unwrap();
-    }
+    Db::create(&path).unwrap();
+    let sock = path.with_extension("sock");
+    let _ = std::fs::remove_file(&sock);
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
 
-    // Writer loop in a shell child; kill it hard while writing.
+    // The daemon does the real file writes; killing it mid-write is the crash.
+    let mut daemon = Command::new(bin)
+        .arg("serve")
+        .env("SMARTAGENT_SEMDB_SOCKET", &sock)
+        .spawn()
+        .unwrap();
+    for _ in 0..300 {
+        if sock.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Writer loop: CLI clients fire puts at the daemon.
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "i=0; while [ $i -lt 100000 ]; do {bin} put {db} --id k$i --vector '1,2,3' --meta '{{\"big\":\"{}\"}}' >/dev/null; i=$((i+1)); done",
+            "i=0; while [ $i -lt 100000 ]; do {bin} put {db} --id k$i --vector '1,2,3' --meta '{{\"big\":\"{}\"}}' >/dev/null 2>&1; i=$((i+1)); done",
             "z".repeat(8000) // >4KB metadata per record
         ))
+        .env("SMARTAGENT_SEMDB_SOCKET", &sock)
         .spawn()
         .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(700));
-    // SIGKILL the whole loop (kill -9).
+    // SIGKILL the daemon (the file writer) mid-write.
+    let _ = Command::new("kill")
+        .args(["-9", &daemon.id().to_string()])
+        .status();
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+    // Stop the now-erroring writer loop too.
     let _ = Command::new("pkill")
         .args(["-9", "-P", &child.id().to_string()])
         .status();
     let _ = child.kill();
     let _ = child.wait();
 
-    // Reopen: must not error, and every surviving entry must be intact.
+    // Reopen the file directly: must not error, every survivor intact.
     let db2 = Db::open(&path).unwrap();
     for (id, e) in &db2.index {
         assert!(id.starts_with('k'));
         assert_eq!(e.vector, vec![1.0, 2.0, 3.0]);
         assert!(e.meta.len() > 8000);
     }
-    println!("recovered {} entries after kill -9", db2.index.len());
+    println!("recovered {} entries after daemon kill -9", db2.index.len());
 
     // And it's writable after recovery.
     let mut db3 = Db::open(&path).unwrap();
     db3.put("post-crash", "", vec![9.0]).unwrap();
     assert!(db3.get("post-crash").is_some());
-    std::fs::remove_file(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&sock);
 }
 
 #[test]

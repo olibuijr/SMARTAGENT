@@ -22,6 +22,15 @@ fn s(parts: &[&str]) -> Vec<String> {
 /// not hardcoded; everything else is repo-relative.
 pub fn registry(chromium_bin: &str, chrome_profile: &str) -> Vec<Service> {
     vec![
+        // semdb daemon FIRST: the shared storage owner. Gateway agents reach it
+        // via the `semdb` CLI (thin client), which errors if it is not up.
+        Service {
+            name: "semdb",
+            argv: s(&["target/release/semdb", "serve"]),
+            needle: "semdb serve",
+            probe: None,
+            enabled: true,
+        },
         Service {
             name: "scheduler",
             argv: s(&[

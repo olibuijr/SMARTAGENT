@@ -47,6 +47,18 @@ impl Config {
         self.repo_relative("data_dir", "data")
     }
 
+    /// Unix socket the semdb daemon binds; defaults to `<repo>/.pi/semdb.sock`.
+    /// Repo-relative so the client and daemon agree regardless of cwd. The env
+    /// override (used by tests for an isolated socket) takes an absolute path.
+    pub fn semdb_socket(&self) -> PathBuf {
+        if let Ok(s) = std::env::var("SMARTAGENT_SEMDB_SOCKET") {
+            if !s.is_empty() {
+                return PathBuf::from(s);
+            }
+        }
+        self.repo_relative("semdb_socket", ".pi/semdb.sock")
+    }
+
     fn repo_relative(&self, key: &str, default: &str) -> PathBuf {
         let rel = self.map.get(key).map(String::as_str).unwrap_or(default);
         let base = find()

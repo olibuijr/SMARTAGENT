@@ -22,8 +22,6 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { existsSync, watch } from "node:fs";
-import { join } from "node:path";
 import { BIN, ROOT, STATUS_SEGMENTS, parseLevel, layout, stripAnsi, vwidth } from "./lib/statusline-common.ts";
 
 const SEGMENTS = STATUS_SEGMENTS;
@@ -101,9 +99,6 @@ const REFRESH_AFTER: Record<string, string[]> = {
 
 const CLEAR_AFTER_MS = 5000;
 const REFRESH_MS = 30_000;
-const FS_DEBOUNCE_MS = 400;
-const INDEX_DEBOUNCE_MS = 2500;
-const WATCH_DIRS = ["data", "workspaces", "crates", "extensions", "hooks.d", "config"].map((d) => join(ROOT, d));
 
 export default function (pi: ExtensionAPI) {
 	const started = new Map<string, number>(); // toolCallId → start ms
@@ -111,9 +106,6 @@ export default function (pi: ExtensionAPI) {
 	const painted = new Map<string, string>(); // segment key → colored text
 	let ui: any; // latest ctx.ui, captured from events (only used when hasUI)
 	let timer: ReturnType<typeof setInterval> | undefined;
-	let fsTimer: ReturnType<typeof setTimeout> | undefined;
-	let indexTimer: ReturnType<typeof setTimeout> | undefined;
-	let watchers: { close: () => void }[] = [];
 
 	// Visible width of a cell: ANSI codes count 0, wide glyphs 2. Wide follows
 	// wcwidth/kitty: East-Asian-Wide + DEFAULT-EMOJI-PRESENTATION ranges only.
@@ -199,61 +191,12 @@ export default function (pi: ExtensionAPI) {
 
 	const probeAll = () => probe(SEGMENTS.map((s) => s.key));
 
-	function jsonEscape(s: string): string {
-		return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
-	}
-
-	function updateStatusEmbedding(path: string) {
-		const db = join(ROOT, "data", "smartagent.semdb");
-		const text = `statusline filesystem resync: ${path}`;
-		execFile(BIN("semdb"), ["embed", db, "--id", "statusline-latest", "--text", text], { encoding: "utf8", timeout: 5000, cwd: ROOT }, (err) => {
-			if (!err) return;
-			execFile(BIN("semdb"), ["put", db, "--id", "statusline-latest", "--vector", "0", "--meta", `{"text":"${jsonEscape(text)}"}`], { encoding: "utf8", timeout: 5000, cwd: ROOT }, () => {});
-		});
-	}
-
-	function scheduleFsResync(path = "") {
-		if (fsTimer) clearTimeout(fsTimer);
-		fsTimer = setTimeout(() => { probeAll(); updateStatusEmbedding(path); }, FS_DEBOUNCE_MS);
-		// Source/workspace changes can stale the code index; re-probe the index
-		// segment after the debounce. The Rust statusline detects drift by
-		// comparing repo file mtimes with the index db, so a single edit does not
-		// trigger a full reindex from the live statusline.
-		if (/\.(rs|ts|js|md|toml|json)$/.test(path) || path.includes("workspaces")) {
-			if (indexTimer) clearTimeout(indexTimer);
-			indexTimer = setTimeout(() => probe(["codeindex"]), INDEX_DEBOUNCE_MS);
-		}
-	}
-
-	function startFsWatchers() {
-		if (watchers.length) return;
-		for (const dir of WATCH_DIRS) {
-			if (!existsSync(dir)) continue;
-			try {
-				watchers.push(watch(dir, { persistent: false }, (_ev, file) => scheduleFsResync(join(dir, String(file ?? "")))));
-			} catch {
-				// Some platforms/filesystems reject watching a directory; periodic
-				// refresh remains the fallback.
-			}
-		}
-	}
-
-	function stopFsWatchers() {
-		for (const w of watchers) w.close();
-		watchers = [];
-		if (fsTimer) clearTimeout(fsTimer);
-		if (indexTimer) clearTimeout(indexTimer);
-		fsTimer = undefined;
-		indexTimer = undefined;
-	}
-
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		ui = ctx.ui;
 		process.stdout.on("resize", render);
 		process.on("SIGWINCH", render);
 		probeAll();
-		startFsWatchers();
 		if (!timer) timer = setInterval(probeAll, REFRESH_MS);
 	});
 
@@ -261,7 +204,6 @@ export default function (pi: ExtensionAPI) {
 		if (timer) clearInterval(timer);
 		process.stdout.off("resize", render);
 		process.off("SIGWINCH", render);
-		stopFsWatchers();
 		timer = undefined;
 		ui = undefined;
 	});
