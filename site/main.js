@@ -820,6 +820,26 @@ if (isTouch) {
 		pads.push({ ...d, mesh: m, up, down, held: false });
 	}
 }
+// Always-visible install CTA: copy the command from anywhere, any time.
+function installBtnCanvas(copiedState) {
+	const w = 92, h = 24;
+	const [c, x] = cv(128, h);
+	const ox = (128 - w) >> 1;
+	x.fillStyle = "#0a0a10"; x.fillRect(ox, 0, w, h);                    // outline
+	x.fillStyle = copiedState ? "#7dff9a" : "#14201a";                    // face
+	x.fillRect(ox + 2, 2, w - 4, h - 4);
+	x.strokeStyle = copiedState ? "#161620" : "#7dff9a";
+	x.lineWidth = 2; x.strokeRect(ox + 3, 3, w - 6, h - 6);
+	x.font = `8px ${FONT}`; x.textBaseline = "top";
+	x.fillStyle = copiedState ? "#161620" : "#7dff9a";
+	const label = copiedState ? "COPIED!" : "INSTALL";
+	x.fillText(label, ox + Math.floor((w - x.measureText(label).width) / 2), 9);
+	return c;
+}
+const installBtn = overlay(plane(installBtnCanvas(false)), 6);
+installBtn.renderOrder = 12;
+const installBtnMaps = { idle: installBtn.material.map, copied: tex(installBtnCanvas(true)) };
+hud.add(installBtn);
 let coinHud = plane(textCanvas("FACTS 0/8", 8, "#ffd75f", { pad: 3 }));
 hud.add(coinHud);
 function refreshCoinHud() {
@@ -857,19 +877,27 @@ addEventListener("keydown", (e) => {
 	start();
 	keys[e.code] = true;
 	if (["ArrowUp", "KeyW"].includes(e.code) && nearCastle()) location.href = REPO;
-	if (e.code === "KeyC" && nearInstall()) copyInstall();
+	if (e.code === "KeyC") copyInstall(); // copy works from anywhere
 	if (["Space", "ArrowUp", "KeyW"].includes(e.code)) e.preventDefault();
 });
 addEventListener("keyup", (e) => (keys[e.code] = false));
 // touch: on-screen controller (multi-touch — walk while jumping)
 let touchDir = 0, touchJump = false;
 const activePointers = new Map(); // pointerId -> pad
-function padAt(clientX, clientY) {
-	// map through the canvas rect — NOT innerWidth/innerHeight, which drift
-	// from the painted canvas when mobile URL bars show/hide
+// map through the canvas rect — NOT innerWidth/innerHeight, which drift
+// from the painted canvas when mobile URL bars show/hide
+function toView(clientX, clientY) {
 	const r = canvas.getBoundingClientRect();
-	const vx = ((clientX - r.left) / r.width - .5) * viewW;
-	const vy = (.5 - (clientY - r.top) / r.height) * viewH + CAM_Y;
+	return [
+		((clientX - r.left) / r.width - .5) * viewW,
+		(.5 - (clientY - r.top) / r.height) * viewH + CAM_Y,
+	];
+}
+function overInstallBtn(vx, vy) {
+	return Math.abs(vx - installBtn.position.x) < 48 && Math.abs(vy - installBtn.position.y) < 14;
+}
+function padAt(clientX, clientY) {
+	const [vx, vy] = toView(clientX, clientY);
 	for (const z of pillZones)
 		if (Math.abs(vx - z.x) < 26 && Math.abs(vy - z.y) < 16) return { pill: true, act: z.act };
 	if (dpadMesh) {
@@ -904,6 +932,10 @@ function doUse() {
 canvas.addEventListener("pointerdown", (e) => {
 	e.preventDefault(); // no synthetic mouse events / long-press selection
 	start();
+	{
+		const [vx, vy] = toView(e.clientX, e.clientY);
+		if (overInstallBtn(vx, vy)) { copyInstall(); return; }
+	}
 	const p = padAt(e.clientX, e.clientY);
 	if (p) {
 		if (p.act === "use" || p.act === "start") doUse();
@@ -933,6 +965,8 @@ addEventListener("pointermove", (e) => {
 	if (isTouch) return; // touch pointers drive the pads, not the parallax
 	pointerNX = (e.clientX / innerWidth) * 2 - 1;
 	pointerNY = (e.clientY / innerHeight) * 2 - 1;
+	const [vx, vy] = toView(e.clientX, e.clientY);
+	canvas.style.cursor = overInstallBtn(vx, vy) || nearCastle() || nearInstall() ? "pointer" : "default";
 });
 if (isTouch && "DeviceOrientationEvent" in window)
 	addEventListener("deviceorientation", (e) => {
@@ -1009,6 +1043,8 @@ function step(dt, now) {
 		hintCtl.material.opacity = Math.max(0, 1 - e * 1.2);
 	}
 	coinHud.position.set(viewW / 2 - 60, CAM_Y + viewH / 2 - topBand - 40, 5); // inside the screen hole
+	installBtn.position.set(viewW / 2 - 60, CAM_Y + viewH / 2 - topBand - 68, 5);
+	installBtn.material.map = copied && now - copied < 2000 ? installBtnMaps.copied : installBtnMaps.idle;
 	{
 		const bottom = CAM_Y - viewH / 2;
 		// controls row sits in the upper half of the shell shelf, above the
