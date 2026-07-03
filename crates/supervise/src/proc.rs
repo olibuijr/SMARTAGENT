@@ -5,6 +5,47 @@ use std::fs::File;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// Scan /proc for the lowest live pid whose argv contains `needle`, excluding
+/// this process. Lets the supervisor ADOPT an already-running service instead
+/// of spawning a duplicate that would exit on the service's own single-instance
+/// guard (the gateway's "already running" socket check) — the churn source:
+/// the duplicate exits, the store tracks its dead pid, watch respawns, loop.
+pub fn pid_by_needle(needle: &str) -> Option<u32> {
+    if needle.is_empty() {
+        return None;
+    }
+    // The needle is `<binary> <subcommand>` (e.g. "gateway serve"). Match ONLY
+    // real service processes: argv[0]'s basename must equal the binary word.
+    // Without this, ANY process whose cmdline merely CONTAINS "gateway serve"
+    // — a shell, a grep, this supervisor's own probe — falsely matches, so
+    // `alive()` adopts a bogus pid and the real service never starts.
+    let binary = needle.split_whitespace().next().unwrap_or(needle);
+    let me = std::process::id();
+    let mut found: Vec<u32> = Vec::new();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        if let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) {
+            let argv: Vec<String> = bytes
+                .split(|&b| b == 0)
+                .filter(|s| !s.is_empty())
+                .map(|s| String::from_utf8_lossy(s).into_owned())
+                .collect();
+            let Some(arg0) = argv.first() else { continue };
+            let base = arg0.rsplit('/').next().unwrap_or(arg0);
+            if base == binary && argv.join(" ").contains(needle) {
+                found.push(pid);
+            }
+        }
+    }
+    found.into_iter().min()
+}
+
 /// Spawn a detached child: stdout/stderr → `log`, stdin from /dev/null. The
 /// handle is dropped so we never wait on it; if this supervisor later exits,
 /// the child is reparented to init and keeps running (we track it by pid).

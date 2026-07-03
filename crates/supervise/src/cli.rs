@@ -8,13 +8,6 @@ use crate::proc;
 use crate::services::{self, Service};
 use crate::state::{Record, Store};
 
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 fn watch_should_restart(rec: &Record, known: bool, now: i64, next_try: i64) -> bool {
     (rec.desired_up || !known) && now >= next_try
 }
@@ -43,7 +36,24 @@ impl Ctx {
     }
 
     fn alive(&self, svc: &Service, rec: &Record) -> bool {
-        proc::is_alive(rec.pid, svc.needle)
+        if proc::is_alive(rec.pid, svc.needle) {
+            return true;
+        }
+        // Tracked pid is dead, but the service may still be running under a pid
+        // we don't know (a manual start, or a restart race). Adopt it instead
+        // of reporting DOWN — that false-negative is what made watch respawn
+        // duplicates in a loop. Adopt into the store so status/stop/restart
+        // target the real process.
+        if let Some(pid) = proc::pid_by_needle(svc.needle) {
+            let mut adopted = rec.clone();
+            adopted.pid = pid;
+            if adopted.started_at == 0 {
+                adopted.started_at = procutil::unix_secs();
+            }
+            let _ = self.store.put(svc.name, &adopted);
+            return true;
+        }
+        false
     }
 
     fn probe_ok(&self, svc: &Service) -> Option<bool> {
@@ -53,13 +63,28 @@ impl Ctx {
     }
 
     fn start(&self, svc: &Service) -> Result<Record, String> {
+        // Never spawn a duplicate: if the service is already running under some
+        // pid (single-instance services like the gateway would just exit on
+        // their own guard, leaving us tracking a dead pid → restart churn),
+        // adopt that pid instead of starting a second one.
+        if let Some(pid) = proc::pid_by_needle(svc.needle) {
+            let rec = Record {
+                desired_up: true,
+                pid,
+                cmd: svc.argv.join(" "),
+                started_at: self.store.get(svc.name).started_at.max(1),
+                restarts: self.store.get(svc.name).restarts,
+            };
+            self.store.put(svc.name, &rec)?;
+            return Ok(rec);
+        }
         let log = self.logs.join(format!("{}.log", svc.name));
         let pid = proc::spawn_detached(&svc.argv, &self.repo, &log)?;
         let rec = Record {
             desired_up: true,
             pid,
             cmd: svc.argv.join(" "),
-            started_at: now_unix(),
+            started_at: procutil::unix_secs(),
             restarts: self.store.get(svc.name).restarts,
         };
         self.store.put(svc.name, &rec)?;
@@ -69,6 +94,16 @@ impl Ctx {
     fn stop(&self, svc: &Service) -> Result<(), String> {
         let mut rec = self.store.get(svc.name);
         proc::terminate(rec.pid);
+        // Kill every process matching the service needle, not just the tracked
+        // pid — churn or a restart race can leave duplicates, and `restart`
+        // must clear ALL of them so the next `start` spawns a fresh binary
+        // (adopting a survivor would silently keep the OLD build running).
+        while let Some(pid) = proc::pid_by_needle(svc.needle) {
+            proc::terminate(pid);
+            if proc::pid_by_needle(svc.needle) == Some(pid) {
+                break; // didn't die — avoid an infinite loop
+            }
+        }
         rec.desired_up = false;
         rec.pid = 0;
         self.store.put(svc.name, &rec)
@@ -186,12 +221,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 for svc in ctx.registry.iter().filter(|s| s.enabled) {
                     let rec = ctx.store.get(svc.name);
                     if ctx.alive(svc, &rec) {
-                        if now_unix() - rec.started_at > 60 {
+                        if procutil::unix_secs() - rec.started_at > 60 {
                             delay.insert(svc.name, 15);
                         }
                         continue;
                     }
-                    let now = now_unix();
+                    let now = procutil::unix_secs();
                     if !watch_should_restart(&rec, ctx.store.names().contains(&svc.name.to_string()), now, *next_try.get(svc.name).unwrap_or(&0)) {
                         continue; // intentionally off or backing off
                     }
@@ -203,7 +238,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                             let _ = ctx.store.put(svc.name, &bumped);
                             let d = if quick_death { (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480) } else { 15 };
                             delay.insert(svc.name, d);
-                            next_try.insert(svc.name, now_unix() + d as i64);
+                            next_try.insert(svc.name, procutil::unix_secs() + d as i64);
                             eprintln!("[supervise] restarted {} (pid {}, next retry window {d}s)", svc.name, bumped.pid);
                         }
                         Err(e) => eprintln!("[supervise] failed to restart {}: {e}", svc.name),
