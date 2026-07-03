@@ -36,15 +36,15 @@ impl Ctx {
     }
 
     fn alive(&self, svc: &Service, rec: &Record) -> bool {
-        if proc::is_alive(rec.pid, svc.needle) {
+        if proc::is_alive(rec.pid, svc.needle, &svc.argv, &self.repo) {
             return true;
         }
         // Tracked pid is dead, but the service may still be running under a pid
         // we don't know (a manual start, or a restart race). Adopt it instead
         // of reporting DOWN — that false-negative is what made watch respawn
         // duplicates in a loop. Adopt into the store so status/stop/restart
-        // target the real process.
-        if let Some(pid) = proc::pid_by_needle(svc.needle) {
+        // target the real process for this repo instance only.
+        if let Some(pid) = proc::pid_by_service(svc.needle, &svc.argv, &self.repo) {
             let mut adopted = rec.clone();
             adopted.pid = pid;
             if adopted.started_at == 0 {
@@ -67,7 +67,7 @@ impl Ctx {
         // pid (single-instance services like the gateway would just exit on
         // their own guard, leaving us tracking a dead pid → restart churn),
         // adopt that pid instead of starting a second one.
-        if let Some(pid) = proc::pid_by_needle(svc.needle) {
+        if let Some(pid) = proc::pid_by_service(svc.needle, &svc.argv, &self.repo) {
             let rec = Record {
                 desired_up: true,
                 pid,
@@ -98,9 +98,9 @@ impl Ctx {
         // pid — churn or a restart race can leave duplicates, and `restart`
         // must clear ALL of them so the next `start` spawns a fresh binary
         // (adopting a survivor would silently keep the OLD build running).
-        while let Some(pid) = proc::pid_by_needle(svc.needle) {
+        while let Some(pid) = proc::pid_by_service(svc.needle, &svc.argv, &self.repo) {
             proc::terminate(pid);
-            if proc::pid_by_needle(svc.needle) == Some(pid) {
+            if proc::pid_by_service(svc.needle, &svc.argv, &self.repo) == Some(pid) {
                 break; // didn't die — avoid an infinite loop
             }
         }
