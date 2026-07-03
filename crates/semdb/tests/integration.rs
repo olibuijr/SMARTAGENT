@@ -13,7 +13,6 @@ fn tmp(name: &str) -> PathBuf {
     // SUN_LEN even when the repo is checked out in a long task worktree path.
     let dir = PathBuf::from("target/test-scratch");
     let _ = std::fs::create_dir_all(&dir);
-    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
     let p = dir.join(format!("semdb-it-{name}-{}", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p

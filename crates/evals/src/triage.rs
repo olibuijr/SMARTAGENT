@@ -12,6 +12,7 @@
 //! - NO-WEAKENING criterion on every generated task: the fix must land in
 //!   code/config; editing the eval's expectations to go green fails review.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::score::{self, Matcher};
@@ -48,27 +49,51 @@ fn embedded_task(run: &str) -> Option<String> {
 ///
 /// Scoring is latest-per-case: a case's most recent trace wins, so re-logging
 /// a passing trace after a fix flips the case (and eventually the run) green.
-pub fn triage(evals_db: &Path, tasks_db: &Path, dry_run: bool, sweep_all: bool) -> Result<String, String> {
+pub fn triage(
+    evals_db: &Path,
+    tasks_db: &Path,
+    dry_run: bool,
+    sweep_all: bool,
+) -> Result<String, String> {
     // Kill switch: `touch <evals-db-dir>/eval-triage.off` disables the loop
     // instantly (a self-modifying loop needs an off-switch that doesn't wait
     // for a rebuild or service restart).
-    let off = evals_db.parent().unwrap_or(Path::new(".")).join("eval-triage.off");
+    let off = evals_db
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("eval-triage.off");
     if off.exists() {
-        return Ok("evals triage: disabled by eval-triage.off — remove the file to re-enable".into());
+        return Ok(
+            "evals triage: disabled by eval-triage.off — remove the file to re-enable".into(),
+        );
     }
     // Sweep lock: concurrent stop hooks (two agents ending together) would race
     // the cursor read→create→set window and duplicate tasks. First writer wins;
     // losers skip — sweeps are frequent and idempotent, skipping is safe.
     // Stale locks (crashed sweep) expire after 120s.
-    let lock = evals_db.parent().unwrap_or(Path::new(".")).join(".eval-triage.lock");
+    let lock = evals_db
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(".eval-triage.lock");
     if let Ok(meta) = std::fs::metadata(&lock) {
-        let fresh = meta.modified().ok().and_then(|m| m.elapsed().ok()).map(|e| e.as_secs() < 120).unwrap_or(true);
+        let fresh = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .map(|e| e.as_secs() < 120)
+            .unwrap_or(true);
         if fresh {
             return Ok("evals triage: another sweep in progress — skipped".into());
         }
         let _ = std::fs::remove_file(&lock);
     }
-    if !dry_run && std::fs::OpenOptions::new().write(true).create_new(true).open(&lock).is_err() {
+    if !dry_run
+        && std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+            .is_err()
+    {
         return Ok("evals triage: another sweep in progress — skipped".into());
     }
     let result = triage_locked(evals_db, tasks_db, dry_run, sweep_all);
@@ -78,9 +103,18 @@ pub fn triage(evals_db: &Path, tasks_db: &Path, dry_run: bool, sweep_all: bool) 
     result
 }
 
-fn triage_locked(evals_db: &Path, tasks_db: &Path, dry_run: bool, sweep_all: bool) -> Result<String, String> {
+fn triage_locked(
+    evals_db: &Path,
+    tasks_db: &Path,
+    dry_run: bool,
+    sweep_all: bool,
+) -> Result<String, String> {
     let traces = store::load(evals_db);
-    let cursor = if sweep_all { 0 } else { store::triage_cursor(evals_db) };
+    let cursor = if sweep_all {
+        0
+    } else {
+        store::triage_cursor(evals_db)
+    };
     if !sweep_all && cursor == 0 && !traces.is_empty() {
         if !dry_run {
             store::set_triage_cursor(evals_db, traces.len())?;
@@ -91,11 +125,20 @@ fn triage_locked(evals_db: &Path, tasks_db: &Path, dry_run: bool, sweep_all: boo
         ));
     }
     let fresh = &traces[cursor.min(traces.len())..];
+    let mut runs_seen: HashSet<String> = HashSet::new();
     let mut runs: Vec<String> = Vec::new();
     for t in fresh {
-        if !runs.contains(&t.run) {
+        if runs_seen.insert(t.run.clone()) {
             runs.push(t.run.clone());
         }
+    }
+    let mut latest_by_run: HashMap<String, Vec<crate::store::Trace>> = HashMap::new();
+    let mut latest_by_case: HashMap<(String, String), crate::store::Trace> = HashMap::new();
+    for t in traces.iter().filter(|t| t.expected.is_some()) {
+        latest_by_case.insert((t.run.clone(), t.case.clone()), t.clone());
+    }
+    for ((run, _case), trace) in latest_by_case {
+        latest_by_run.entry(run).or_default().push(trace);
     }
     let tstore = Store::open(tasks_db)?;
     let all = tstore.all()?;
@@ -103,20 +146,17 @@ fn triage_locked(evals_db: &Path, tasks_db: &Path, dry_run: bool, sweep_all: boo
     let mut created = 0usize;
 
     for run in runs {
-        // Latest trace per case wins — full history considered, newest state.
-        let mut latest: Vec<crate::store::Trace> = Vec::new();
-        for t in traces.iter().filter(|t| t.run == run && t.expected.is_some()) {
-            if let Some(slot) = latest.iter_mut().find(|l| l.case == t.case) {
-                *slot = t.clone();
-            } else {
-                latest.push(t.clone());
-            }
-        }
+        // Latest trace per case wins — precomputed once for all runs above.
+        let latest = latest_by_run.get(&run).cloned().unwrap_or_default();
         let scores = score::score_run(&latest, &run, Matcher::Exact);
         if scores.is_empty() {
             continue; // nothing scorable (no expected values)
         }
-        let failing: Vec<String> = scores.iter().filter(|s| !s.pass).map(|s| s.case.clone()).collect();
+        let failing: Vec<String> = scores
+            .iter()
+            .filter(|s| !s.pass)
+            .map(|s| s.case.clone())
+            .collect();
         if failing.is_empty() {
             continue;
         }
@@ -131,14 +171,25 @@ fn triage_locked(evals_db: &Path, tasks_db: &Path, dry_run: bool, sweep_all: boo
         // with `run-2` (dedupe key = exact run).
         let fix_prefix = format!("eval-fix: {run} —");
         let esc_prefix = format!("eval-fix (recurring): {run} —");
-        if all.iter().any(|t| (t.title.starts_with(&fix_prefix) || t.title.starts_with(&esc_prefix)) && t.col != "done") {
+        if all.iter().any(|t| {
+            (t.title.starts_with(&fix_prefix) || t.title.starts_with(&esc_prefix))
+                && t.col != "done"
+        }) {
             out.push(format!("skip {run}: open eval-fix task exists"));
             continue;
         }
-        let recurred = all.iter().any(|t| t.title.starts_with(&fix_prefix) && t.col == "done");
-        if recurred && all.iter().any(|t| t.title.starts_with(&esc_prefix) && t.col == "done") {
+        let recurred = all
+            .iter()
+            .any(|t| t.title.starts_with(&fix_prefix) && t.col == "done");
+        if recurred
+            && all
+                .iter()
+                .any(|t| t.title.starts_with(&esc_prefix) && t.col == "done")
+        {
             // Escalation was also completed and it STILL fails — a human call.
-            out.push(format!("skip {run}: escalation already exhausted — needs orchestrator"));
+            out.push(format!(
+                "skip {run}: escalation already exhausted — needs orchestrator"
+            ));
             continue;
         }
         let case_note = if failing.len() == 1 {
@@ -193,7 +244,9 @@ mod tests {
     /// Per-test directory: the sweep lock and kill-switch files are
     /// directory-scoped, so parallel tests need isolated dirs.
     fn pair(n: &str) -> (PathBuf, PathBuf) {
-        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/triage").join(n);
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch/triage")
+            .join(n);
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         (d.join("evals.semdb"), d.join("tasks.semdb"))
@@ -236,7 +289,10 @@ mod tests {
         assert_eq!(t.criteria.len(), 2);
         // Second sweep: dedupe, no new task.
         let r2 = triage(&ev, &tk, false, true).unwrap();
-        assert!(r2.contains("skip r1: open eval-fix task exists"), "got: {r2}");
+        assert!(
+            r2.contains("skip r1: open eval-fix task exists"),
+            "got: {r2}"
+        );
         assert!(Store::open(&tk).unwrap().get("T-2").is_err());
     }
 
@@ -262,9 +318,22 @@ mod tests {
         // A NEW failing trace after the cursor generates exactly one task.
         store::append(&ev, &fail_trace("new-red", "c1")).unwrap();
         let r3 = triage(&ev, &tk, false, false).unwrap();
-        assert!(r3.contains("created T-1 (p2): eval-fix: new-red —"), "got: {r3}");
-        let titles: Vec<String> = Store::open(&tk).unwrap().all().unwrap().into_iter().map(|t| t.title).collect();
-        assert_eq!(titles.len(), 1, "old-red must not create a task: {titles:?}");
+        assert!(
+            r3.contains("created T-1 (p2): eval-fix: new-red —"),
+            "got: {r3}"
+        );
+        let titles: Vec<String> = Store::open(&tk)
+            .unwrap()
+            .all()
+            .unwrap()
+            .into_iter()
+            .map(|t| t.title)
+            .collect();
+        assert_eq!(
+            titles.len(),
+            1,
+            "old-red must not create a task: {titles:?}"
+        );
     }
 
     #[test]
@@ -282,10 +351,21 @@ mod tests {
         let (ev, tk) = pair("t3");
         store::append(&ev, &fail_trace("T-9-self-heal", "c1")).unwrap();
         let s = Store::open(&tk).unwrap();
-        s.put(&Task { id: "T-9".into(), title: "self heal".into(), col: "doing".into(), prio: "p1".into(), created: now(), trans: vec![("doing".into(), now())], ..Task::default() })
-            .unwrap();
+        s.put(&Task {
+            id: "T-9".into(),
+            title: "self heal".into(),
+            col: "doing".into(),
+            prio: "p1".into(),
+            created: now(),
+            trans: vec![("doing".into(), now())],
+            ..Task::default()
+        })
+        .unwrap();
         let r = triage(&ev, &tk, false, true).unwrap();
-        assert!(r.contains("skip T-9-self-heal: tracked by open T-9"), "got: {r}");
+        assert!(
+            r.contains("skip T-9-self-heal: tracked by open T-9"),
+            "got: {r}"
+        );
     }
 
     #[test]
@@ -293,16 +373,35 @@ mod tests {
         let (ev, tk) = pair("t4");
         store::append(&ev, &fail_trace("r4", "c1")).unwrap();
         let s = Store::open(&tk).unwrap();
-        s.put(&Task { id: "T-1".into(), title: "eval-fix: r4 — c1".into(), col: "done".into(), prio: "p2".into(), created: now(), trans: vec![], ..Task::default() })
-            .unwrap();
+        s.put(&Task {
+            id: "T-1".into(),
+            title: "eval-fix: r4 — c1".into(),
+            col: "done".into(),
+            prio: "p2".into(),
+            created: now(),
+            trans: vec![],
+            ..Task::default()
+        })
+        .unwrap();
         let r = triage(&ev, &tk, false, true).unwrap();
-        assert!(r.contains("(p1): eval-fix (recurring): r4 — c1"), "got: {r}");
-        let esc = s.all().unwrap().into_iter().find(|t| t.title.starts_with("eval-fix (recurring): r4 —")).unwrap();
+        assert!(
+            r.contains("(p1): eval-fix (recurring): r4 — c1"),
+            "got: {r}"
+        );
+        let esc = s
+            .all()
+            .unwrap()
+            .into_iter()
+            .find(|t| t.title.starts_with("eval-fix (recurring): r4 —"))
+            .unwrap();
         assert_eq!(esc.prio, "p1");
         assert!(esc.tags.contains(&"escalate".to_string()));
         // Escalation open → skip; escalation done + still failing → human.
         let r2 = triage(&ev, &tk, false, true).unwrap();
-        assert!(r2.contains("skip r4: open eval-fix task exists"), "got: {r2}");
+        assert!(
+            r2.contains("skip r4: open eval-fix task exists"),
+            "got: {r2}"
+        );
     }
 
     #[test]
