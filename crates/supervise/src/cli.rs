@@ -22,11 +22,20 @@ struct Ctx {
 impl Ctx {
     fn load() -> Result<Ctx, String> {
         let cfg = Config::load();
-        let repo = cfg.data_dir().parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+        let repo = cfg
+            .data_dir()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
         let logs = cfg.workspaces_dir().join("supervise-logs");
         std::fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
-        let chromium = cfg.resolve("chromium_bin", "CHROMIUM_BIN", None).unwrap_or_else(|| "chromium".into());
-        let profile = repo.join(".pi/chrome-profile").to_string_lossy().to_string();
+        let chromium = cfg
+            .resolve("chromium_bin", "CHROMIUM_BIN", None)
+            .unwrap_or_else(|| "chromium".into());
+        let profile = repo
+            .join(".pi/chrome-profile")
+            .to_string_lossy()
+            .to_string();
         Ok(Ctx {
             store: Store::open(&cfg.data_dir())?,
             registry: services::registry(&chromium, &profile),
@@ -58,7 +67,11 @@ impl Ctx {
 
     fn probe_ok(&self, svc: &Service) -> Option<bool> {
         svc.probe.as_ref().map(|url| {
-            httpc::Request::new("GET", url).timeout(4).send().map(|r| r.status < 500).unwrap_or(false)
+            httpc::Request::new("GET", url)
+                .timeout(4)
+                .send()
+                .map(|r| r.status < 500)
+                .unwrap_or(false)
         })
     }
 
@@ -146,7 +159,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         "restart" => {
             let name = target.ok_or("usage: supervise restart <service>")?;
-            let svc = services::find(&ctx.registry, name).ok_or_else(|| format!("unknown service '{name}'"))?;
+            let svc = services::find(&ctx.registry, name)
+                .ok_or_else(|| format!("unknown service '{name}'"))?;
             ctx.stop(svc)?;
             let r = ctx.start(svc)?;
             Ok(format!("{}: restarted (pid {})", svc.name, r.pid))
@@ -161,17 +175,33 @@ pub fn run(args: &[String]) -> Result<String, String> {
                     Some(false) => "PROBE-FAIL",
                     None => "—", // no HTTP probe for this service; liveness shown in state
                 };
-                let state = if alive { "running" } else if rec.desired_up { "DOWN(want up)" } else { "stopped" };
-                out.push(format!("{:<10} {:<9} {:<8} {:<8} {}", svc.name, state, if alive { rec.pid } else { 0 }, rec.restarts, health));
+                let state = if alive {
+                    "running"
+                } else if rec.desired_up {
+                    "DOWN(want up)"
+                } else {
+                    "stopped"
+                };
+                out.push(format!(
+                    "{:<10} {:<9} {:<8} {:<8} {}",
+                    svc.name,
+                    state,
+                    if alive { rec.pid } else { 0 },
+                    rec.restarts,
+                    health
+                ));
             }
             Ok(out.join("\n"))
         }
         "logs" => {
             // Tail a service's captured output — was write-only before.
             let name = target.ok_or("usage: supervise logs <service> [--tail N]")?;
-            let n: usize = httpc::args::flag(args, "--tail").and_then(|s| s.parse().ok()).unwrap_or(40);
+            let n: usize = httpc::args::flag(args, "--tail")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(40);
             let path = ctx.logs.join(format!("{name}.log"));
-            let text = std::fs::read_to_string(&path).map_err(|_| format!("no log at {}", path.display()))?;
+            let text = std::fs::read_to_string(&path)
+                .map_err(|_| format!("no log at {}", path.display()))?;
             let lines: Vec<&str> = text.lines().collect();
             let start = lines.len().saturating_sub(n);
             Ok(lines[start..].join("\n"))
@@ -215,9 +245,11 @@ pub fn run(args: &[String]) -> Result<String, String> {
             // doubles its restart delay (15s → … → 480s cap) instead of being
             // hammered forever; a service that stays up resets the backoff.
             let mut delay: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
-            let mut next_try: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
+            let mut next_try: std::collections::HashMap<&str, i64> =
+                std::collections::HashMap::new();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(15));
+                let _ = proc::reap_detached_children();
                 for svc in ctx.registry.iter().filter(|s| s.enabled) {
                     let rec = ctx.store.get(svc.name);
                     if ctx.alive(svc, &rec) {
@@ -227,7 +259,12 @@ pub fn run(args: &[String]) -> Result<String, String> {
                         continue;
                     }
                     let now = proc::unix_secs();
-                    if !watch_should_restart(&rec, ctx.store.names().contains(&svc.name.to_string()), now, *next_try.get(svc.name).unwrap_or(&0)) {
+                    if !watch_should_restart(
+                        &rec,
+                        ctx.store.names().contains(&svc.name.to_string()),
+                        now,
+                        *next_try.get(svc.name).unwrap_or(&0),
+                    ) {
                         continue; // intentionally off or backing off
                     }
                     let quick_death = rec.started_at > 0 && now - rec.started_at < 60;
@@ -236,10 +273,17 @@ pub fn run(args: &[String]) -> Result<String, String> {
                             let mut bumped = r;
                             bumped.restarts += 1;
                             let _ = ctx.store.put(svc.name, &bumped);
-                            let d = if quick_death { (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480) } else { 15 };
+                            let d = if quick_death {
+                                (delay.get(svc.name).copied().unwrap_or(15) * 2).min(480)
+                            } else {
+                                15
+                            };
                             delay.insert(svc.name, d);
                             next_try.insert(svc.name, proc::unix_secs() + d as i64);
-                            eprintln!("[supervise] restarted {} (pid {}, next retry window {d}s)", svc.name, bumped.pid);
+                            eprintln!(
+                                "[supervise] restarted {} (pid {}, next retry window {d}s)",
+                                svc.name, bumped.pid
+                            );
                         }
                         Err(e) => eprintln!("[supervise] failed to restart {}: {e}", svc.name),
                     }
@@ -269,11 +313,27 @@ mod tests {
 
     #[test]
     fn watch_restarts_dead_desired_gateway() {
-        let rec = super::Record { desired_up: true, pid: 123, cmd: "target/release/gateway serve".into(), started_at: 1, restarts: 0 };
+        let rec = super::Record {
+            desired_up: true,
+            pid: 123,
+            cmd: "target/release/gateway serve".into(),
+            started_at: 1,
+            restarts: 0,
+        };
         assert!(super::watch_should_restart(&rec, true, 100, 0));
         assert!(!super::watch_should_restart(&rec, true, 100, 101));
-        assert!(!super::watch_should_restart(&super::Record::default(), true, 100, 0));
-        assert!(super::watch_should_restart(&super::Record::default(), false, 100, 0));
+        assert!(!super::watch_should_restart(
+            &super::Record::default(),
+            true,
+            100,
+            0
+        ));
+        assert!(super::watch_should_restart(
+            &super::Record::default(),
+            false,
+            100,
+            0
+        ));
     }
 }
 
