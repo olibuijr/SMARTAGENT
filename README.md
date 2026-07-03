@@ -59,7 +59,7 @@ The result is an agent you can run locally, inspect, and verify:
 - an autonomous 8-agent fleet (the meðvitund gateway) with a dedicated chat
   agent reachable over a **Telegram bot** — streaming replies, slash commands,
   and task-completion broadcasts
-- a configured AkurAI-Notes MCP server endpoint at `https://akurai-notes.olibuijr.com/mcp` (`mcp_akurai_notes_url`, hosted at `https://akurai-notes.olibuijr.com`) that is the priority destination for durable documentation across all repos and projects
+- a configured AkurAI-Notes MCP server endpoint at `https://akurai-notes.olibuijr.com/mcp` (`mcp_akurai_notes_url`, hosted at `https://akurai-notes.olibuijr.com`) that is the priority destination for durable documentation across all repos and projects; authenticate with the policy-stored MCP bearer token secret, never by copying passwords into docs or logs
 
 No `npm install`, no `pip install`, and no crates.io dependency tree inside the
 tool crates. The system borrows proven patterns from popular agent projects and
@@ -212,7 +212,7 @@ The core active tool catalog is 22 standalone Rust binaries exposed to pi by thi
 | `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open, click, type, wait, scroll, snapshot |
 | `sa-browser` | browser-use visual companion | Visual browser pane in the pi TUI plus DOM snapshots |
 | `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out headless-pi subagents with persisted results |
-| `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers; AkurAI-Notes endpoint `https://akurai-notes.olibuijr.com/mcp` is the preferred documentation sink |
+| `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers; AkurAI-Notes endpoint `https://akurai-notes.olibuijr.com/mcp` is the preferred documentation sink, using a policy-stored bearer token secret for authenticated writes |
 | `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution with secret masking and resource caps |
 | `context` | TELOS-style context | Principal identity and context composition |
 | `evals` | [Langfuse](https://github.com/langfuse/langfuse) | Trace logs, scoring, regression diffs |
