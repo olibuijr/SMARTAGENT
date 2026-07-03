@@ -3,9 +3,10 @@
 //! `next`, criteria-gated done) are enforced HERE, deterministically — not in
 //! prompts.
 
-use std::path::PathBuf;
 use semdb::storage::Db;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use httpc::args::{flag, has};
 
@@ -84,7 +85,6 @@ fn notify_task_created(t: &Task) -> String {
     }
 }
 
-
 fn task_lifecycle_notification(event: &str, t: &Task, actor: &str, note: Option<&str>) -> String {
     let mut lines = vec![
         format!("🤖 *Agent task update:* {event}"),
@@ -92,29 +92,48 @@ fn task_lifecycle_notification(event: &str, t: &Task, actor: &str, note: Option<
         format!("*Task:* `{}` — {}", t.id, t.title),
         format!("*Priority:* `{}` · *State:* `{}`", t.prio, t.col),
     ];
-    if !t.tags.is_empty() { lines.push(format!("*Tags:* `{}`", t.tags.join(","))); }
-    if !t.criteria.is_empty() { lines.push(format!("*Criteria:* `{}/{}`", t.criteria_done(), t.criteria.len())); }
-    if let Some(note) = note.filter(|s| !s.trim().is_empty()) { lines.push(format!("*Note:* {note}")); }
-    lines.push("*Next:* agents continue from the board; no action needed unless you want to steer.".into());
+    if !t.tags.is_empty() {
+        lines.push(format!("*Tags:* `{}`", t.tags.join(",")));
+    }
+    if !t.criteria.is_empty() {
+        lines.push(format!(
+            "*Criteria:* `{}/{}`",
+            t.criteria_done(),
+            t.criteria.len()
+        ));
+    }
+    if let Some(note) = note.filter(|s| !s.trim().is_empty()) {
+        lines.push(format!("*Note:* {note}"));
+    }
+    lines.push(
+        "*Next:* agents continue from the board; no action needed unless you want to steer.".into(),
+    );
     lines.join("\n")
 }
 
 fn notify_task_lifecycle(event: &str, t: &Task, actor: &str, note: Option<&str>) {
-    if std::env::var("SMARTAGENT_TASK_NOTIFY_DISABLE").is_ok() { return; }
+    if std::env::var("SMARTAGENT_TASK_NOTIFY_DISABLE").is_ok() {
+        return;
+    }
     let text = task_lifecycle_notification(event, t, actor, note);
     let mut candidates = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() { candidates.push(dir.join("telegram")); }
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("telegram"));
+        }
     }
     candidates.push(PathBuf::from("target/release/telegram"));
     for bin in candidates {
         if bin.exists() {
-            let _ = Command::new(bin).arg("broadcast").arg("--text").arg(&text).status();
+            let _ = Command::new(bin)
+                .arg("broadcast")
+                .arg("--text")
+                .arg(&text)
+                .status();
             break;
         }
     }
 }
-
 
 fn event_db_path() -> PathBuf {
     std::env::var("SMARTAGENT_TASK_EVENTS_DB")
@@ -123,10 +142,18 @@ fn event_db_path() -> PathBuf {
 }
 
 fn log_task_event(event: &str, t: &Task, actor: &str, from: &str, to: &str, reason: &str) {
-    if std::env::var("SMARTAGENT_TASK_EVENT_LOG_DISABLE").is_ok() { return; }
+    if std::env::var("SMARTAGENT_TASK_EVENT_LOG_DISABLE").is_ok() {
+        return;
+    }
     let path = event_db_path();
-    if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
-    let mut db = match if path.exists() { Db::open(&path) } else { Db::create(&path) } {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut db = match if path.exists() {
+        Db::open(&path)
+    } else {
+        Db::create(&path)
+    } {
         Ok(db) => db,
         Err(_) => return,
     };
@@ -143,24 +170,127 @@ fn log_task_event(event: &str, t: &Task, actor: &str, from: &str, to: &str, reas
 
 fn render_task_events(limit: usize) -> String {
     let path = event_db_path();
-    if !path.exists() { return "no task events".into(); }
-    let db = match Db::open(&path) { Ok(db) => db, Err(e) => return format!("task events unavailable: {e}") };
+    if !path.exists() {
+        return "no task events".into();
+    }
+    let db = match Db::open(&path) {
+        Ok(db) => db,
+        Err(e) => return format!("task events unavailable: {e}"),
+    };
     let mut rows: Vec<_> = db.index.iter().collect();
     rows.sort_by(|a, b| a.0.cmp(b.0));
-    let out: Vec<String> = rows.into_iter().rev().take(limit).filter_map(|(_, e)| {
-        let v = semdb::json::parse(&e.meta).ok()?;
-        Some(format!(
-            "{}\t{}\t{}\t{}→{}\t@{}\t{}",
-            v.get("ts").and_then(|x| x.as_f64()).map(|n| n as i64).unwrap_or(0),
-            v.get("event").and_then(|x| x.as_str()).unwrap_or(""),
-            v.get("task").and_then(|x| x.as_str()).unwrap_or(""),
-            v.get("from").and_then(|x| x.as_str()).unwrap_or(""),
-            v.get("to").and_then(|x| x.as_str()).unwrap_or(""),
-            v.get("actor").and_then(|x| x.as_str()).unwrap_or(""),
-            v.get("reason").and_then(|x| x.as_str()).unwrap_or("")
-        ))
-    }).collect();
-    if out.is_empty() { "no task events".into() } else { out.join("\n") }
+    let out: Vec<String> = rows
+        .into_iter()
+        .rev()
+        .take(limit)
+        .filter_map(|(_, e)| {
+            let v = semdb::json::parse(&e.meta).ok()?;
+            Some(format!(
+                "{}\t{}\t{}\t{}→{}\t@{}\t{}",
+                v.get("ts")
+                    .and_then(|x| x.as_f64())
+                    .map(|n| n as i64)
+                    .unwrap_or(0),
+                v.get("event").and_then(|x| x.as_str()).unwrap_or(""),
+                v.get("task").and_then(|x| x.as_str()).unwrap_or(""),
+                v.get("from").and_then(|x| x.as_str()).unwrap_or(""),
+                v.get("to").and_then(|x| x.as_str()).unwrap_or(""),
+                v.get("actor").and_then(|x| x.as_str()).unwrap_or(""),
+                v.get("reason").and_then(|x| x.as_str()).unwrap_or("")
+            ))
+        })
+        .collect();
+    if out.is_empty() {
+        "no task events".into()
+    } else {
+        out.join("\n")
+    }
+}
+
+fn cargo_done_criteria(t: &Task) -> Vec<String> {
+    t.criteria
+        .iter()
+        .filter(|(_, done)| *done)
+        .map(|(c, _)| c.trim())
+        .filter(|c| {
+            let mut parts = c.split_whitespace();
+            matches!(parts.next(), Some("cargo"))
+                && matches!(parts.next(), Some("test" | "build" | "check"))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn done_check_timeout() -> Duration {
+    let secs = std::env::var("SMARTAGENT_TASKS_DONE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(120);
+    Duration::from_secs(secs)
+}
+
+fn run_cargo_done_checks(t: &Task) -> Result<(), String> {
+    let checks = cargo_done_criteria(t);
+    if checks.is_empty() {
+        return Ok(());
+    }
+    let cwd = if worktree::has_worktree(&t.id) {
+        worktree::current_task_path(&t.id)?
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
+    let timeout = done_check_timeout();
+    for check in checks {
+        run_one_cargo_done_check(&check, &cwd, timeout)?;
+    }
+    Ok(())
+}
+
+fn run_one_cargo_done_check(
+    check: &str,
+    cwd: &std::path::Path,
+    timeout: Duration,
+) -> Result<(), String> {
+    let mut parts = check.split_whitespace();
+    let program = parts.next().ok_or("empty cargo criterion")?;
+    let args = parts.collect::<Vec<_>>();
+    let mut child = Command::new(program)
+        .args(&args)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("run done criterion `{check}` in {}: {e}", cwd.display()))?;
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            if status.success() {
+                return Ok(());
+            }
+            let mut stderr = String::new();
+            if let Some(mut e) = child.stderr.take() {
+                let _ = std::io::Read::read_to_string(&mut e, &mut stderr);
+            }
+            return Err(format!(
+                "done criterion `{check}` failed with {status}{}",
+                if stderr.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", stderr.trim())
+                }
+            ));
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "done criterion `{check}` timed out after {}s",
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {
@@ -282,7 +412,16 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let actor = current_owner();
             if col == "doing" && !has(args, "--force") {
                 if t.col != "ready" {
-                    return Err(format!("{} is already in {}{} — do not double-assign; pull another ready task", t.id, t.col, if t.owner.is_empty() { String::new() } else { format!(" owned by @{}", t.owner) }));
+                    return Err(format!(
+                        "{} is already in {}{} — do not double-assign; pull another ready task",
+                        t.id,
+                        t.col,
+                        if t.owner.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" owned by @{}", t.owner)
+                        }
+                    ));
                 }
                 if !t.owner.is_empty() && t.owner != actor {
                     return Err(format!("{} is already owned by @{} — do not double-assign; pull another ready task", t.id, t.owner));
@@ -332,6 +471,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
                     "{0}: worktrees/{0} has no changes — the fix was not implemented (criteria were checked but nothing was built). Edit the files in the worktree, or pass --allow-empty if this task genuinely needs no code change.",
                     t.id
                 ));
+            }
+            if col == "done" && !has(args, "--force") {
+                run_cargo_done_checks(&t)?;
             }
             t.col = col.to_string();
             if col == "doing" {
@@ -473,17 +615,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 Err(format!("no task '{id}'"))
             }
         }
-        Some("worktrees") => {
-            match args.get(1).map(String::as_str) {
-                Some("reap") => {
-                    let age = flag(args, "--age-secs").and_then(|s| s.parse().ok()).unwrap_or(86_400);
-                    worktree::reap_abandoned(age)
-                }
-                _ => Err("usage: tasks worktrees reap [--age-secs N]".into()),
+        Some("worktrees") => match args.get(1).map(String::as_str) {
+            Some("reap") => {
+                let age = flag(args, "--age-secs")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(86_400);
+                worktree::reap_abandoned(age)
             }
-        }
+            _ => Err("usage: tasks worktrees reap [--age-secs N]".into()),
+        },
         Some("events") => {
-            let n = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(20);
+            let n = flag(args, "--limit")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(20);
             Ok(render_task_events(n))
         }
         Some("wip") => {
@@ -515,7 +659,7 @@ USAGE:
   tasks board                         render columns + WIP state
   tasks list [--col C] [--tag T] [--owner O|--mine|--others] [--blocked]
   tasks show T-1                      card: owner + criteria checklist + history
-  tasks move T-1 <column>             WIP-limited; done requires criteria ✓ (--force overrides)
+  tasks move T-1 <column>             WIP-limited; done requires criteria ✓ and matching cargo checks
   tasks done T-1                      = move done
   tasks next                          pull highest-prio ready task IF doing has capacity
   tasks crit add T-1 '<text>' | check T-1 <n> | uncheck T-1 <n>
@@ -548,7 +692,8 @@ mod tests {
             criteria: vec![("structured".into(), true), ("not spammy".into(), false)],
             ..Task::default()
         };
-        let text = task_lifecycle_notification("started work", &t, "woz", Some("pulled from ready"));
+        let text =
+            task_lifecycle_notification("started work", &t, "woz", Some("pulled from ready"));
         assert!(text.contains("🤖 *Agent task update:* started work"));
         assert!(text.contains("*Agent:* `woz`"));
         assert!(text.contains("*Task:* `T-189`"));

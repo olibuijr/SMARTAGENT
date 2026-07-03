@@ -23,6 +23,9 @@ kanban practitioner thinks. Workflows in `Workflows/` are runnable via the
 4. **Explicit policies** — done means ALL criteria checked. Write criteria at
    add-time (`--criteria 'a;b;c'`), each one a binary check a tool can verify
    — the ISA/ISC discipline. A task without criteria is a wish, not work.
+   Criteria that begin with `cargo test`, `cargo build`, or `cargo check` are
+   not just trusted as text: `tasks done` re-runs them in the task worktree
+   with a timeout and refuses closure if they fail or hang.
 5. **Feedback loops** — load the `triage` skill for backlog ordering or
    priority sweeps, run the `triage` workflow when the backlog grows past ~10,
    and the `retro` workflow after every few completed tasks.
@@ -37,7 +40,7 @@ kanban practitioner thinks. Workflows in `Workflows/` are runnable via the
 | ready | refined: has prio + criteria, unblocked, fleet-eligible | refined during triage, never rots >2 weeks |
 | doing | actively worked NOW | pulled via `tasks next`, WIP-limited |
 | review | awaiting verification | named assignee/role verifies or re-hands off with a note |
-| done | all criteria verified | gate enforced by the tool |
+| done | all criteria verified | gate enforced by the tool; checked `cargo test`, `cargo build`, and `cargo check` criteria are re-run by `tasks done` in the task worktree with a timeout |
 
 ## Reviewer flow
 

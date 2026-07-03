@@ -1,5 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tasks::cli;
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn db(name: &str) -> String {
     std::env::set_var("SMARTAGENT_WORKTREE_DISABLE", "1");
@@ -135,4 +138,70 @@ fn block_and_statusline_levels() {
     assert!(err.starts_with("err|"), "{err}");
     let board = cli::run(&s(&["board"], &db)).unwrap();
     assert!(board.contains("OVER-WIP"), "{board}");
+}
+
+#[test]
+fn done_runs_checked_cargo_criteria() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    std::env::remove_var("SMARTAGENT_TASKS_DONE_TIMEOUT_SECS");
+    let db = db("tasks-done-cargo-check");
+    cli::run(&s(
+        &[
+            "add",
+            "cargo criterion",
+            "--col",
+            "ready",
+            "--criteria",
+            "cargo --version;cargo check -p tasks",
+        ],
+        &db,
+    ))
+    .unwrap();
+    cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();
+    cli::run(&s(&["crit", "check", "T-1", "1"], &db)).unwrap();
+    cli::run(&s(&["crit", "check", "T-1", "2"], &db)).unwrap();
+    let done = cli::run(&s(&["done", "T-1"], &db)).unwrap();
+    assert!(done.contains("→ done"), "{done}");
+}
+
+#[test]
+fn done_cargo_criteria_are_timeout_guarded() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let scratch = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join("tasks-done-cargo-timeout");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let fake = scratch.join("cargo");
+    std::fs::write(&fake, "#!/bin/sh\nsleep 5\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fake, perms).unwrap();
+    }
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    std::env::set_var("PATH", format!("{}:{old_path}", scratch.display()));
+    std::env::set_var("SMARTAGENT_TASKS_DONE_TIMEOUT_SECS", "1");
+
+    let db = scratch.join("tasks.semdb").display().to_string();
+    cli::run(&s(
+        &[
+            "add",
+            "slow cargo criterion",
+            "--col",
+            "ready",
+            "--criteria",
+            "cargo test --version",
+        ],
+        &db,
+    ))
+    .unwrap();
+    cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();
+    cli::run(&s(&["crit", "check", "T-1", "1"], &db)).unwrap();
+    let err = cli::run(&s(&["done", "T-1"], &db)).unwrap_err();
+    std::env::set_var("PATH", old_path);
+    std::env::remove_var("SMARTAGENT_TASKS_DONE_TIMEOUT_SECS");
+    assert!(err.contains("timed out"), "{err}");
 }
