@@ -86,7 +86,7 @@ pub fn index_source(graph: &mut Graph, file: &str, src: &str) {
     let clean = strip_comments_and_strings(src, lang);
     let toks = lex(&clean);
     extract_symbols(graph, file, lang, &toks);
-    extract_calls(graph, lang, &toks);
+    extract_calls(graph, lang, file, &toks);
 }
 
 fn ident(t: &Token) -> Option<&str> {
@@ -276,13 +276,19 @@ fn extract_c_family_method(graph: &mut Graph, file: &str, toks: &[Token], i: usi
     }
 }
 
-fn extract_calls(graph: &mut Graph, lang: Language, toks: &[Token]) {
-    let funcs: Vec<(String, usize, usize)> = graph
+fn extract_calls(graph: &mut Graph, lang: Language, file: &str, toks: &[Token]) {
+    // Only functions defined in THIS file: `graph.symbols` accumulates symbols
+    // from every file indexed so far, and their line numbers index into other
+    // files' token streams. Using them to bound this file's token ranges
+    // attributed call edges to functions in a DIFFERENT file. Filter by file
+    // and sort by line so the range-slicing below is correct.
+    let mut funcs: Vec<(String, usize, usize)> = graph
         .symbols
         .iter()
-        .filter(|s| s.kind == "fn" || s.kind == "def" || s.kind == "function")
+        .filter(|s| s.file == file && (s.kind == "fn" || s.kind == "def" || s.kind == "function"))
         .map(|s| (s.name.clone(), s.line, usize::MAX))
         .collect();
+    funcs.sort_by_key(|(_, line, _)| *line);
     for (idx, (fname, line, _)) in funcs.iter().enumerate() {
         let start = toks.iter().position(|t| t.line >= *line).unwrap_or(0);
         let end = funcs
@@ -420,6 +426,22 @@ mod tests {
             .into_iter()
             .map(|s| format!("{}:{}", s.kind, s.name))
             .collect()
+    }
+
+    #[test]
+    fn calls_attributed_to_defining_file_not_another() {
+        // Two files indexed into one graph. File b's call `helper()` must be a
+        // `calls` edge from `bfn` (defined in b), never from a function in a.
+        // Before the fix, a's symbol lines bounded b's token slice and calls
+        // were misattributed across files.
+        let mut g = Graph::new();
+        index_source(&mut g, "a.py", "def afn():\n    pass\n");
+        index_source(&mut g, "b.py", "def bfn():\n    helper()\n");
+        let mis = g
+            .edges
+            .iter()
+            .any(|e| e.kind == "calls" && e.to == "helper" && e.from == "afn");
+        assert!(!mis, "call misattributed to a function in another file");
     }
 
     #[test]

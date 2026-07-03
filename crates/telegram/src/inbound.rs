@@ -138,6 +138,23 @@ pub(crate) fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
         return;
     };
     let agent = agent.to_string();
+    // Bound concurrent in-flight replies: each spawns a thread AND a `gateway`
+    // subprocess, so an unthrottled burst of messages (a spammy or compromised
+    // allow-listed chat) would fork unbounded threads+processes and exhaust the
+    // host. Cap concurrency; over the cap, tell the user to retry rather than
+    // pile on.
+    let prev = INFLIGHT_REPLIES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if prev >= MAX_INFLIGHT_REPLIES {
+        INFLIGHT_REPLIES.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = send(&[
+            "send".into(),
+            "--chat".into(),
+            chat,
+            "--text".into(),
+            "⏳ Busy handling other requests — please resend in a moment.".into(),
+        ]);
+        return;
+    }
     std::thread::spawn(move || {
         if let Err(e) = stream_reply(&agent, &from, &user, &text, &chat, &thread, update_id) {
             eprintln!("[tg] stream FAILED: {e}");
@@ -149,8 +166,14 @@ pub(crate) fn handle_inbound(gateway_agent: Option<&str>, line: &str) {
                 format!("⚠ agent unavailable: {e}"),
             ]);
         }
+        INFLIGHT_REPLIES.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     });
 }
+
+/// Ceiling on concurrent agent replies (each = one thread + one gateway
+/// subprocess). Protects the host from an inbound-message flood.
+static INFLIGHT_REPLIES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const MAX_INFLIGHT_REPLIES: usize = 8;
 
 /// Stream a precomputed slash-command response through the same Telegram UX
 /// channel as LLM replies: send a placeholder, edit to an in-progress state,
