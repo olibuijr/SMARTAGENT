@@ -5023,6 +5023,8 @@ name = "smartagent-os"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "futures-channel",
+ "futures-util",
 ]
 
 [[package]]

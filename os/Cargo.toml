@@ -10,6 +10,8 @@ description = "SMARTAGENT OS — one Dioxus fullstack frontend for web, desktop,
 
 [dependencies]
 dioxus = { version = "0.7", features = ["router"] }
+futures-channel = "0.3"
+futures-util = "0.3"
 
 [features]
 default = ["web"]
