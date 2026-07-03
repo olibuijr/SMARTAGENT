@@ -16,6 +16,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn strict() -> bool {
@@ -274,16 +275,20 @@ impl MergeLock {
                 }
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                     if lock_is_stale(&path) {
-                        // Prior holder almost certainly died mid-merge; reclaim.
-                        let _ = fs::remove_file(&path);
-                        continue;
+                        // Prior holder almost certainly died mid-merge; reclaim by
+                        // atomically moving the observed stale lock out of the way.
+                        // Never remove-then-create: two waiters can both observe the
+                        // stale lock, both remove/create, and both believe they hold it.
+                        if reclaim_stale_lock(&path) {
+                            continue;
+                        }
                     }
                     if Instant::now() >= deadline {
                         return Err(format!(
                             "held by another process after {MERGE_LOCK_WAIT_SECS}s wait"
                         ));
                     }
-                    std::thread::sleep(Duration::from_millis(MERGE_LOCK_POLL_MS));
+                    thread::sleep(Duration::from_millis(MERGE_LOCK_POLL_MS));
                 }
                 Err(e) => return Err(e.to_string()),
             }
@@ -304,6 +309,30 @@ fn lock_is_stale(path: &Path) -> bool {
         .and_then(|t| SystemTime::now().duration_since(t).ok())
         .map(|age| age.as_secs() > MERGE_LOCK_STALE_SECS)
         .unwrap_or(false)
+}
+
+fn reclaim_stale_lock(path: &Path) -> bool {
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = parent.join(format!(
+        ".{}.reclaimed.{}.{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("lock"),
+        std::process::id(),
+        nanos
+    ));
+    match fs::rename(path, &tmp) {
+        Ok(()) => {
+            let _ = fs::remove_file(tmp);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn current_task_path(id: &str) -> Result<PathBuf, String> {
@@ -354,4 +383,33 @@ pub fn reap_abandoned(max_age_secs: u64) -> Result<String, String> {
         }
     }
     Ok(format!("reaped {reaped} abandoned worktree(s)"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(format!("tasks-worktree-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn stale_lock_reclaim_is_atomic_rename_not_remove_then_create() {
+        let dir = scratch("merge-lock-reclaim");
+        let lock = dir.join("tasks-merge.lock");
+        fs::write(&lock, b"stale-holder").unwrap();
+
+        let first = reclaim_stale_lock(&lock);
+        let second = reclaim_stale_lock(&lock);
+
+        assert!(first);
+        assert!(!second);
+        assert!(!lock.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
