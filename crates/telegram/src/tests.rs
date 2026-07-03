@@ -889,9 +889,23 @@ fn gateway_prompt_names_current_chat_scope() {
 fn verbosity_command_is_listed_and_stores_scope_local_preference() {
     let help = command_help();
     assert!(help.contains("/verbosity"), "{help}");
+    assert!(help.contains("/verbose"), "{help}");
     assert_eq!(
         slash_name("/verbosity@smartagent_bot quiet"),
         Some("verbosity")
+    );
+    assert_eq!(slash_name("/verbose@smartagent_bot quiet"), Some("verbose"));
+    assert_eq!(
+        super::command_class("verbose"),
+        Some(super::CommandClass::ChatScoped)
+    );
+    let out = slash_command("/verbose quiet", "50020485", "alias-thread", "alias-user")
+        .expect("slash command handled")
+        .expect("slash command ok");
+    assert!(out.contains("Telegram verbosity set to quiet"), "{out}");
+    assert_eq!(
+        super::verbosity("50020485", "alias-thread", "alias-user"),
+        super::VerbosityLevel::Quiet
     );
     let mut db = test_db("telegram-verbosity-pref");
     super::set_verbosity_in_db(

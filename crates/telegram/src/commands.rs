@@ -51,6 +51,10 @@ pub(crate) const TELEGRAM_COMMANDS: &[BotCommand] = &[
         description: "Show or set notification verbosity",
     },
     BotCommand {
+        name: "verbose",
+        description: "Alias for /verbosity",
+    },
+    BotCommand {
         name: "reset",
         description: "Clear this chat/thread rolling context",
     },
@@ -147,8 +151,8 @@ pub(crate) fn slash_command(
         "reset" => reset_context(chat, thread),
         "model" if !arg.is_empty() => set_model_preference(chat, thread, user, arg),
         "model" => Ok(model_menu_text(chat, thread, user)),
-        "verbosity" if !arg.is_empty() => set_verbosity(chat, thread, user, arg),
-        "verbosity" => Ok(verbosity_status(chat, thread, user)),
+        "verbosity" | "verbose" if !arg.is_empty() => set_verbosity(chat, thread, user, arg),
+        "verbosity" | "verbose" => Ok(verbosity_status(chat, thread, user)),
         "remember" => remember_context_fact(chat, thread, arg),
         "resolve" => resolve_block_text(arg),
         "stop" => stop_context(chat, thread),
@@ -171,7 +175,9 @@ pub(crate) enum CommandClass {
 pub(crate) fn command_class(cmd: &str) -> Option<CommandClass> {
     Some(match cmd {
         "start" | "help" | "commands" => CommandClass::UserSafe,
-        "memory" | "reset" | "remember" | "resolve" | "verbosity" => CommandClass::ChatScoped,
+        "memory" | "reset" | "remember" | "resolve" | "verbosity" | "verbose" => {
+            CommandClass::ChatScoped
+        }
         "board" | "tasks" | "status" | "agents" | "runs" | "skills" | "model" | "stop" => {
             CommandClass::AdminOnly
         }
@@ -449,7 +455,7 @@ pub(crate) fn set_verbosity(
     choice: &str,
 ) -> Result<String, String> {
     let Some(level) = VerbosityLevel::parse(choice) else {
-        return Ok("Usage: /verbosity quiet|normal|verbose|debug".into());
+        return Ok("Usage: /verbosity quiet|normal|verbose|debug (alias: /verbose)".into());
     };
     let mut db = open_db()?;
     set_verbosity_in_db(&mut db, chat, thread, user, level)?;
@@ -461,7 +467,7 @@ pub(crate) fn set_verbosity(
 
 pub(crate) fn verbosity_status(chat: &str, thread: &str, user: &str) -> String {
     let level = verbosity(chat, thread, user);
-    format!("Current Telegram verbosity: {}. Set with /verbosity quiet|normal|verbose|debug. quiet suppresses progress/task/workflow notifications; normal is default; verbose/debug allow more detail as producers add it.", level.as_str())
+    format!("Current Telegram verbosity: {}. Set with /verbosity quiet|normal|verbose|debug (or /verbose). quiet suppresses progress/task/workflow notifications; normal is default; verbose/debug allow more detail as producers add it.", level.as_str())
 }
 
 pub(crate) fn notification_allowed_for_level(level: VerbosityLevel, kind: &str) -> bool {
