@@ -315,10 +315,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 flag(args, "--col").unwrap_or_else(|| "ready".into())
             };
             valid_col(&col)?;
+            // Born claimed: a task added from an interactive session (no
+            // gateway-agent identity) is the creator's work-in-conversation —
+            // claiming it at birth stops the fleet racing the human for it
+            // (2026-07-03: fleet pounced on a task Óli's TUI session created).
+            // `--fleet` explicitly leaves it unclaimed for fleet pickup;
+            // gateway agents' adds stay unclaimed (they add FOR the board).
+            let owner = if has(args, "--fleet") || std::env::var("SMARTAGENT_GATEWAY_AGENT").is_ok() {
+                String::new()
+            } else {
+                current_owner()
+            };
             let t = Task {
                 id: store.next_id()?,
                 title: title.clone(),
                 col: col.clone(),
+                owner,
                 prio,
                 tags: flag(args, "--tags")
                     .map(|s| s.split(',').map(str::to_string).collect())

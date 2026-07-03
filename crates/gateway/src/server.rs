@@ -214,6 +214,10 @@ fn reconcile_board_roster(repo_root: &std::path::Path, live_agents: &[String]) {
 }
 
 fn orphan_task_ids(list_output: &str, live_agents: &[String]) -> Vec<String> {
+    // Humans are never orphans: a task owned by the unix user (interactive
+    // session work) must survive gateway restarts — only tasks owned by
+    // DEAD AGENT names get requeued to ready.
+    let human = std::env::var("USER").unwrap_or_default();
     list_output
         .lines()
         .filter_map(|line| {
@@ -222,7 +226,7 @@ fn orphan_task_ids(list_output: &str, live_agents: &[String]) -> Vec<String> {
             let owner = line
                 .split_whitespace()
                 .find_map(|part| part.strip_prefix('@'))?;
-            if live_agents.iter().any(|a| a == owner) {
+            if live_agents.iter().any(|a| a == owner) || (!human.is_empty() && owner == human) {
                 None
             } else {
                 Some(id.to_string())
