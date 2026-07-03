@@ -67,18 +67,19 @@ done
 [ -n "$DEST" ] || { warn "no <target-dir> given"; usage 1; }
 
 # ── Platform gate ───────────────────────────────────────────────────────────
-# Linux x86_64 (glibc) is the reference platform; the prebuilt binaries are
-# ELF x86-64 and will not run anywhere else. On an unsupported client, STOP
-# and emit PLATFORM_SUPPORT.md — it is the porting contract, written for the
+# Supported target triples (from bundle_target_triple — the same identity the
+# release assets use). Ports extend this list in their platform PR, alongside
+# the CI matrix entry (see PLATFORM_SUPPORT.md). On an unsupported client,
+# STOP and emit PLATFORM_SUPPORT.md — the porting contract, written for the
 # AI coding agent sitting in front of this terminal.
 # Escape hatch for porters mid-port: SMARTAGENT_SKIP_PLATFORM_CHECK=1
-PLAT_OS="$(uname -s 2>/dev/null || echo unknown)"
-PLAT_ARCH="$(uname -m 2>/dev/null || echo unknown)"
+SUPPORTED_TRIPLES="x86_64-unknown-linux-gnu"
+HOST_TRIPLE="$(bundle_target_triple)"
 if [ "${SMARTAGENT_SKIP_PLATFORM_CHECK:-0}" != "1" ]; then
-    case "$PLAT_OS/$PLAT_ARCH" in
-        Linux/x86_64|Linux/amd64) : ;;  # supported
+    case " $SUPPORTED_TRIPLES " in
+        *" $HOST_TRIPLE "*) : ;;  # supported
         *)
-            warn "unsupported platform: $PLAT_OS/$PLAT_ARCH — SMARTAGENT's reference platform is Linux x86_64"
+            warn "unsupported platform: $HOST_TRIPLE — supported: $SUPPORTED_TRIPLES"
             say ""
             if [ -f "$SELF/PLATFORM_SUPPORT.md" ]; then
                 say "${B}━━━ PLATFORM_SUPPORT.md ━━━${N}"
@@ -87,13 +88,13 @@ if [ "${SMARTAGENT_SKIP_PLATFORM_CHECK:-0}" != "1" ]; then
                 say "${B}━━━ end of PLATFORM_SUPPORT.md ━━━${N}"
                 say ""
                 say "If you are an AI coding agent: the document above is your porting"
-                say "contract for $PLAT_OS/$PLAT_ARCH. Follow it, verify, open a PR."
+                say "contract for $HOST_TRIPLE. Follow it, verify, open a PR."
                 say "Porters mid-port can bypass this gate with:"
                 say "  SMARTAGENT_SKIP_PLATFORM_CHECK=1 $0 ..."
             else
                 warn "PLATFORM_SUPPORT.md not found next to the installer — see github.com/olibuijr/SMARTAGENT"
             fi
-            die "install stopped: $PLAT_OS/$PLAT_ARCH is not supported yet"
+            die "install stopped: $HOST_TRIPLE is not supported yet"
             ;;
     esac
 fi

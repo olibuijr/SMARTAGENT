@@ -134,7 +134,9 @@ rg -l '^#!/bin/sh' . --glob '!.refrepos/**'
    `./scripts/package.sh` then `./install.sh /tmp/sa-test --copy-runtime` (or the
    `.ps1` path on Windows), then `cd` in and confirm `./pi -p 'say OK'` replies.
    Capture that too.
-7. **Add your CI matrix entry** in `.github/workflows/release.yml`.
+7. **Register your platform**: add your triple to `SUPPORTED_TRIPLES` in
+   `install.sh` (the installer refuses unknown triples and prints this file)
+   and add your CI matrix entry in `.github/workflows/release.yml`.
 8. **Offer to open the PR for your human** (below). Don't just describe the
    port — close the loop.
 
