@@ -67,6 +67,11 @@ pub fn ok_hits(hits: &[(String, f32, String)]) -> String {
         if i > 0 {
             out.push(',');
         }
+        let score = if score.is_finite() {
+            score.to_string()
+        } else {
+            "0".into()
+        };
         out.push_str(&format!(
             "[{},\"{}\",\"{}\"]",
             score,
@@ -109,5 +114,23 @@ mod tests {
         let line = format!("{{\"vector\":{}}}", vec_to_json(&v));
         let parsed = json::parse(&line).unwrap();
         assert_eq!(json_to_vec(parsed.get("vector")), v);
+    }
+
+    #[test]
+    fn search_hits_always_serialize_to_valid_json() {
+        let hits = vec![
+            ("finite".into(), 0.75, "ok".into()),
+            ("nan".into(), f32::NAN, "bad".into()),
+            ("pos_inf".into(), f32::INFINITY, "bad".into()),
+            ("neg_inf".into(), f32::NEG_INFINITY, "bad".into()),
+        ];
+        let line = ok_hits(&hits);
+        let parsed = json::parse(&line).expect("search hits must be valid JSON");
+        let arr = parsed.get("hits").and_then(Value::as_arr).unwrap();
+        assert_eq!(arr.len(), 4);
+        assert_eq!(arr[0].as_arr().unwrap()[0].as_f64(), Some(0.75));
+        assert_eq!(arr[1].as_arr().unwrap()[0].as_f64(), Some(0.0));
+        assert_eq!(arr[2].as_arr().unwrap()[0].as_f64(), Some(0.0));
+        assert_eq!(arr[3].as_arr().unwrap()[0].as_f64(), Some(0.0));
     }
 }
