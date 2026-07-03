@@ -377,6 +377,11 @@ fn decode_record(body: &[u8]) -> Option<(u8, String, Option<Entry>)> {
     pos += meta_len;
     let dim = u32::from_le_bytes(body.get(pos..pos + 4)?.try_into().ok()?) as usize;
     pos += 4;
+    let vector_bytes = dim.checked_mul(4)?;
+    let vector_end = pos.checked_add(vector_bytes)?;
+    if vector_end > body.len() {
+        return None;
+    }
     let mut vector = Vec::with_capacity(dim);
     for _ in 0..dim {
         vector.push(f32::from_le_bytes(body.get(pos..pos + 4)?.try_into().ok()?));
@@ -399,6 +404,16 @@ mod tests {
         let _ = std::fs::create_dir_all(p.parent().unwrap());
         let _ = std::fs::remove_file(&p);
         p
+    }
+
+    #[test]
+    fn decode_record_rejects_oversized_vector_dim_before_allocation() {
+        let mut body = vec![OP_PUT];
+        put_bytes16(&mut body, b"id");
+        put_bytes32(&mut body, b"meta");
+        body.extend_from_slice(&u32::MAX.to_le_bytes());
+
+        assert!(decode_record(&body).is_none());
     }
 
     #[test]
