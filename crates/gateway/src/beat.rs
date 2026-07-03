@@ -47,35 +47,29 @@ impl Beat {
         }
     }
 
-    /// Compose the beat text from local state. Cheap, deterministic, no LLM.
-    pub fn compose(&mut self, busy: bool) -> String {
+    /// Compose the beat and derive autonomous work from the same board output.
+    /// This avoids a second `tasks board` subprocess in the heartbeat hot path.
+    pub fn compose_with_work(&mut self, busy: bool, agent: &str, role: &str) -> (String, bool) {
         let now = human_now();
         let up = human_dur(self.started.elapsed());
-        let board = self
-            .board_snapshot()
-            .map(|out| summarize_board(&out))
+        // One cached board fetch, reused for both the summary and the
+        // work-availability check (T-251) — no second `tasks board` spawn.
+        let board_out = self.board_snapshot();
+        let has_work = board_out
+            .as_deref()
+            .map(|out| board_has_autonomous_work_for(out, agent, role))
+            .unwrap_or(true);
+        let board = board_out
+            .as_deref()
+            .map(summarize_board)
             .unwrap_or_else(|| "board unavailable".into());
         let wf = self
             .workflow_snapshot()
             .map(|out| first_active_line(&out))
             .unwrap_or_default();
-        let state = if busy { "working" } else { "idle" };
-        let beat = format!(
-            "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill; use the `triage` skill for ready-empty/backlog ordering. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol. (6) Other agents work this board too: first sweep review for items assigned to you/your role and verify them; otherwise continue only doing tasks owned by you (@owner in the board), never take doing/review tasks owned by someone else, and pull only unclaimed ready/backlog items. (7) NEVER pull or continue any task tagged `desktop-agent` or that edits `desktop-agent/` — that crate is a separate session's WIP and is off-limits to this fleet; skip such tasks in triage even if they are the highest priority."
-        );
+        let beat = format_beat(now.clone(), up, busy, &board, &wf);
         self.last_beat = Some(now);
-        beat
-    }
-
-    /// True when an autonomous idle beat should spend a model turn.
-    ///
-    /// Work exists when the root board has anything in DOING (resume), READY
-    /// (pull), BACKLOG (triage/promote), or a REVIEW row assigned to this
-    /// agent/role. Other review rows are handoffs for other agents.
-    pub fn has_autonomous_work_for(&self, agent: &str, role: &str) -> bool {
-        self.board_snapshot()
-            .map(|out| board_has_autonomous_work_for(&out, agent, role))
-            .unwrap_or(true)
+        (beat, has_work)
     }
 
     /// First task in the DOING column, shortened — "what am I on right now".
@@ -422,6 +416,14 @@ fn board_has_autonomous_work_for(board: &str, agent: &str, role: &str) -> bool {
 
 pub fn human_day_prefix() -> String {
     human_now().chars().take(10).collect()
+}
+
+
+fn format_beat(now: String, up: String, busy: bool, board: &str, wf: &str) -> String {
+    let state = if busy { "working" } else { "idle" };
+    format!(
+        "⏲ heartbeat {now} | session up {up} | you are {state}\n{board}{wf}\nYou are a persistent agent with continuity across the day. Stay aware of the time and how long you have been on the current task. RULES: (1) one agent does ONE thing at a time — at most one task in doing; finish it (criteria checked, moved to done) before pulling the next single ready task; park extras back to ready. (2) Route every task through `skills match` first and load the winning skill; use the `triage` skill for ready-empty/backlog ordering. (3) Non-trivial tasks (≥2 steps or ≥2 files) run through the workflow engine (`workflow start task-run --task T-n`), advancing only with real evidence. (4) Utilize your sub-agents: independent parallelizable work goes to `orchestrate`; do not serialize what sub-agents can do concurrently. (5) Handoff discipline: when a task needs review or another role, move it to the review column with a note instead of silently finishing — the board IS the handoff protocol. (6) Other agents work this board too: first sweep review for items assigned to you/your role and verify them; otherwise continue only doing tasks owned by you (@owner in the board), never take doing/review tasks owned by someone else, and pull only unclaimed ready/backlog items. (7) NEVER pull or continue any task tagged `desktop-agent` or that edits `desktop-agent/` — that crate is a separate session's WIP and is off-limits to this fleet; skip such tasks in triage even if they are the highest priority."
+    )
 }
 
 fn human_now() -> String {
