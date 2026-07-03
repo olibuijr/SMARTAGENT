@@ -619,6 +619,7 @@ fn handle_client(stream: UnixStream, agents: Agents) {
                 let state = if AUTONOMY.load(Ordering::Relaxed) { "on" } else { "off" };
                 write_info_done(&mut write_side, &format!("fleet autonomy: {state}"));
             }
+            "stop" if stop_all_requested(requested) => stop_all_agents(&agents, &mut write_side),
             "send" | "steer" | "attach" | "ask" | "status" | "stop" => {
                 let Some(agent) = select_agent(&agents, requested) else {
                     write_info_done(&mut write_side, &format!("unknown agent {requested}"));
@@ -631,10 +632,18 @@ fn handle_client(stream: UnixStream, agents: Agents) {
     }
 }
 
-fn select_agent(agents: &Agents, requested: &str) -> Option<Arc<AgentRuntime>> {
-    if requested == "*" {
-        return agents.values().next().cloned();
+fn stop_all_requested(requested: &str) -> bool {
+    requested == "*"
+}
+
+fn stop_all_agents(agents: &Agents, write_side: &mut UnixStream) {
+    for agent in agents.values() {
+        agent.child.lock().unwrap().kill();
     }
+    write_info_done(write_side, &format!("stopping {} agents", agents.len()));
+}
+
+fn select_agent(agents: &Agents, requested: &str) -> Option<Arc<AgentRuntime>> {
     if !requested.is_empty() {
         return agents.get(requested).cloned();
     }
@@ -850,6 +859,13 @@ mod tests {
             dedupe_agents(vec!["main".into(), "qa".into(), "main".into()]),
             vec!["main", "qa"]
         );
+    }
+
+    #[test]
+    fn stop_all_uses_explicit_wildcard_path() {
+        assert!(stop_all_requested("*"));
+        assert!(!stop_all_requested("main"));
+        assert!(!stop_all_requested(""));
     }
 
     #[test]
