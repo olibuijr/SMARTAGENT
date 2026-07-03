@@ -1,12 +1,12 @@
 ---
 name: code-nav
-description: Navigate and find code with codeindex (fast text search over the repo and workspace projects) and codegraph (Rust symbol graph — where a function or struct is defined, refs, callers, call path, unused). USE WHEN find code, search the codebase, grep for a pattern, where is a function or struct defined, definition, who calls this, callers, references, refs, symbol lookup, call path, unused functions, index a repo, reindex, list workspace projects, explore an unfamiliar repository.
+description: Navigate and find code with codeindex (fast text search over the repo and workspace projects) and codegraph (multi-language symbol graph — where a function/class/type is defined, refs, callers, call path, unused). USE WHEN find code, search the codebase, grep for a pattern, where is a function, class, type, or struct defined, definition, who calls this, callers, references, refs, symbol lookup, call path, unused functions, index a repo, reindex, list workspace projects, explore an unfamiliar repository.
 ---
 
 # CodeNav — finding your way around code
 
 Two tools, one decision: **codeindex** answers "which files/lines contain X"
-(text), **codegraph** answers "how is X wired" (symbols — Rust only). Always
+(text), **codegraph** answers "how is X wired" (multi-language symbols). Always
 cheaper than reading files top to bottom, always before editing.
 
 ## Which tool
@@ -63,4 +63,5 @@ empty result without it proves nothing.
 - A stale graph lies: after renames/refactors, `codegraph index` again before
   trusting `refs`/`callers` output. The statusline ⌂ row shows staleness.
 - Close-out convention: after structural changes to a workspace repo, run
-  `codeindex index <project>` and (Rust repos) `codegraph index --project <p>`.
+  `codeindex index <project>` and `codegraph index --project <p>` for repos
+  containing supported languages.
