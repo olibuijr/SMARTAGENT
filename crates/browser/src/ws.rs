@@ -29,14 +29,17 @@ impl WebSocket {
             Some((h, p)) => (h.to_string(), p.parse::<u16>().map_err(|_| "bad port")?),
             None => (authority.to_string(), 80),
         };
-        let mut stream = TcpStream::connect((host.as_str(), port)).map_err(|e| format!("connect: {e}"))?;
+        let mut stream =
+            TcpStream::connect((host.as_str(), port)).map_err(|e| format!("connect: {e}"))?;
         stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
 
         let key = ws_key();
         let req = format!(
             "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
         );
-        stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+        stream
+            .write_all(req.as_bytes())
+            .map_err(|e| e.to_string())?;
 
         // Read until end of handshake headers.
         let mut buf = Vec::new();
@@ -49,11 +52,13 @@ impl WebSocket {
             buf.extend_from_slice(&tmp[..n]);
             if let Some(pos) = find_crlf2(&buf) {
                 let head = String::from_utf8_lossy(&buf[..pos]);
-                if !head.contains("101") {
-                    return Err(format!("handshake failed: {}", head.lines().next().unwrap_or("")));
-                }
+                validate_handshake(&head, &key)?;
                 let leftover = buf[pos + 4..].to_vec();
-                return Ok(WebSocket { stream, buf: leftover, pos: 0 });
+                return Ok(WebSocket {
+                    stream,
+                    buf: leftover,
+                    pos: 0,
+                });
             }
         }
     }
@@ -95,7 +100,7 @@ impl WebSocket {
                 }
                 0x8 => return Err("websocket closed by server".into()),
                 0x9 => self.send_pong(&payload)?, // ping → pong
-                0xA => {} // pong, ignore
+                0xA => {}                         // pong, ignore
                 other => return Err(format!("unexpected opcode {other}")),
             }
         }
@@ -133,7 +138,12 @@ impl WebSocket {
             return Err(format!("frame too large: {len} bytes (max {MAX_FRAME})"));
         }
         let mask = if masked {
-            [self.read_byte()?, self.read_byte()?, self.read_byte()?, self.read_byte()?]
+            [
+                self.read_byte()?,
+                self.read_byte()?,
+                self.read_byte()?,
+                self.read_byte()?,
+            ]
         } else {
             [0; 4]
         };
@@ -190,6 +200,95 @@ fn find_crlf2(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
+fn validate_handshake(head: &str, key: &str) -> Result<(), String> {
+    let status = head.lines().next().unwrap_or("");
+    if !status.starts_with("HTTP/1.1 101 ") && status != "HTTP/1.1 101" {
+        return Err(format!("handshake failed: {status}"));
+    }
+    let got = header_value(head, "sec-websocket-accept")
+        .ok_or("handshake failed: missing Sec-WebSocket-Accept")?;
+    let want = websocket_accept(key);
+    if got.trim() != want {
+        return Err("handshake failed: bad Sec-WebSocket-Accept".into());
+    }
+    Ok(())
+}
+
+fn header_value<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    for line in head.lines().skip(1) {
+        let (k, v) = line.split_once(':')?;
+        if k.trim().eq_ignore_ascii_case(name) {
+            return Some(v.trim());
+        }
+    }
+    None
+}
+
+fn websocket_accept(key: &str) -> String {
+    let mut bytes = Vec::from(key.as_bytes());
+    bytes.extend_from_slice(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    base64(&sha1(&bytes))
+}
+
+fn sha1(input: &[u8]) -> [u8; 20] {
+    let mut h0: u32 = 0x6745_2301;
+    let mut h1: u32 = 0xEFCD_AB89;
+    let mut h2: u32 = 0x98BA_DCFE;
+    let mut h3: u32 = 0x1032_5476;
+    let mut h4: u32 = 0xC3D2_E1F0;
+
+    let bit_len = (input.len() as u64) * 8;
+    let mut msg = input.to_vec();
+    msg.push(0x80);
+    while (msg.len() % 64) != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in msg.chunks(64) {
+        let mut w = [0u32; 80];
+        for (i, word) in w.iter_mut().take(16).enumerate() {
+            let j = i * 4;
+            *word = u32::from_be_bytes([chunk[j], chunk[j + 1], chunk[j + 2], chunk[j + 3]]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+        }
+
+        let (mut a, mut b, mut c, mut d, mut e) = (h0, h1, h2, h3, h4);
+        for (i, wi) in w.iter().enumerate() {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999),
+                20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
+                _ => (b ^ c ^ d, 0xCA62_C1D6),
+            };
+            let temp = a
+                .rotate_left(5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(*wi);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = temp;
+        }
+        h0 = h0.wrapping_add(a);
+        h1 = h1.wrapping_add(b);
+        h2 = h2.wrapping_add(c);
+        h3 = h3.wrapping_add(d);
+        h4 = h4.wrapping_add(e);
+    }
+
+    let mut out = [0u8; 20];
+    for (i, h) in [h0, h1, h2, h3, h4].iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&h.to_be_bytes());
+    }
+    out
+}
+
 fn ws_key() -> String {
     // 16 random bytes, base64-encoded (server only echoes a hash; we don't verify).
     let mut seed = entropy();
@@ -216,7 +315,10 @@ fn mask_key() -> [u8; 4] {
 }
 
 fn entropy() -> u64 {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1);
     t ^ (std::process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
 }
 
@@ -224,11 +326,23 @@ fn base64(input: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for chunk in input.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         out.push(A[(b[0] >> 2) as usize] as char);
         out.push(A[(((b[0] & 0x3) << 4) | (b[1] >> 4)) as usize] as char);
-        if chunk.len() > 1 { out.push(A[(((b[1] & 0xf) << 2) | (b[2] >> 6)) as usize] as char); } else { out.push('='); }
-        if chunk.len() > 2 { out.push(A[(b[2] & 0x3f) as usize] as char); } else { out.push('='); }
+        if chunk.len() > 1 {
+            out.push(A[(((b[1] & 0xf) << 2) | (b[2] >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(A[(b[2] & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
     }
     out
 }
@@ -253,5 +367,26 @@ mod tests {
     #[test]
     fn crlf2_boundary() {
         assert_eq!(find_crlf2(b"HTTP/1.1 101\r\nA: b\r\n\r\nrest"), Some(18));
+    }
+
+    #[test]
+    fn websocket_accept_known_vector() {
+        assert_eq!(
+            websocket_accept("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    #[test]
+    fn validates_sec_websocket_accept() {
+        let key = "dGhlIHNhbXBsZSBub25jZQ==";
+        let good = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n";
+        assert!(validate_handshake(good, key).is_ok());
+
+        let missing = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n";
+        assert!(validate_handshake(missing, key).is_err());
+
+        let wrong = "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: wrong\r\n";
+        assert!(validate_handshake(wrong, key).is_err());
     }
 }
