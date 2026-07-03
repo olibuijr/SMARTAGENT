@@ -253,38 +253,43 @@ await document.fonts.load(`8px ${FONT}`).catch(() => {});
 renderer.setClearColor(new THREE.Color(BG));
 
 const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-240, 240, VIEW_H / 2, -VIEW_H / 2, -100, 100);
-camera.position.set(0, 0, 10);
+// Perspective diorama: the gameplay plane sits at z=0 and spans VIEW_H
+// vertically, exactly like the old ortho view — but depth is now real.
+const FOV = 38;
+const DIST = (VIEW_H / 2) / Math.tan((FOV / 2) * Math.PI / 180); // ≈392
+const camera = new THREE.PerspectiveCamera(FOV, 16 / 9, 10, 2600);
+scene.add(camera);
 let viewW = 480;
 function resize() {
 	const aspect = innerWidth / innerHeight;
-	viewW = Math.round(Math.min(640, Math.max(340, VIEW_H * aspect)));
-	camera.left = -viewW / 2; camera.right = viewW / 2;
+	camera.aspect = aspect;
 	camera.updateProjectionMatrix();
+	viewW = Math.round(Math.min(760, Math.max(340, VIEW_H * aspect)));
 	renderer.setSize(viewW, VIEW_H, false);
 }
 addEventListener("resize", resize);
 resize();
 
-// world y: screen bottom at y=0 → shift camera up
+// world y: screen bottom at y=0 → camera rides above the ground line
 const CAM_Y = VIEW_H / 2 - 24;
-camera.position.y = CAM_Y;
+camera.position.set(0, CAM_Y, DIST);
+scene.fog = new THREE.Fog(new THREE.Color(BG), DIST + 60, DIST + 900);
 
 // ── Build world ─────────────────────────────────────────────────────────────
 const world = new THREE.Group();
 scene.add(world);
 
-// sky bands
+// sky bands (deep background — fog-exempt)
 {
-	const bands = ["#12121c", "#161624", "#1a1a2c"];
-	bands.forEach((col, i) => {
+	const bands = [["#12121c", 1100, 620], ["#161624", 420, 210], ["#1a1a2c", 230, -10]];
+	for (const [col, h, y] of bands) {
 		const m = new THREE.Mesh(
-			new THREE.PlaneGeometry(LEVEL_END * 3, 120),
-			new THREE.MeshBasicMaterial({ color: col })
+			new THREE.PlaneGeometry(LEVEL_END * 4, h),
+			new THREE.MeshBasicMaterial({ color: col, fog: false })
 		);
-		m.position.set(LEVEL_END / 2, 200 - i * 80, -30);
+		m.position.set(LEVEL_END / 2, y, -900);
 		scene.add(m);
-	});
+	}
 }
 // stars
 const stars = [];
@@ -293,38 +298,72 @@ const stars = [];
 	const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 	const [sc, sx] = cv(2, 2); sx.fillStyle = "#e8e8ff"; sx.fillRect(0, 0, 2, 2);
 	for (let i = 0; i < 90; i++) {
-		const s = plane(sc);
-		s.position.set(rnd() * LEVEL_END * 1.2, 90 + rnd() * 170, -25);
+		const s = plane(sc, 2);
+		s.material.fog = false;
+		s.position.set(rnd() * LEVEL_END * 1.4 - 200, 120 + rnd() * 420, -820 + rnd() * 120);
 		s.material.opacity = .3 + rnd() * .7;
 		s.userData.tw = rnd() * 6.28;
 		scene.add(s); stars.push(s);
 	}
 }
-// parallax layers
-const farLayer = new THREE.Group(), midLayer = new THREE.Group();
-scene.add(farLayer, midLayer);
+// city: actual 3D boxes at depth — perspective gives the parallax for free
 {
-	const sky = skylineStrip(), hil = hillsStrip(), cl = cloud();
-	for (let px = -480; px < LEVEL_END + 960; px += 480) {
-		const s = plane(sky); s.position.set(px + 240, GROUND + 50, -20); farLayer.add(s);
-		const h = plane(hil); h.position.set(px + 240, GROUND + 30, -15); midLayer.add(h);
-	}
 	let seed = 13;
 	const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+	const mat = (canvas) => new THREE.MeshBasicMaterial({ map: tex(canvas) });
+	const flat = (col) => new THREE.MeshBasicMaterial({ color: col });
+	function buildingFace(w, h) {
+		const [c, x] = cv(Math.ceil(w / 4) * 4, Math.ceil(h / 4) * 4);
+		x.fillStyle = "#20202c"; x.fillRect(0, 0, c.width, c.height);
+		x.fillStyle = rnd() > .5 ? "#43536b" : "#3f4c40";
+		for (let wy = 8; wy < h - 10; wy += 12)
+			for (let wx = 5; wx < w - 8; wx += 10)
+				if (rnd() > .62) x.fillRect(wx, wy, 4, 5);
+		return c;
+	}
+	for (let i = 0; i < 46; i++) {
+		const bw = 44 + rnd() * 70, bh = 70 + rnd() * 190, bd = 36 + rnd() * 40;
+		const z = -(90 + rnd() * 320);
+		const front = mat(buildingFace(bw, bh));
+		const side = flat("#181822"), top = flat("#14141c");
+		const b = new THREE.Mesh(
+			new THREE.BoxGeometry(bw, bh, bd),
+			[side, side, top, side, front, side]
+		);
+		b.position.set(-350 + rnd() * (LEVEL_END + 900), GROUND + bh / 2 - 6, z - bd / 2);
+		scene.add(b);
+	}
+	// soft hills silhouette behind the city
+	const hil = hillsStrip();
+	for (let px = -480; px < LEVEL_END + 960; px += 480) {
+		const h = plane(hil, 2.2);
+		h.material.fog = false;
+		h.position.set(px + 240, GROUND + 44, -560);
+		scene.add(h);
+	}
+	// drifting clouds between city and sky
+	const cl = cloud();
 	for (let i = 0; i < 14; i++) {
-		const c = plane(cl);
-		c.position.set(rnd() * LEVEL_END * 1.1, GROUND + 140 + rnd() * 80, -18);
-		midLayer.add(c);
+		const c = plane(cl, 1.6);
+		c.material.fog = false;
+		c.position.set(rnd() * LEVEL_END * 1.2 - 100, GROUND + 220 + rnd() * 160, -480 + rnd() * 140);
+		scene.add(c);
 	}
 }
-// ground
+// ground: one long slab with real depth — front face bricks, walkable top
 {
 	const g = groundStrip(480);
-	for (let px = -480; px < LEVEL_END + 960; px += 480) {
-		const s = plane(g, 1, false);
-		s.position.set(px + 240, GROUND / 2, 0);
-		world.add(s);
-	}
+	const front = new THREE.MeshBasicMaterial({ map: tex(g) });
+	front.map.wrapS = THREE.RepeatWrapping;
+	front.map.repeat.x = (LEVEL_END + 1920) / 480;
+	const top = new THREE.MeshBasicMaterial({ color: "#232028" });
+	const side = new THREE.MeshBasicMaterial({ color: "#1b1820" });
+	const slab = new THREE.Mesh(
+		new THREE.BoxGeometry(LEVEL_END + 1920, GROUND, 240),
+		[side, side, top, side, front, side]
+	);
+	slab.position.set(LEVEL_END / 2, GROUND / 2, -120);
+	world.add(slab);
 }
 
 // agents + lamps + signs
@@ -334,9 +373,18 @@ AGENTS.forEach((a, i) => {
 	const spr = plane(agentSprite(a.key, a.accent));
 	spr.position.set(ax, GROUND + 38, 1);
 	world.add(spr);
-	const lamp = plane(lampPost(a.accent));
-	lamp.position.set(ax - 60, GROUND + 48, -2);
-	world.add(lamp);
+	const post = new THREE.Mesh(
+		new THREE.BoxGeometry(4, 84, 4),
+		new THREE.MeshBasicMaterial({ color: "#3a3a46" })
+	);
+	post.position.set(ax - 60, GROUND + 42, -8);
+	world.add(post);
+	const head = new THREE.Mesh(
+		new THREE.BoxGeometry(12, 12, 12),
+		new THREE.MeshBasicMaterial({ color: a.accent })
+	);
+	head.position.set(ax - 60, GROUND + 88, -8);
+	world.add(head);
 	const glow = plane(glowDisc(a.accent, 48));
 	glow.material.blending = THREE.AdditiveBlending;
 	glow.material.depthWrite = false;
@@ -370,15 +418,17 @@ AGENTS.forEach((a, i) => {
 const blocks = [];
 FACTS.forEach((fact, i) => {
 	const bx = LEVEL_START + (i + 1) * STATION_GAP - STATION_GAP / 2;
-	const b = plane(qBlock(true));
-	b.position.set(bx, BLOCK_Y, 1);
+	const qt = new THREE.MeshBasicMaterial({ map: tex(qBlock(true)) });
+	const qs = new THREE.MeshBasicMaterial({ map: tex(qBlock(true)), color: "#9a9a9a" });
+	const b = new THREE.Mesh(new THREE.BoxGeometry(24, 24, 24), [qs, qs, qs, qs, qt, qs]);
+	b.position.set(bx, BLOCK_Y, 0);
 	world.add(b);
 	const toast = plane(textCanvas(fact, 8, "#ffd75f", { bg: PANEL, pad: 5 }));
 	toast.position.set(bx, BLOCK_Y + 34, 2);
 	toast.material.opacity = 0;
 	world.add(toast);
 	const cn = plane(coin());
-	cn.position.set(bx, BLOCK_Y + 20, 1);
+	cn.position.set(bx, BLOCK_Y + 20, 14);
 	cn.material.opacity = 0;
 	world.add(cn);
 	blocks.push({ x: bx, mesh: b, toast, coin: cn, hit: false, anim: 0 });
@@ -428,8 +478,10 @@ async function copyInstall() {
 
 // castle + flag at the end
 {
-	const cs = plane(castle());
-	cs.position.set(LEVEL_END - 80, GROUND + 60, 0);
+	const cfront = new THREE.MeshBasicMaterial({ map: tex(castle()), transparent: true });
+	const cside = new THREE.MeshBasicMaterial({ color: "#2c2733" });
+	const cs = new THREE.Mesh(new THREE.BoxGeometry(120, 120, 90), [cside, cside, cside, cside, cfront, cside]);
+	cs.position.set(LEVEL_END - 80, GROUND + 60, -45);
 	world.add(cs);
 	const pole = plane((() => { const [c, x] = cv(4, 140); x.fillStyle = "#5a5a68"; x.fillRect(0, 0, 4, 140); return c; })());
 	pole.position.set(LEVEL_END - 190, GROUND + 70, 0);
@@ -448,7 +500,9 @@ async function copyInstall() {
 const frames = playerFrames().map((c) => tex(c));
 const player = new THREE.Mesh(
 	new THREE.PlaneGeometry(26, 32),
-	new THREE.MeshBasicMaterial({ map: frames[0], transparent: true })
+	// DoubleSide: scale.x = -1 (facing left) inverts winding and would
+	// otherwise get back-face culled — the character vanished walking left.
+	new THREE.MeshBasicMaterial({ map: frames[0], transparent: true, side: THREE.DoubleSide })
 );
 player.position.set(60, GROUND + 16, 3);
 world.add(player);
@@ -457,7 +511,8 @@ const P = { x: spawnX, y: 0, vx: 0, vy: 0, onGround: true, face: 1, coins: 0 };
 
 // ── HUD (camera-space) ──────────────────────────────────────────────────────
 const hud = new THREE.Group();
-scene.add(hud);
+camera.add(hud);
+hud.position.set(0, -CAM_Y, -DIST); // children keep their world-y semantics
 const title = plane(textCanvas("SMARTAGENT", 26, SKINC, { glow: "#ffaf5f", pad: 8 }));
 const subtitle = plane(textCanvas("THE LEGENDARY DEVELOPER TEAM", 9, "#87d7ff", { pad: 4 }));
 const hintCtl = plane(textCanvas(
@@ -587,6 +642,18 @@ function nearCastle() { return P.x > LEVEL_END - 260; }
 // ── Game loop ───────────────────────────────────────────────────────────────
 const GRAV = 900, SPEED = 150, JUMP = 350;
 let last = performance.now(), walkT = 0, demoDir = 1, camX = spawnX;
+let pointerNX = 0, pointerNY = 0, tiltX = 0, tiltY = 0;
+addEventListener("pointermove", (e) => {
+	if (isTouch) return; // touch pointers drive the pads, not the parallax
+	pointerNX = (e.clientX / innerWidth) * 2 - 1;
+	pointerNY = (e.clientY / innerHeight) * 2 - 1;
+});
+if (isTouch && "DeviceOrientationEvent" in window)
+	addEventListener("deviceorientation", (e) => {
+		if (e.gamma == null) return;
+		pointerNX = Math.max(-1, Math.min(1, e.gamma / 28));
+		pointerNY = Math.max(-1, Math.min(1, (e.beta - 42) / 32));
+	});
 
 function step(dt, now) {
 	// input → velocity
@@ -613,7 +680,8 @@ function step(dt, now) {
 			const playerTop = GROUND + P.y + 32;
 			if (Math.abs(P.x - b.x) < 22 && playerTop > BLOCK_Y - 12 && playerTop < BLOCK_Y + 10) {
 				b.hit = true; b.anim = 1; P.coins++; refreshCoinHud(); coinSound();
-				b.mesh.material.map = tex(qBlock(false));
+				const dead = new THREE.MeshBasicMaterial({ map: tex(qBlock(false)) });
+				b.mesh.material = [dead, dead, dead, dead, dead, dead];
 				P.vy = -60;
 			}
 		}
@@ -632,10 +700,13 @@ function step(dt, now) {
 	// camera follow
 	const target = Math.max(viewW / 2 - 40, Math.min(LEVEL_END - viewW / 2 + 40, P.x + P.face * 40));
 	camX += (target - camX) * Math.min(1, dt * 3);
-	camera.position.x = Math.round(camX);           // pixel-snap (NES-style)
-	farLayer.position.x = Math.round(camX * .75);
-	midLayer.position.x = Math.round(camX * .5);
-	hud.position.x = camera.position.x;
+	// perspective drift: pointer (or walking) tilts the diorama in 3D
+	tiltX += ((reduceMotion ? 0 : pointerNX) - tiltX) * Math.min(1, dt * 2.5);
+	tiltY += ((reduceMotion ? 0 : pointerNY) - tiltY) * Math.min(1, dt * 2.5);
+	const lean = Math.max(-1, Math.min(1, P.vx / SPEED));
+	camera.position.x = camX + tiltX * 26 + lean * 10;
+	camera.position.y = CAM_Y + 6 - tiltY * 16;
+	camera.lookAt(camX - tiltX * 22, CAM_Y - 8 + tiltY * 10, 0);
 	// title parks top-left after the first input
 	if (started) {
 		const k = reduceMotion ? 1 : Math.min(1, (now - lastStart) / 800);
@@ -666,7 +737,7 @@ function step(dt, now) {
 			const k = 1 - b.anim;
 			b.mesh.position.y = BLOCK_Y + Math.sin(k * Math.PI) * 8;
 			b.coin.material.opacity = b.anim;
-			b.coin.position.y = BLOCK_Y + 20 + k * 30;
+			b.coin.position.y = BLOCK_Y + 20 + k * 30; b.coin.position.z = 14;
 		}
 		if (b.hit) b.toast.material.opacity += (1 - b.toast.material.opacity) * Math.min(1, dt * 6);
 	}
