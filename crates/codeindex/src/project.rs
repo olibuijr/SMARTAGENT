@@ -7,7 +7,7 @@
 //! embeddings, so indexing needs no network.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use semdb::storage::Db;
 // Project discovery/resolution is the shared semdb::workspace mechanism; this
@@ -18,6 +18,7 @@ use crate::gitignore::Rules;
 use crate::walk;
 
 pub const INDEX_REL: &str = ".smartagent/codeindex.semdb";
+const STATUS_REL: &str = ".smartagent/codeindex.status";
 const SUMMARY_ID: &str = "__codeindex_summary__";
 /// Files larger than this get size-only rows (no line count) — reading huge
 /// blobs for a line count wastes index time on artifacts.
@@ -89,9 +90,42 @@ pub fn index_project(project: &Path) -> Result<IndexStats, String> {
         let _ = std::fs::remove_file(&tmp_path);
         format!("replace {}: {e}", db_path.display())
     })?;
+    write_status_sidecar(project, count, bytes, now)?;
     Ok(IndexStats {
         files: count,
         bytes,
+    })
+}
+
+fn status_sidecar_path(project: &Path) -> PathBuf {
+    project.join(STATUS_REL)
+}
+
+fn write_status_sidecar(
+    project: &Path,
+    files: usize,
+    bytes: u64,
+    indexed_at: u64,
+) -> Result<(), String> {
+    let index_path = project.join(INDEX_REL);
+    let index_mtime = std::fs::metadata(&index_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(indexed_at);
+    let sidecar = status_sidecar_path(project);
+    if let Some(dir) = sidecar.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = sidecar.with_file_name("codeindex.status.tmp");
+    let body = format!(
+        "{{\"files\":{files},\"bytes\":{bytes},\"indexed_at\":{indexed_at},\"index_mtime\":{index_mtime}}}"
+    );
+    std::fs::write(&tmp, body).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &sidecar).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("replace {}: {e}", sidecar.display())
     })
 }
 
@@ -116,34 +150,27 @@ pub fn status(project: &Path) -> Option<(usize, u64)> {
     status_detail(project).map(|s| (s.files, s.age_secs))
 }
 
-/// Detailed index status including drift: stale when any indexable repo file is
-/// newer than the index db. This catches single-file edits immediately without
-/// forcing a reindex from the statusline path.
+/// Detailed index status for statusline. This is intentionally O(1): read a
+/// tiny sidecar written at index time and use the index db mtime for age. It
+/// must not open the semdb table or walk the project tree on every TUI render.
 pub fn status_detail(project: &Path) -> Option<Status> {
+    let sidecar = std::fs::read_to_string(status_sidecar_path(project)).ok()?;
+    let meta = semdb::json::parse(&sidecar).ok()?;
+    let files = meta.get("files")?.as_f64()? as usize;
     let p = project.join(INDEX_REL);
-    let db = Db::open(&p).ok()?;
     let index_mtime = std::fs::metadata(&p).ok()?.modified().ok()?;
-    let files = db.index.len().saturating_sub(1); // minus summary row
     let age_secs = SystemTime::now()
         .duration_since(index_mtime)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let stale = newest_indexable_mtime(project)
-        .map(|t| t > index_mtime)
-        .unwrap_or(false);
+    // No tree walk here. A week-old index is stale enough to warn in the
+    // statusline; source-change refresh is handled by the statusline watcher.
+    let stale = age_secs >= 7 * 86_400;
     Some(Status {
         files,
         age_secs,
         stale,
     })
-}
-
-fn newest_indexable_mtime(project: &Path) -> Option<SystemTime> {
-    let rules = Rules::load(project);
-    walk::walk(project, &rules, None)
-        .into_iter()
-        .filter_map(|p| std::fs::metadata(p).ok()?.modified().ok())
-        .max()
 }
 
 pub fn human_age(secs: u64) -> String {
@@ -241,11 +268,11 @@ mod tests {
         )
         .unwrap();
         assert!(
-            status_detail(&proj).unwrap().stale,
-            "edited file newer than index must stale status"
+            !status_detail(&proj).unwrap().stale,
+            "status_detail must not walk the repo to detect per-file edits"
         );
 
-        // Re-index must not swallow its own .smartagent db as a file.
+        // Re-index must not swallow its own .smartagent db/status sidecar as a file.
         let s2 = index_project(&proj).unwrap();
         assert_eq!(s2.files, 3);
         assert!(!status_detail(&proj).unwrap().stale);
