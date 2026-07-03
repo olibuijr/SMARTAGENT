@@ -377,7 +377,8 @@ mod tests {
     fn others_doing_task_does_not_wake_idle_agent() {
         // The no-op-turn bug: a task in doing owned by ANOTHER agent must NOT
         // count as work for an idle agent (it can't be pulled — one per agent).
-        let others = "BACKLOG (0)\nREADY (0)\nDOING (2/8)\n  T-1 x @ada\n  T-2 y @dennis\nREVIEW (0/4)\n";
+        let others =
+            "BACKLOG (0)\nREADY (0)\nDOING (2/8)\n  T-1 x @ada\n  T-2 y @dennis\nREVIEW (0/4)\n";
         assert!(!board_has_autonomous_work_for(others, "grace", "QA"));
         // ...but MY own doing task still counts (continue it).
         let mine = "BACKLOG (0)\nREADY (0)\nDOING (1/8)\n  T-3 z @grace\n";
