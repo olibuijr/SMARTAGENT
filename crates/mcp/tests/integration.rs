@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Drain a full HTTP request (headers + Content-Length body) so closing the
 /// socket sends FIN, not RST, avoiding a client-side connection reset.
@@ -91,4 +92,26 @@ fn http_notification_accepts_202() {
     let mut c = HttpClient::start(&format!("http://127.0.0.1:{port}/mcp")).unwrap();
     let tools = jsonrpc::parse_tools(&c.call("tools/list", "{}").unwrap());
     assert_eq!(tools[0].0, "t");
+}
+
+#[test]
+fn http_start_times_out_when_server_stalls() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut sock, _) = listener.accept().unwrap();
+        let _ = read_full_request(&mut sock);
+        thread::sleep(Duration::from_secs(4));
+    });
+
+    let started = Instant::now();
+    let err = match HttpClient::start_with_timeout(&format!("http://127.0.0.1:{port}/mcp"), 1) {
+        Ok(_) => panic!("stalled server unexpectedly completed MCP handshake"),
+        Err(e) => e,
+    };
+    assert!(started.elapsed() < Duration::from_secs(3), "timeout took too long: {err}");
+    assert!(
+        err.contains("timed out") || err.contains("WouldBlock") || err.contains("Resource temporarily unavailable"),
+        "unexpected timeout error: {err}"
+    );
 }
