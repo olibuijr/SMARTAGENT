@@ -15,7 +15,7 @@ backend.port = 993
 backend.encryption.type = "tls"
 backend.login = "olibuijr@olibuijr.com"
 backend.auth.type = "password"
-backend.auth.cmd = "./target/release/secrets get --store data/secrets --name mail_olibuijr_password --as pi"
+backend.auth.cmd = "./target/release/secrets get --store ../../data/secrets --name mail_olibuijr_password --as pi"
 
 message.send.backend.type = "smtp"
 message.send.backend.host = "mail.olibuijr.com"
@@ -23,6 +23,6 @@ message.send.backend.port = 465
 message.send.backend.encryption.type = "tls"
 message.send.backend.login = "olibuijr@olibuijr.com"
 message.send.backend.auth.type = "password"
-message.send.backend.auth.cmd = "./target/release/secrets get --store data/secrets --name mail_olibuijr_password --as pi"
+message.send.backend.auth.cmd = "./target/release/secrets get --store ../../data/secrets --name mail_olibuijr_password --as pi"
 
 folder.aliases.inbox = "INBOX"
