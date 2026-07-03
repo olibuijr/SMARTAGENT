@@ -21,9 +21,9 @@ export function stripAnsi(s: string): string {
 	return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-export function runFile(binary: string, args: string[], timeout = 60_000, hint?: RegExp | string, hintText?: string): string {
+export function runFile(binary: string, args: string[], timeout = 60_000, hint?: RegExp | string, hintText?: string, input?: string): string {
 	try {
-		return execFileSync(binary, args, { encoding: "utf8", timeout, cwd: ROOT }).trim();
+		return execFileSync(binary, args, { encoding: "utf8", timeout, cwd: ROOT, ...(input !== undefined ? { input } : {}) }).trim();
 	} catch (e: any) {
 		const msg = e.stderr?.toString().trim() || e.message;
 		const matches = typeof hint === "string" ? msg.includes(hint) : hint?.test(msg);
@@ -32,6 +32,11 @@ export function runFile(binary: string, args: string[], timeout = 60_000, hint?:
 	}
 }
 
+// `input`, when given, is piped to the child's stdin (and stdin is closed
+// immediately after) — e.g. skills.ts uses it to hand a SKILL.md body to
+// `skills create`/`edit` without ever touching a shell temp file. Omitting
+// it keeps the old behavior: execFileSync opens an unused pipe that reads
+// as immediate EOF, so callers that never pass it are unaffected.
 export function makeRunner(binary: string, timeout = 60_000, hint?: RegExp | string, hintText?: string) {
-	return (args: string[]): string => runFile(binary, args, timeout, hint, hintText);
+	return (args: string[], input?: string): string => runFile(binary, args, timeout, hint, hintText, input);
 }

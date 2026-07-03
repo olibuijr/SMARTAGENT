@@ -1,9 +1,49 @@
-//! CLI: list / show / search
+//! CLI: list / show / search / create / patch / edit / delete
 use httpc::args::flag;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use crate::manage;
 use crate::registry;
+
+/// `<root>/.smartagent/skills` under a workspace project — the same
+/// `.smartagent/<name>` convention `tasks`/`memory`/`rag` use for per-repo
+/// state (see `semdb::workspace`).
+fn project_root(name: &str) -> Result<PathBuf, String> {
+    semdb::workspace::data_path(name, "skills")
+}
+
+/// Write target for the mutating verbs: `--project P` writes into that
+/// project's own skills dir; otherwise the positional `<root>` (global by
+/// convention — the extension defaults it to `./skills`).
+fn effective_root(root: &Path, args: &[String]) -> Result<PathBuf, String> {
+    match flag(args, "--project") {
+        Some(p) => project_root(&p),
+        None => Ok(root.to_path_buf()),
+    }
+}
+
+/// Discovery for the read verbs: GLOBAL `<root>` plus, when `--project P` is
+/// given, that project's own skills — a project skill wins on a name
+/// collision (Hermes "local wins").
+fn discover_scoped(root: &Path, args: &[String]) -> Result<Vec<registry::Skill>, String> {
+    match flag(args, "--project") {
+        Some(p) => registry::discover_merged(root, Some(&project_root(&p)?)),
+        None => registry::discover(root),
+    }
+}
+
+/// SKILL.md body for create/edit: `--file <path>` if given, else the whole
+/// of stdin (empty when the caller supplies none — e.g. the pi extension
+/// pipes `content` via stdin and closes it, so this never blocks).
+fn read_body(args: &[String]) -> Result<String, String> {
+    if let Some(path) = flag(args, "--file") {
+        return std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"));
+    }
+    let mut s = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| e.to_string())?;
+    Ok(s)
+}
 
 pub fn run(args: &[String]) -> Result<String, String> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
@@ -11,7 +51,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
     match cmd {
         "list" => {
             let root = root.ok_or("usage: skills list <root>")?;
-            let skills = registry::discover(root)?;
+            let skills = discover_scoped(root, args)?;
             if skills.is_empty() {
                 return Ok("no skills found".into());
             }
@@ -24,7 +64,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
         "show" => {
             let root = root.ok_or("usage: skills show <root> <name>")?;
             let name = args.get(2).ok_or("name required")?;
-            let skills = registry::discover(root)?;
+            let skills = discover_scoped(root, args)?;
             let s = skills
                 .iter()
                 .find(|s| &s.name == name)
@@ -46,7 +86,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
         "search" => {
             let root = root.ok_or("usage: skills search <root> <query>")?;
             let query = args.get(2).ok_or("query required")?.to_lowercase();
-            let skills = registry::discover(root)?;
+            let skills = discover_scoped(root, args)?;
             let mut ranked: Vec<(usize, &registry::Skill)> = skills
                 .iter()
                 .filter_map(|s| {
@@ -109,7 +149,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if qtokens.is_empty() {
                 return Err("no usable words in query".into());
             }
-            let skills = registry::discover(root)?;
+            let skills = discover_scoped(root, args)?;
             let mut ranked: Vec<(usize, &registry::Skill)> = skills
                 .iter()
                 .filter_map(|s| {
@@ -146,6 +186,49 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 .map(|(score, s)| format!("{score}\t{}\t{}", s.name, s.description))
                 .collect::<Vec<_>>()
                 .join("\n"))
+        }
+        // Self-creating skills: an agent that just worked out a non-trivial,
+        // reusable procedure saves it here — procedural memory, ported from
+        // Hermes Agent's `skill_manage` tool.
+        "create" => {
+            let root = root.ok_or(
+                "usage: skills create <root> --name <kebab> [--category C] [--desc \"...\"] [--project P] (body via --file <path> or stdin)",
+            )?;
+            let target = effective_root(root, args)?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            let body = read_body(args)?;
+            manage::create(
+                &target,
+                &name,
+                flag(args, "--category").as_deref(),
+                flag(args, "--desc").as_deref(),
+                &body,
+            )
+        }
+        "patch" => {
+            let root = root.ok_or(
+                "usage: skills patch <root> --name X --old '<str>' --new '<str>' [--project P]",
+            )?;
+            let target = effective_root(root, args)?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            let old = flag(args, "--old").ok_or("--old required")?;
+            let new = flag(args, "--new").unwrap_or_default();
+            manage::patch(&target, &name, &old, &new)
+        }
+        "edit" => {
+            let root = root.ok_or(
+                "usage: skills edit <root> --name X [--desc \"...\"] [--project P] (body via --file <path> or stdin)",
+            )?;
+            let target = effective_root(root, args)?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            let body = read_body(args)?;
+            manage::edit(&target, &name, &body, flag(args, "--desc").as_deref())
+        }
+        "delete" => {
+            let root = root.ok_or("usage: skills delete <root> --name X [--project P]")?;
+            let target = effective_root(root, args)?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            manage::delete(&target, &name)
         }
         _ => Ok(HELP.trim().into()),
     }
@@ -200,12 +283,26 @@ mod tests {
 }
 
 const HELP: &str = r#"
-skills — Agent Skills (SKILL.md) loader
+skills — Agent Skills (SKILL.md) loader + self-authoring (procedural memory)
 
 USAGE:
-  skills list   <root>
-  skills show   <root> <name>
-  skills search <root> <query>      substring rank (single term)
-  skills validate <root>            frontmatter compliance check
-  skills match  <root> '<prompt>'   auto-trigger: score skills against a whole sentence
+  skills list    <root> [--project P]
+  skills show    <root> <name> [--head N] [--project P]
+  skills search  <root> <query> [--project P]        substring rank (single term)
+  skills validate <root>                              frontmatter compliance check
+  skills match   <root> '<prompt>' [--project P]      auto-trigger: score against a whole sentence
+
+  skills create <root> --name <kebab> [--category C] [--desc "..."] [--project P]
+                                       body via --file <path> or stdin; rejects a
+                                       name collision (use edit/patch instead)
+  skills patch  <root> --name X --old '<str>' --new '<str>' [--project P]
+                                       exact-string replace, errors if not unique
+  skills edit   <root> --name X [--desc "..."] [--project P]
+                                       full-body rewrite via --file <path> or stdin
+  skills delete <root> --name X [--project P]
+
+<root> is the global skills dir (extension default ./skills). --project P scopes
+to workspaces/P/.smartagent/skills: read verbs MERGE global+project (project wins
+on a name collision); the write verbs (create/patch/edit/delete) target the
+project dir instead of <root> when --project is given, else <root>.
 "#;
