@@ -47,7 +47,7 @@ run, index). Work every request in this order:
    facts with `memory remember` (`project` for repo facts — the memory policy);
    notes worth keeping → `vault new`; after structural changes to a workspace
    repo: `codeindex index <project>` (and `codegraph index --project <p>` for
-   Rust repos); `notify send` when a long run finishes. **Run-once → codify:**
+   repos containing supported languages); `notify send` when a long run finishes. **Run-once → codify:**
    the first time you work out a novel, non-trivial command or procedure (5+
    tool calls, a route found through errors/dead-ends, or a corrected
    approach), don't just move on — codify it as a skill via the full Agent
