@@ -1,4 +1,48 @@
-# SMARTAGENT
+<div align="center">
+
+[![SMARTAGENT](assets/readme/logo.png)](https://smartagent.olibuijr.com)
+
+**[▶ PLAY THE LANDING PAGE](https://smartagent.olibuijr.com)** — a walkable
+pixel world built on three.js WebGPU. Meet the fleet, bump the ?-blocks,
+reach the castle.
+
+</div>
+
+## Meet The Fleet
+
+Eight autonomous agents — the legendary developer team — run this workspace
+around the clock: pulling tasks from the kanban board, running workflows,
+reviewing each other's work. Their pixel faces below are the exact sprites
+from the TUI sidebar and the landing page.
+
+| | | | |
+|:---:|:---:|:---:|:---:|
+| ![Linus Torvalds](assets/readme/linus.png) | ![Ada Lovelace](assets/readme/ada.png) | ![Dennis Ritchie](assets/readme/dennis.png) | ![Steve Wozniak](assets/readme/woz.png) |
+| **Linus Torvalds**<br>Team Lead | **Ada Lovelace**<br>Backend Expert | **Dennis Ritchie**<br>Systems Expert | **Steve Wozniak**<br>Frontend Expert |
+| ![Margaret Hamilton](assets/readme/margaret.png) | ![Grace Hopper](assets/readme/grace.png) | ![Alan Turing](assets/readme/turing.png) | ![Ken Thompson](assets/readme/ken.png) |
+| **Margaret Hamilton**<br>Database Expert | **Grace Hopper**<br>QA Lead | **Alan Turing**<br>Verification Expert | **Ken Thompson**<br>Infrastructure Expert |
+
+The fleet is real — here is `./pi` live, with `/status` and the `/team`
+sidebar (statusline: code graph, board, workflows, services):
+
+[![The pi TUI with the live fleet sidebar](assets/readme/tui-team.png)](https://smartagent.olibuijr.com)
+
+## Install
+
+```sh
+git clone https://github.com/olibuijr/SMARTAGENT && SMARTAGENT/install.sh my-agent
+```
+
+(Also copyable in-game: walk to the terminal at the end of the level and
+press **C**.)
+
+<div align="center">
+
+| | |
+|:---:|:---:|
+| [![Ada Lovelace's station](assets/readme/station-ada.jpg)](https://smartagent.olibuijr.com) | [![The GitHub castle](assets/readme/castle-github.png)](https://smartagent.olibuijr.com) |
+
+</div>
 
 SMARTAGENT is a personal AI agent workspace built around
 [pi](https://github.com/earendil-works/pi). Pi stays small and focused; every
