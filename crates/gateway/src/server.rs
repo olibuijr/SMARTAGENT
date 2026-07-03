@@ -428,17 +428,16 @@ fn start_heartbeat(
             std::thread::sleep(next);
             next = period;
             let busy = child.lock().unwrap().is_busy();
-            let text = beat.lock().unwrap().compose(busy);
+            let (text, has_work) = {
+                let mut b = beat.lock().unwrap();
+                let role = role_of(&agent);
+                b.compose_with_work(busy, &agent, role)
+            };
             beat.lock()
                 .unwrap()
                 .log(&agent, "beat", if busy { "busy" } else { "idle" }, &text);
-            match heartbeat_action(
-                busy,
-                autonomous,
-                beat.lock()
-                    .unwrap()
-                    .has_autonomous_work_for(&agent, role_of(&agent)),
-            ) {
+            let should_check_work = autonomous && !busy;
+            match heartbeat_action(busy, autonomous, should_check_work && has_work) {
                 HeartbeatAction::Steer => {
                     queue_prompt(&pending_prompts, text);
                 }
@@ -503,10 +502,10 @@ fn start_work_chaser(
             if drain_pending_prompt(&child, &pending_prompts) {
                 continue;
             }
-            let (has_work, text) = {
+            let (text, has_work) = {
                 let mut b = beat.lock().unwrap();
-                let w = b.has_autonomous_work_for(&agent, role_of(&agent));
-                (w, b.compose(false))
+                let role = role_of(&agent);
+                b.compose_with_work(false, &agent, role)
             };
             if has_work && prompt_gate.lock().unwrap().allow() {
                 beat.lock().unwrap().log(
