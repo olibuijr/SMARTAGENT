@@ -6,7 +6,7 @@
 //! placeholder vector) plus one summary row. Structural rows only: no
 //! embeddings, so indexing needs no network.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use semdb::storage::Db;
@@ -40,17 +40,24 @@ pub fn index_project(project: &Path) -> Result<IndexStats, String> {
     if let Some(dir) = db_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    if db_path.exists() {
-        std::fs::remove_file(&db_path).map_err(|e| e.to_string())?;
+    let tmp_path = temp_index_path(&db_path);
+    if tmp_path.exists() {
+        std::fs::remove_file(&tmp_path).map_err(|e| e.to_string())?;
     }
-    let mut db = Db::create(&db_path)?;
+    let mut db = Db::create(&tmp_path)?;
     let mut rows: Vec<(String, String, Vec<f32>)> = Vec::with_capacity(files.len() + 1);
     let mut bytes = 0u64;
     for f in &files {
-        let rel = f.strip_prefix(project).unwrap_or(f).to_string_lossy().to_string();
+        let rel = f
+            .strip_prefix(project)
+            .unwrap_or(f)
+            .to_string_lossy()
+            .to_string();
         let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
         let lines = if size <= MAX_LINECOUNT_BYTES {
-            std::fs::read_to_string(f).map(|s| s.lines().count()).unwrap_or(0)
+            std::fs::read_to_string(f)
+                .map(|s| s.lines().count())
+                .unwrap_or(0)
         } else {
             0
         };
@@ -73,7 +80,29 @@ pub fn index_project(project: &Path) -> Result<IndexStats, String> {
         vec![0.0],
     ));
     db.put_many(&rows)?;
-    Ok(IndexStats { files: count, bytes })
+    drop(db);
+    if std::env::var("SMARTAGENT_CODEINDEX_FAIL_BEFORE_REPLACE").as_deref() == Ok("1") {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err("simulated codeindex failure before replace".into());
+    }
+    std::fs::rename(&tmp_path, &db_path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        format!("replace {}: {e}", db_path.display())
+    })?;
+    Ok(IndexStats {
+        files: count,
+        bytes,
+    })
+}
+
+fn temp_index_path(db_path: &Path) -> PathBuf {
+    let mut name = db_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("codeindex.semdb")
+        .to_string();
+    name.push_str(".tmp");
+    db_path.with_file_name(name)
 }
 
 pub struct Status {
@@ -99,8 +128,14 @@ pub fn status_detail(project: &Path) -> Option<Status> {
         .duration_since(index_mtime)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let stale = newest_indexable_mtime(project).map(|t| t > index_mtime).unwrap_or(false);
-    Some(Status { files, age_secs, stale })
+    let stale = newest_indexable_mtime(project)
+        .map(|t| t > index_mtime)
+        .unwrap_or(false);
+    Some(Status {
+        files,
+        age_secs,
+        stale,
+    })
 }
 
 fn newest_indexable_mtime(project: &Path) -> Option<SystemTime> {
@@ -135,6 +170,47 @@ mod tests {
     }
 
     #[test]
+    fn failed_reindex_keeps_previous_index_readable() {
+        let ws = scratch("ci-project-failed-reindex");
+        let proj = ws.join("demo");
+        std::fs::create_dir_all(proj.join("src")).unwrap();
+        std::fs::write(
+            proj.join("src/main.rs"),
+            "fn main() {}
+",
+        )
+        .unwrap();
+
+        let first = index_project(&proj).unwrap();
+        assert_eq!(first.files, 1);
+        let before = proj.join(INDEX_REL);
+        assert!(Db::open(&before).unwrap().get("src/main.rs").is_some());
+
+        std::fs::write(
+            proj.join("src/lib.rs"),
+            "pub fn lib() {}
+",
+        )
+        .unwrap();
+        std::env::set_var("SMARTAGENT_CODEINDEX_FAIL_BEFORE_REPLACE", "1");
+        let failed = match index_project(&proj) {
+            Ok(_) => panic!("simulated failure unexpectedly succeeded"),
+            Err(e) => e,
+        };
+        std::env::remove_var("SMARTAGENT_CODEINDEX_FAIL_BEFORE_REPLACE");
+        assert!(failed.contains("simulated codeindex failure"), "{failed}");
+
+        let db = Db::open(&before).unwrap();
+        assert!(db.get("src/main.rs").is_some());
+        assert!(
+            db.get("src/lib.rs").is_none(),
+            "failed rebuild must not replace old index"
+        );
+        assert_eq!(status(&proj).unwrap().0, 1);
+        assert!(!temp_index_path(&before).exists());
+    }
+
+    #[test]
     fn index_status_reindex_roundtrip() {
         let ws = scratch("ci-project");
         let proj = ws.join("demo");
@@ -152,8 +228,15 @@ mod tests {
         assert!(!status_detail(&proj).unwrap().stale);
 
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        std::fs::write(proj.join("src/main.rs"), "fn main() { println!(\"hi\"); }\n").unwrap();
-        assert!(status_detail(&proj).unwrap().stale, "edited file newer than index must stale status");
+        std::fs::write(
+            proj.join("src/main.rs"),
+            "fn main() { println!(\"hi\"); }\n",
+        )
+        .unwrap();
+        assert!(
+            status_detail(&proj).unwrap().stale,
+            "edited file newer than index must stale status"
+        );
 
         // Re-index must not swallow its own .smartagent db as a file.
         let s2 = index_project(&proj).unwrap();
