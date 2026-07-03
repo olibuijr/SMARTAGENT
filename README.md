@@ -53,7 +53,7 @@ explicitly want the launcher to check upstream and replace `.pi/runtime/`.
 - Run commands through a sandbox that masks secrets and scrubs the environment.
 - Keep long-running services alive through the internal supervisor.
 
-Useful slash commands inside `./pi`:
+Useful slash commands inside `./pi` and Telegram share the same registry in `config/slash_commands.tsv`; update that file first, then keep the TUI/Telegram handlers in sync.
 
 ```text
 /status          live tool/service health
@@ -66,6 +66,7 @@ Useful slash commands inside `./pi`:
 /memory query    memory recall
 /sab [url]       toggle the visual browser pane
 /team            open the fleet sidebar / agent panel
+/assign          Telegram inline agent-team picker (Coordinator/Builder/QA/Ops)
 /index [project] reindex one project or all workspace projects
 ```
 

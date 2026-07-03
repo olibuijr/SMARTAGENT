@@ -55,14 +55,15 @@ fields are escaped with Telegram's full MarkdownV2 escape set.
 |---|---|---|
 | Agent final reply | `stream_reply` final gateway output, normal chat prompts | `💬 Answer` heading, then 1-3 concise paragraphs. If follow-up work is needed, end with `Next: …`. |
 | Streaming progress | `ProgressEvent`, tool-status frames, placeholder edits | One-line status with emoji (`🧭 Planning…`, `🔧 Using <tool>…`, `⏳ Waiting…`, `✅ Verifying…`) plus at most one short detail line or visible answer snapshot. |
-| Slash-command output | `/board`, `/tasks`, `/status`, `/agents`, `/runs`, `/skills`, `/memory` via `slash_command` | `/<command>` heading, then clipped plain-text tool output. Preserve existing task/status line breaks; avoid code fences unless output is otherwise ambiguous. |
-| Help/command catalog | `/help`, `/commands`, `/start`, `command_help` | `SMARTAGENT Telegram commands` heading followed by bullets: `• /cmd — description`. |
+| Slash-command output | `/board`, `/tasks`, `/status`, `/agents`, `/runs`, `/skills`, `/memory`, `/index`, `/projects`, `/audit`, `/goal`, `/team`, `/sab`, `/assign` via `slash_command` | `/<command>` heading, then clipped plain-text tool output. Preserve existing task/status line breaks; avoid code fences unless output is otherwise ambiguous. |
+| Help/command catalog | `/help`, `/commands`, `/start`, `command_help` | `SMARTAGENT commands` heading followed by bullets from the shared `config/slash_commands.tsv` registry: `• /cmd — description`. This registry is the parity contract with TUI slash commands. |
 | Task creation / kanban planning | Agent replies that create, plan, or update board tasks | `📋 Task` heading; fields on separate lines: `ID: T-n`, `Priority: pX`, `State: ready/doing`, `Criteria: checked/total`, then criteria bullets when useful. |
 | Board/status reports | `/board`, `/tasks`, `/status`, done hook, status-report workflow | `📊 Status` heading; grouped sections (`Ready`, `Doing`, `Review`, `Blocked`) using bullets. Include `Evidence:` and `Next:` sections for workflow/status reports. |
 | Blockers / denials | `safe_denial`, blocked-task reports, unavailable commands | `⚠ Blocked` or `⛔ Not available` heading; one sentence reason; optional `Next: …`. Avoid exposing allow-list/admin internals. |
 | Errors | command failures, gateway unavailable, Telegram API failures | `❌ Error` heading; human-readable problem line; optional retry guidance. Do not include raw secrets, tokens, or giant stderr dumps. |
 | Memory recall | `/memory <query>` | `🧠 Memory` heading; bullets with the recalled fact first and source/id only when useful. If empty, say `No matching memory found.` |
 | Memory write/reset | `/remember`, `/reset`, context injection summaries | `🧠 Memory updated` or `🧹 Context reset`; one sentence with scope (`this chat/thread`) and count when available. |
+| Agent assignment choice | `/assign` and slash commands containing `assign` | Send an inline keyboard with Coordinator, Builder, QA, and Ops choices. Callback data uses `assign:<role>` and the confirmation edits the message to say which agent-team role was chosen. |
 | Model selection | `/model`, callback menu | `🤖 Model` heading; current model line; numbered choices. Inline keyboard buttons mirror the same order. |
 | Stop/cancel | `/stop` and active stream cancellation | `⏹ Stopped` heading; confirm only this chat/thread was affected. |
 
