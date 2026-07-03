@@ -47,15 +47,27 @@ run, index). Work every request in this order:
    facts with `memory remember` (`project` for repo facts — the memory policy);
    notes worth keeping → `vault new`; after structural changes to a workspace
    repo: `codeindex index <project>` (and `codegraph index --project <p>` for
-   Rust repos); `notify send` when a long run finishes. If the path to done
-   was non-trivial (5+ tool calls, a route found through errors/dead-ends, or
-   a corrected approach), also author a skill: `skills create --project <repo>
-   --name <kebab-name> --desc "..."` with `## When to Use` / `## Procedure` /
-   `## Pitfalls` / `## Verification` sections built around REAL SMARTAGENT
-   tools — no invented commands. This is procedural memory: skills are
-   multi-step how-tos loaded on demand (`skills match`); `memory` is small
-   facts always in context. Refine an existing skill with `skills patch`
-   (targeted) or `skills edit` (full rewrite) instead of re-creating it.
+   Rust repos); `notify send` when a long run finishes. **Run-once → codify:**
+   the first time you work out a novel, non-trivial command or procedure (5+
+   tool calls, a route found through errors/dead-ends, or a corrected
+   approach), don't just move on — codify it as a skill via the full Agent
+   Skills standard instead of re-deriving it next time: `skills create
+   --project <repo> --role <role> --task <task> --name <kebab-name> --desc
+   "..."` with `## When to Use` / `## Procedure` / `## Pitfalls` /
+   `## Verification` sections built around REAL SMARTAGENT tools — no
+   invented commands (`role` = Coordinator/Builder/QA/Ops, aligned with the
+   gateway fleet; `task` = the task type, e.g. `deploy-verify`). Then `skills
+   write-file --name <kebab-name> --path scripts/<name>.sh` to save the
+   ACTUAL reusable command(s) as a runnable script (this IS the CLI tool per
+   the standard — made executable, not a separate tool/recipe concept), and
+   `--path references/<file>` for any reference material. Next time: `skills
+   match --role <role> '<the task>'` finds it, `skills files --name
+   <kebab-name>` shows what's bundled, and you RUN the script instead of
+   re-deriving the command. Split: skills are multi-step how-tos + runnable
+   scripts loaded/run when relevant; `memory` is small facts always in
+   context. Refine an existing skill with `skills patch` (targeted SKILL.md
+   edit) or `skills edit` (full rewrite) instead of re-creating it;
+   `skills remove-file` prunes one supporting file.
 8. **Blocker hygiene.** Blocked is a temporary exception, not a parking lot and
    not a request for the principal to intervene. Every board/triage sweep must
    resolve blockers agent-side: unblock obsolete reasons, split/rescope work,
@@ -82,7 +94,7 @@ run, index). Work every request in this order:
 - **tasks** — kanban board (backlog→ready→doing→review→done): board, add/todo (criteria as 'a;b;c'), next (pull-based), move, done, show, list, crit add/check/uncheck, block/unblock (reason required), wip, metrics (cycle time/throughput), rm. `project` = that workspace repo's OWN board — per-repo tasks never mix; omit for the root board. **Done-gate (two parts):** all criteria must be checked AND — for tasks worked in a `worktrees/T-n` — the worktree must contain real changes (an edit or a commit). Ticking criteria without building the fix is REJECTED (empty worktree = fix not implemented). If a task genuinely needs no code change (pure investigation/triage), pass `--allow-empty` on `done`.
 - **workflow** — process engine: list, show, start (`task_id` links a board task), step (current instructions), advance (`evidence` REQUIRED, ≥10 chars, 'done'/'ok' rejected), runs, abort, drive (ENGINE-DRIVEN: the harness executes every step in a fresh headless pi and validates each step's final `EVIDENCE:` line; supports timeout/retry controls where exposed — use for well-defined multi-step work; never from within a driven step). `project` keeps run state on a workspace repo — use the SAME project as the tasks board the run's task lives on. Built-ins: task-run, triage (backlog hygiene), retro (flow improvement), status-report (drive smoke).
 - **goal** — work until an INDEPENDENTLY-verified condition holds (Claude Code `/goal`): set `"<condition>"`, status, clear (aliases stop/off/reset/none/cancel), check, run. After each turn a small model (default `claude/claude-haiku-4-5`, config `goal_eval_model`) that did NOT do the work reads the session transcript and returns met/not-met — never the agent grading itself. `check` is the stop-hook entry point (goal-check hook): unmet → emits a block-decision with the reason as continuation guidance; met → clears the goal. `goal run "<prompt>"` is the unattended driver: it spawns fresh `./pi -p` turns with stdin closed until `check` passes or `--max-turns` is hit. Goal rows are keyed by `--session`/`PI_SESSION_ID`, so gateway agents keep separate active goals. Interactive TUI caveat: pi `agent_end` hooks are notification-only and can surface guidance but cannot start the next turn by themselves. Write conditions the transcript can prove ("cargo test passes exit 0"); bound with "… or stop after N turns". Users set it via `/goal <condition>`.
-- **skills** — SKILL.md loader + self-authoring (procedural memory): list, match (score against a whole prompt — best picker), search (single term), show (`head` for progressive disclosure), validate; `create`/`patch`/`edit`/`delete` to author your own skills as you work (see step 7, Close). `project` scopes to that workspace repo's own accumulated skills (`.smartagent/skills`) — `list`/`match`/`search`/`show` merge global+project (a project skill of the same name wins, intentionally — a repo can override a general skill); the write verbs target the project dir directly when `project` is given.
+- **skills** — SKILL.md loader + self-authoring (procedural memory), full Agent Skills standard (`scripts`/`references`/`assets` + role/task filing): list, match (score against a whole prompt — best picker; filter with `role`/`task`), search (single term), show (`head` for progressive disclosure of SKILL.md, or `path` — e.g. `scripts/foo.sh` — for Level-2 disclosure of one supporting file), files (list a skill's supporting files: path + size), validate; `create` (tag `role`/`task` so it can be filed and found again) / `patch` / `edit` / `delete` to author SKILL.md, plus `write-file` (`name`, `path`, `content`) to attach the actual runnable script(s) under `scripts/` — made executable, this IS the CLI tool per the standard — and reference material under `references/`/`assets/`, and `remove-file` to prune one (see step 7, Close, for the run-once → codify loop). `project` scopes to that workspace repo's own accumulated skills (`.smartagent/skills`) — read verbs merge global+project (a project skill of the same name wins, intentionally — a repo can override a general skill); the write verbs target the project dir directly when `project` is given.
 - **semdb** — vector store. embed, search (`idsOnly`, `metaChars` to shrink), get, del, count (`prefix`), ids (`prefix`), stats. Vector dims are enforced per db.
 - **memory** — 3-tier memory. remember, update (correct by id — prefer over remembering a contradiction), recall (`scope` to one tier), recent, forget, promote, stats. `project` = that workspace repo's own store — durable facts about a repo go THERE, not in the global store (memory policy). Past-session intents auto-recalled at launch.
 - **codegraph** — Rust code graph: index, defs, refs, callers, impls, path (BFS call-path between two fns), search (semantic symbol), stats. `limit` caps output. `project` = that workspace repo's own graph for indexing AND queries — per-repo graphs never clobber each other.

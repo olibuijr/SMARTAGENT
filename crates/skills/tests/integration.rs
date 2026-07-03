@@ -275,3 +275,164 @@ fn create_rejects_invalid_frontmatter_at_cli_layer() {
     // None of the rejected attempts should have left a skill behind.
     assert_eq!(cli::run(&s(&["list", &root_s])).unwrap(), "no skills found");
 }
+
+/// Full run-once → codify loop through the CLI: create a role/task-tagged
+/// skill, attach a real runnable script under scripts/ (and a reference file
+/// under references/), confirm it shows up in `files`, is viewable via
+/// `show --path`, actually executes, is found by `match --role`, then gets
+/// removed — mirrors what an agent does after solving something the hard way
+/// once and not wanting to re-derive it next time.
+#[test]
+fn write_file_show_path_and_role_task_round_trip_through_cli() {
+    let root = empty_root("skills-cli-supporting-files");
+    let root_s = root.to_string_lossy().to_string();
+    let bodies = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch/skills-cli-supporting-files-bodies");
+    let _ = std::fs::remove_dir_all(&bodies);
+    let body = body_file(
+        &bodies,
+        "deploy-smoke.md",
+        "## When to Use\nAfter any deploy.\n## Procedure\nRun scripts/smoke.sh against the healthcheck endpoint.\n",
+    );
+
+    cli::run(&s(&[
+        "create",
+        &root_s,
+        "--name",
+        "deploy-smoke",
+        "--desc",
+        "smoke-check a deploy before declaring it done",
+        "--role",
+        "Ops",
+        "--task",
+        "deploy-verify",
+        "--file",
+        &body,
+    ]))
+    .unwrap();
+
+    // Role/task must round-trip through discovery and show up in listings.
+    let listed = cli::run(&s(&["list", &root_s])).unwrap();
+    assert!(listed.contains("deploy-smoke"), "{listed}");
+    assert!(listed.contains("role=Ops"), "{listed}");
+    assert!(listed.contains("task=deploy-verify"), "{listed}");
+
+    // files: empty before anything is attached.
+    let empty_files = cli::run(&s(&["files", &root_s, "--name", "deploy-smoke"])).unwrap();
+    assert_eq!(empty_files, "no supporting files");
+
+    // write-file: attach the actual reusable script (via --file, not stdin).
+    let script_path = body_file(&bodies, "smoke.sh", "#!/bin/sh\necho healthy\n");
+    let wrote = cli::run(&s(&[
+        "write-file",
+        &root_s,
+        "--name",
+        "deploy-smoke",
+        "--path",
+        "scripts/smoke.sh",
+        "--file",
+        &script_path,
+    ]))
+    .unwrap();
+    assert!(wrote.contains("scripts/smoke.sh"), "{wrote}");
+
+    // The script must actually be executable on disk (not just written).
+    let on_disk = root.join("deploy-smoke/scripts/smoke.sh");
+    assert!(on_disk.exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&on_disk).unwrap().permissions().mode();
+        assert_eq!(mode & 0o111, 0o111, "script must be executable: {mode:o}");
+    }
+
+    // references/ file too.
+    let ref_path = body_file(&bodies, "notes.md", "healthcheck endpoint is /healthz");
+    cli::run(&s(&[
+        "write-file",
+        &root_s,
+        "--name",
+        "deploy-smoke",
+        "--path",
+        "references/notes.md",
+        "--file",
+        &ref_path,
+    ]))
+    .unwrap();
+
+    // files: both now listed.
+    let files_out = cli::run(&s(&["files", &root_s, "--name", "deploy-smoke"])).unwrap();
+    assert!(files_out.contains("scripts/smoke.sh"), "{files_out}");
+    assert!(files_out.contains("references/notes.md"), "{files_out}");
+
+    // show --path: Level-2 disclosure of one supporting file.
+    let shown_script = cli::run(&s(&[
+        "show",
+        &root_s,
+        "deploy-smoke",
+        "--path",
+        "scripts/smoke.sh",
+    ]))
+    .unwrap();
+    assert!(shown_script.contains("echo healthy"), "{shown_script}");
+
+    // Path-traversal and disallowed-subdir writes must be rejected, not
+    // silently escape the skill dir.
+    for bad in ["../escape.sh", "scripts/../../etc/passwd", "bin/tool.sh", "scripts"] {
+        let rejected = cli::run(&s(&[
+            "write-file",
+            &root_s,
+            "--name",
+            "deploy-smoke",
+            "--path",
+            bad,
+            "--file",
+            &script_path,
+        ]));
+        assert!(rejected.is_err(), "expected '{bad}' to be rejected");
+    }
+
+    // match --role: role-tagged skill is found when the role matches, and
+    // (as a negative check) a mismatched role filters it out.
+    let matched = cli::run(&s(&[
+        "match",
+        &root_s,
+        "deploy verification smoke check",
+        "--role",
+        "Ops",
+    ]))
+    .unwrap();
+    assert!(matched.contains("deploy-smoke"), "{matched}");
+    let filtered_out = cli::run(&s(&[
+        "match",
+        &root_s,
+        "deploy verification smoke check",
+        "--role",
+        "QA",
+    ]))
+    .unwrap();
+    assert_eq!(filtered_out, "no matching skill", "{filtered_out}");
+
+    // remove-file: prune the script, confirm it is gone from `files` but the
+    // skill (and its remaining reference file) survives.
+    let removed = cli::run(&s(&[
+        "remove-file",
+        &root_s,
+        "--name",
+        "deploy-smoke",
+        "--path",
+        "scripts/smoke.sh",
+    ]))
+    .unwrap();
+    assert!(removed.contains("removed"), "{removed}");
+    assert!(!on_disk.exists());
+    assert!(!root.join("deploy-smoke/scripts").exists(), "empty scripts/ pruned");
+    assert!(root.join("deploy-smoke/SKILL.md").exists());
+
+    let files_after_remove = cli::run(&s(&["files", &root_s, "--name", "deploy-smoke"])).unwrap();
+    assert!(!files_after_remove.contains("scripts/smoke.sh"));
+    assert!(files_after_remove.contains("references/notes.md"));
+
+    cli::run(&s(&["delete", &root_s, "--name", "deploy-smoke"])).unwrap();
+    assert!(!root.join("deploy-smoke").exists());
+}

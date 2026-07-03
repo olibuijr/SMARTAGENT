@@ -8,6 +8,12 @@ pub struct Skill {
     pub name: String,
     pub description: String,
     pub path: PathBuf,
+    /// `metadata.smartagent.role` — who this skill is for (Coordinator /
+    /// Builder / QA / Ops, aligned with the gateway fleet). Optional.
+    pub role: Option<String>,
+    /// `metadata.smartagent.task` — the task type this skill covers.
+    /// Optional.
+    pub task: Option<String>,
 }
 
 pub fn discover(root: &Path) -> Result<Vec<Skill>, String> {
@@ -31,10 +37,14 @@ pub fn discover(root: &Path) -> Result<Vec<Skill>, String> {
             .get("description")
             .unwrap_or("(no description)")
             .to_string();
+        let role = fm.get("metadata.smartagent.role").map(str::to_string);
+        let task = fm.get("metadata.smartagent.task").map(str::to_string);
         skills.push(Skill {
             name,
             description,
             path: p,
+            role,
+            task,
         });
     }
     skills.sort_by(|a, b| a.name.cmp(&b.name));
@@ -197,5 +207,29 @@ mod tests {
         // No project root at all: pure global discovery.
         let global_alone = discover_merged(&global, None).unwrap();
         assert_eq!(global_alone.len(), 2);
+    }
+
+    #[test]
+    fn discover_reads_role_and_task_from_metadata() {
+        let root = scratch("skills-role-task");
+        std::fs::create_dir_all(root.join("tagged")).unwrap();
+        std::fs::create_dir_all(root.join("untagged")).unwrap();
+        std::fs::write(
+            root.join("tagged/SKILL.md"),
+            "---\nname: tagged\ndescription: has role and task\nmetadata:\n  smartagent:\n    role: Builder\n    task: golf-onboarding\n---\nbody",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("untagged/SKILL.md"),
+            "---\nname: untagged\ndescription: no metadata block\n---\nbody",
+        )
+        .unwrap();
+        let skills = discover(&root).unwrap();
+        let tagged = skills.iter().find(|s| s.name == "tagged").unwrap();
+        assert_eq!(tagged.role.as_deref(), Some("Builder"));
+        assert_eq!(tagged.task.as_deref(), Some("golf-onboarding"));
+        let untagged = skills.iter().find(|s| s.name == "untagged").unwrap();
+        assert_eq!(untagged.role, None);
+        assert_eq!(untagged.task, None);
     }
 }

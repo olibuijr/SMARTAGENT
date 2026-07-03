@@ -1,8 +1,10 @@
-//! CLI: list / show / search / create / patch / edit / delete
+//! CLI: list / show / search / match / validate / create / patch / edit /
+//! delete / write-file / remove-file / files
 use httpc::args::flag;
 
 use std::path::{Path, PathBuf};
 
+use crate::files;
 use crate::manage;
 use crate::registry;
 
@@ -33,9 +35,9 @@ fn discover_scoped(root: &Path, args: &[String]) -> Result<Vec<registry::Skill>,
     }
 }
 
-/// SKILL.md body for create/edit: `--file <path>` if given, else the whole
-/// of stdin (empty when the caller supplies none — e.g. the pi extension
-/// pipes `content` via stdin and closes it, so this never blocks).
+/// Body/content for create/edit/write-file: `--file <path>` if given, else
+/// the whole of stdin (empty when the caller supplies none — e.g. the pi
+/// extension pipes `content` via stdin and closes it, so this never blocks).
 fn read_body(args: &[String]) -> Result<String, String> {
     if let Some(path) = flag(args, "--file") {
         return std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"));
@@ -45,32 +47,85 @@ fn read_body(args: &[String]) -> Result<String, String> {
     Ok(s)
 }
 
+/// `--role`/`--task` filter for `list`/`match`: role/task filing lets an
+/// agent ask "skills for my role + this task" instead of scanning
+/// everything. Case-insensitive equality against the skill's
+/// `metadata.smartagent.role`/`.task` tags; a skill missing the tag never
+/// matches a filter that asks for one.
+fn matches_role_task(s: &registry::Skill, args: &[String]) -> bool {
+    if let Some(want) = flag(args, "--role") {
+        if !s.role.as_deref().is_some_and(|r| r.eq_ignore_ascii_case(&want)) {
+            return false;
+        }
+    }
+    if let Some(want) = flag(args, "--task") {
+        if !s.task.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(&want)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// `\t[role=... task=...]` suffix appended to a skill's listing line when
+/// either tag is set; empty (no visible change) when neither is — keeps
+/// list/search/match output backward compatible for untagged skills.
+fn role_task_suffix(s: &registry::Skill) -> String {
+    let mut tags = Vec::new();
+    if let Some(r) = &s.role {
+        tags.push(format!("role={r}"));
+    }
+    if let Some(t) = &s.task {
+        tags.push(format!("task={t}"));
+    }
+    if tags.is_empty() {
+        String::new()
+    } else {
+        format!("\t[{}]", tags.join(" "))
+    }
+}
+
 pub fn run(args: &[String]) -> Result<String, String> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     let root = args.get(1).map(Path::new);
     match cmd {
         "list" => {
-            let root = root.ok_or("usage: skills list <root>")?;
+            let root = root.ok_or("usage: skills list <root> [--role R] [--task T] [--project P]")?;
             let skills = discover_scoped(root, args)?;
+            let skills: Vec<&registry::Skill> =
+                skills.iter().filter(|s| matches_role_task(s, args)).collect();
             if skills.is_empty() {
                 return Ok("no skills found".into());
             }
             Ok(skills
                 .iter()
-                .map(|s| format!("{}\t{}", s.name, s.description))
+                .map(|s| format!("{}\t{}{}", s.name, s.description, role_task_suffix(s)))
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
         "show" => {
-            let root = root.ok_or("usage: skills show <root> <name>")?;
+            let root = root.ok_or(
+                "usage: skills show <root> <name> [--path scripts/foo.sh] [--head N] [--project P]",
+            )?;
             let name = args.get(2).ok_or("name required")?;
             let skills = discover_scoped(root, args)?;
             let s = skills
                 .iter()
                 .find(|s| &s.name == name)
                 .ok_or_else(|| format!("no skill '{name}'"))?;
-            let body = registry::load_body(&s.path)?;
-            // --head N: first N lines (progressive disclosure of a long SKILL.md).
+            let body = match flag(args, "--path") {
+                // Level-2 progressive disclosure: view one supporting file
+                // (the standard's `skill_view(name, path)`) instead of the
+                // whole SKILL.md body.
+                Some(p) => {
+                    let dir = s
+                        .path
+                        .parent()
+                        .ok_or_else(|| format!("skill '{name}' has no parent dir"))?;
+                    files::read_from(dir, &p)?
+                }
+                None => registry::load_body(&s.path)?,
+            };
+            // --head N: first N lines (progressive disclosure of a long body).
             match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
                 Some(n) => {
                     let lines: Vec<&str> = body.lines().collect();
@@ -84,7 +139,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
         }
         "search" => {
-            let root = root.ok_or("usage: skills search <root> <query>")?;
+            let root = root.ok_or("usage: skills search <root> <query> [--project P]")?;
             let query = args.get(2).ok_or("query required")?.to_lowercase();
             let skills = discover_scoped(root, args)?;
             let mut ranked: Vec<(usize, &registry::Skill)> = skills
@@ -105,7 +160,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             Ok(ranked
                 .iter()
-                .map(|(_, s)| format!("{}\t{}", s.name, s.description))
+                .map(|(_, s)| format!("{}\t{}{}", s.name, s.description, role_task_suffix(s)))
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
@@ -143,7 +198,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
             // (word-boundary token overlap, name hits weighted 3×) — unlike
             // `search`, which is a single-substring count. Use to pick which
             // skill to load for a step or an incoming task.
-            let root = root.ok_or("usage: skills match <root> '<prompt text>'")?;
+            let root = root.ok_or(
+                "usage: skills match <root> '<prompt text>' [--role R] [--task T] [--project P]",
+            )?;
             let query = args.get(2).ok_or("prompt text required")?;
             let qtokens: Vec<String> = tokens(query);
             if qtokens.is_empty() {
@@ -153,6 +210,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let mut ranked: Vec<(usize, &registry::Skill)> = skills
                 .iter()
                 .filter_map(|s| {
+                    if !matches_role_task(s, args) {
+                        return None;
+                    }
                     if is_ponytail_skill(&s.name) && !has_ponytail_trigger(&qtokens) {
                         return None;
                     }
@@ -183,16 +243,20 @@ pub fn run(args: &[String]) -> Result<String, String> {
             Ok(ranked
                 .iter()
                 .take(5)
-                .map(|(score, s)| format!("{score}\t{}\t{}", s.name, s.description))
+                .map(|(score, s)| {
+                    format!("{score}\t{}\t{}{}", s.name, s.description, role_task_suffix(s))
+                })
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
-        // Self-creating skills: an agent that just worked out a non-trivial,
-        // reusable procedure saves it here — procedural memory, ported from
-        // Hermes Agent's `skill_manage` tool.
+        // Self-creating skills: an agent that just worked out a novel,
+        // non-trivial command/procedure saves it here — procedural memory,
+        // ported from Hermes Agent's `skill_manage` tool, extended to the
+        // full Agent Skills standard (scripts/references/assets + role/task
+        // filing).
         "create" => {
             let root = root.ok_or(
-                "usage: skills create <root> --name <kebab> [--category C] [--desc \"...\"] [--project P] (body via --file <path> or stdin)",
+                "usage: skills create <root> --name <kebab> [--category C] [--desc \"...\"] [--role R] [--task T] [--project P] (body via --file <path> or stdin)",
             )?;
             let target = effective_root(root, args)?;
             let name = flag(args, "--name").ok_or("--name required")?;
@@ -202,6 +266,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 &name,
                 flag(args, "--category").as_deref(),
                 flag(args, "--desc").as_deref(),
+                flag(args, "--role").as_deref(),
+                flag(args, "--task").as_deref(),
                 &body,
             )
         }
@@ -229,6 +295,49 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let target = effective_root(root, args)?;
             let name = flag(args, "--name").ok_or("--name required")?;
             manage::delete(&target, &name)
+        }
+        // Supporting-file management (`scripts/`/`references/`/`assets/`) —
+        // the other half of the Agent Skills standard. `scripts/` IS the
+        // reusable "CLI tool" the standard describes; there is no separate
+        // tool/recipe concept.
+        "write-file" => {
+            let root = root.ok_or(
+                "usage: skills write-file <root> --name X --path scripts/foo.sh [--project P] (content via --file <path> or stdin)",
+            )?;
+            let target = effective_root(root, args)?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            let rel_path = flag(args, "--path").ok_or("--path required")?;
+            let content = read_body(args)?;
+            let dir = files::find_skill_dir(&target, &name)?;
+            let full = files::write_to(&dir, &rel_path, content.as_bytes())?;
+            Ok(format!(
+                "wrote '{name}' {rel_path} ({})",
+                full.display()
+            ))
+        }
+        "remove-file" => {
+            let root = root
+                .ok_or("usage: skills remove-file <root> --name X --path <file> [--project P]")?;
+            let target = effective_root(root, args)?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            let rel_path = flag(args, "--path").ok_or("--path required")?;
+            let dir = files::find_skill_dir(&target, &name)?;
+            files::remove_from(&dir, &rel_path)?;
+            Ok(format!("removed '{name}' {rel_path}"))
+        }
+        "files" => {
+            let root = root.ok_or("usage: skills files <root> --name X [--project P]")?;
+            let name = flag(args, "--name").ok_or("--name required")?;
+            let skills = discover_scoped(root, args)?;
+            let s = skills
+                .iter()
+                .find(|s| s.name == name)
+                .ok_or_else(|| format!("no skill '{name}'"))?;
+            let dir = s
+                .path
+                .parent()
+                .ok_or_else(|| format!("skill '{name}' has no parent dir"))?;
+            Ok(files::list_in(dir))
         }
         _ => Ok(HELP.trim().into()),
     }
@@ -286,13 +395,14 @@ const HELP: &str = r#"
 skills — Agent Skills (SKILL.md) loader + self-authoring (procedural memory)
 
 USAGE:
-  skills list    <root> [--project P]
-  skills show    <root> <name> [--head N] [--project P]
+  skills list    <root> [--role R] [--task T] [--project P]
+  skills show    <root> <name> [--path scripts/foo.sh] [--head N] [--project P]
   skills search  <root> <query> [--project P]        substring rank (single term)
   skills validate <root>                              frontmatter compliance check
-  skills match   <root> '<prompt>' [--project P]      auto-trigger: score against a whole sentence
+  skills match   <root> '<prompt>' [--role R] [--task T] [--project P]
+                                       auto-trigger: score against a whole sentence
 
-  skills create <root> --name <kebab> [--category C] [--desc "..."] [--project P]
+  skills create <root> --name <kebab> [--category C] [--desc "..."] [--role R] [--task T] [--project P]
                                        body via --file <path> or stdin; rejects a
                                        name collision (use edit/patch instead)
   skills patch  <root> --name X --old '<str>' --new '<str>' [--project P]
@@ -301,8 +411,18 @@ USAGE:
                                        full-body rewrite via --file <path> or stdin
   skills delete <root> --name X [--project P]
 
+  skills write-file  <root> --name X --path scripts/foo.sh [--project P]
+                                       content via --file <path> or stdin; the path
+                                       MUST start with scripts/, references/, or
+                                       assets/ — scripts/ files are made executable
+  skills remove-file <root> --name X --path <file> [--project P]
+  skills files       <root> --name X [--project P]
+                                       list a skill's supporting files (path + size)
+
 <root> is the global skills dir (extension default ./skills). --project P scopes
 to workspaces/P/.smartagent/skills: read verbs MERGE global+project (project wins
-on a name collision); the write verbs (create/patch/edit/delete) target the
-project dir instead of <root> when --project is given, else <root>.
+on a name collision); the write verbs (create/patch/edit/delete/write-file/
+remove-file) target the project dir instead of <root> when --project is given, else
+<root>. --role/--task tag/filter skills by `metadata.smartagent.role`/`.task`
+(Coordinator/Builder/QA/Ops, aligned with the gateway fleet).
 "#;
