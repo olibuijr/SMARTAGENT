@@ -856,9 +856,9 @@ hud.add(installBtn);
 let coinHud = plane(textCanvas("FACTS 0/8", 8, "#ffd75f", { pad: 3 }));
 hud.add(coinHud);
 function refreshCoinHud() {
-	hud.remove(coinHud);
-	coinHud = plane(textCanvas(`FACTS ${P.coins}/8`, 8, "#ffd75f", { pad: 3 }));
-	hud.add(coinHud);
+	const old = coinHud.material.map;
+	coinHud.material.map = tex(textCanvas(`FACTS ${P.coins}/8`, 8, "#ffd75f", { pad: 3 })); coinHud.material.needsUpdate = true;
+	old?.dispose();
 }
 
 // ── Audio (created on first gesture) ───────────────────────────────────────
