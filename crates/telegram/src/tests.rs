@@ -2,14 +2,36 @@ use super::{
     build_gateway_prompt, chunks, command_help, command_menu_body, progress_event_for_stream_line,
     progress_frame, progress_frame_for_verbosity, progress_scope_key, sanitize_progress_body,
     should_emit_progress, should_emit_progress_for_verbosity, simulate_stream_frames,
-    slash_command, slash_name, streaming_preview, ProgressEvent, VerbosityLevel, TELEGRAM_COMMANDS,
+    slash_command, slash_name, streaming_preview, telegram_commands, ProgressEvent, VerbosityLevel,
 };
+
+#[test]
+fn shared_registry_marks_telegram_and_tui_commands_in_parity() {
+    let registry = super::parse_command_registry();
+    assert!(registry.iter().all(|c| c.telegram == c.tui), "{registry:?}");
+    assert!(registry.iter().any(|c| c.name == "assign"));
+}
+
+#[test]
+fn telegram_agent_assignment_keyboard_is_multiple_choice() {
+    let markup = super::agent_assignment_menu_markup();
+    assert!(markup.contains("inline_keyboard"), "{markup}");
+    for role in ["Coordinator", "Builder", "QA", "Ops"] {
+        assert!(markup.contains(role), "{markup}");
+    }
+    let now = 1000;
+    assert_eq!(
+        super::callback_agent_assignment("assign:qa", now, now),
+        Some("QA")
+    );
+}
 
 #[test]
 fn command_menu_lists_supported_slashes() {
     let body = command_menu_body();
     let help = command_help();
-    for c in TELEGRAM_COMMANDS {
+    let commands = telegram_commands();
+    for c in &commands {
         assert!(
             body.contains(&format!("\"command\":\"{}\"", c.name)),
             "{body}"
@@ -26,11 +48,12 @@ fn command_menu_lists_supported_slashes() {
 fn help_catalog_matches_registered_menu_exactly() {
     let help = command_help();
     let lines = help.lines().skip(1).collect::<Vec<_>>();
-    assert_eq!(lines.len(), TELEGRAM_COMMANDS.len(), "{help}");
-    for (line, c) in lines.iter().zip(TELEGRAM_COMMANDS) {
+    let commands = telegram_commands();
+    assert_eq!(lines.len(), commands.len(), "{help}");
+    for (line, c) in lines.iter().zip(commands.iter()) {
         assert_eq!(*line, format!("• /{} — {}", c.name, c.description));
     }
-    assert!(help.chars().count() < 1200, "{help}");
+    assert!(help.chars().count() < 2000, "{help}");
 }
 
 #[test]
@@ -152,14 +175,11 @@ fn slash_help_output_is_concise_and_streamable() {
     let out = slash_command("/help", "chat-a", "main", "u1")
         .expect("recognized")
         .unwrap();
-    assert!(out.starts_with("SMARTAGENT Telegram commands:"), "{out}");
-    assert!(
-        out.contains("• /help — Show SMARTAGENT Telegram commands"),
-        "{out}"
-    );
+    assert!(out.starts_with("SMARTAGENT commands:"), "{out}");
+    assert!(out.contains("• /help — Show SMARTAGENT commands"), "{out}");
     let preview = streaming_preview("/help", &out);
     assert!(
-        preview.starts_with("💭 /help\nSMARTAGENT Telegram commands:"),
+        preview.starts_with("💭 /help\nSMARTAGENT commands:"),
         "{preview}"
     );
     assert!(preview.chars().count() <= 4000, "{preview}");

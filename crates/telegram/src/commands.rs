@@ -1,93 +1,77 @@
 use super::*;
 
 pub(crate) struct BotCommand {
-    pub(crate) name: &'static str,
-    pub(crate) description: &'static str,
+    pub(crate) name: String,
+    pub(crate) description: String,
 }
 
-pub(crate) const TELEGRAM_COMMANDS: &[BotCommand] = &[
-    BotCommand {
-        name: "help",
-        description: "Show SMARTAGENT Telegram commands",
-    },
-    BotCommand {
-        name: "commands",
-        description: "Show SMARTAGENT Telegram commands",
-    },
-    BotCommand {
-        name: "board",
-        description: "Show the kanban board",
-    },
-    BotCommand {
-        name: "tasks",
-        description: "List ready tasks",
-    },
-    BotCommand {
-        name: "status",
-        description: "Show supervised service status",
-    },
-    BotCommand {
-        name: "skills",
-        description: "List skills or match a query",
-    },
-    BotCommand {
-        name: "agents",
-        description: "Show gateway fleet state",
-    },
-    BotCommand {
-        name: "runs",
-        description: "Show active workflows",
-    },
-    BotCommand {
-        name: "memory",
-        description: "Recall SMARTAGENT memory",
-    },
-    BotCommand {
-        name: "model",
-        description: "Choose this chat's reply model",
-    },
-    BotCommand {
-        name: "verbosity",
-        description: "Show or set notification verbosity",
-    },
-    BotCommand {
-        name: "verbose",
-        description: "Alias for /verbosity",
-    },
-    BotCommand {
-        name: "reset",
-        description: "Clear this chat/thread rolling context",
-    },
-    BotCommand {
-        name: "remember",
-        description: "Remember a fact for this chat/channel",
-    },
-    BotCommand {
-        name: "stop",
-        description: "Stop the active reply in this chat/thread",
-    },
-    BotCommand {
-        name: "resolve",
-        description: "Add custom resolution text for a blocked task",
-    },
+const SLASH_COMMANDS_TSV: &str = include_str!("../../../config/slash_commands.tsv");
+const TELEGRAM_AGENT_CHOICES: &[(&str, &str)] = &[
+    ("coordinator", "Coordinator"),
+    ("builder", "Builder"),
+    ("qa", "QA"),
+    ("ops", "Ops"),
 ];
 
+pub(crate) fn telegram_commands() -> Vec<BotCommand> {
+    parse_command_registry()
+        .into_iter()
+        .filter(|c| c.telegram && c.tui)
+        .map(|c| BotCommand {
+            name: c.name,
+            description: c.description,
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RegistryCommand {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) telegram: bool,
+    pub(crate) tui: bool,
+    pub(crate) class: String,
+}
+
+pub(crate) fn parse_command_registry() -> Vec<RegistryCommand> {
+    SLASH_COMMANDS_TSV
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let cols = line.split('\t').collect::<Vec<_>>();
+            if cols.len() < 5 {
+                return None;
+            }
+            Some(RegistryCommand {
+                name: cols[0].trim().to_string(),
+                description: cols[1].trim().to_string(),
+                telegram: cols[2].trim() == "true",
+                tui: cols[3].trim() == "true",
+                class: cols[4].trim().to_string(),
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn command_help() -> String {
-    let mut out = String::from("SMARTAGENT Telegram commands:");
-    for c in TELEGRAM_COMMANDS {
+    let mut out = String::from("SMARTAGENT commands:");
+    for c in telegram_commands() {
         out.push_str(&format!("\n• /{} — {}", c.name, c.description));
     }
     out
 }
 
 pub(crate) fn command_menu_body() -> String {
-    let commands = TELEGRAM_COMMANDS
+    let commands = telegram_commands()
         .iter()
         .map(|c| {
             format!(
                 r#"{{"command":"{}","description":"{}"}}"#,
-                json::escape(c.name),
-                json::escape(c.description)
+                json::escape(&c.name),
+                json::escape(&c.description)
             )
         })
         .collect::<Vec<_>>()
@@ -148,6 +132,16 @@ pub(crate) fn slash_command(
         "memory" if !arg.is_empty() => {
             run("memory", &["recall", "--dir", "data/memory", "--text", arg])
         }
+        "index" => run("codeindex", if arg.is_empty() { vec!["index", "--all"] } else { vec!["index", arg] }.as_slice()),
+        "projects" => run("codeindex", &["projects"]),
+        "audit" => run("hooks", &["audit", "--n", "10", "--root", "."]),
+        "goal" if !arg.is_empty() => {
+            let parts = std::iter::once("set").chain(arg.split_whitespace()).collect::<Vec<_>>();
+            run("goal", &parts)
+        }
+        "goal" => run("goal", &["status"]),
+        "team" | "assign" => Ok(agent_assignment_menu_text()),
+        "sab" => Ok("/sab is available in the TUI visual browser pane. From Telegram, assign this request to the agent team with /assign and choose Browser/Ops.".into()),
         "reset" => reset_context(chat, thread),
         "model" if !arg.is_empty() => set_model_preference(chat, thread, user, arg),
         "model" => Ok(model_menu_text(chat, thread, user)),
@@ -173,14 +167,15 @@ pub(crate) enum CommandClass {
 }
 
 pub(crate) fn command_class(cmd: &str) -> Option<CommandClass> {
-    Some(match cmd {
-        "start" | "help" | "commands" => CommandClass::UserSafe,
-        "memory" | "reset" | "remember" | "resolve" | "verbosity" | "verbose" => {
-            CommandClass::ChatScoped
-        }
-        "board" | "tasks" | "status" | "agents" | "runs" | "skills" | "model" | "stop" => {
-            CommandClass::AdminOnly
-        }
+    let cmd = if cmd == "start" { "help" } else { cmd };
+    let class = parse_command_registry()
+        .into_iter()
+        .find(|c| c.name == cmd)?
+        .class;
+    Some(match class.as_str() {
+        "user" => CommandClass::UserSafe,
+        "chat" => CommandClass::ChatScoped,
+        "admin" => CommandClass::AdminOnly,
         _ => return None,
     })
 }
@@ -605,6 +600,55 @@ pub(crate) fn send_model_menu(chat: &str, thread: &str, user: &str) -> Result<St
     let mid =
         api::send_message_with_markup(&token, chat, &text, false, Some(&model_menu_markup()))?;
     Ok(format!("message_id={mid} models={}", TELEGRAM_MODELS.len()))
+}
+
+pub(crate) fn agent_assignment_menu_text() -> String {
+    "Assign this Telegram command/request to the agent team. Choose an agent role:".into()
+}
+
+pub(crate) fn agent_assignment_menu_markup() -> String {
+    let rows = TELEGRAM_AGENT_CHOICES
+        .iter()
+        .map(|(id, label)| {
+            format!(
+                r#"[{{"text":"{}","callback_data":"assign:{}"}}]"#,
+                json::escape(label),
+                json::escape(id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(r#"{{"inline_keyboard":[{rows}]}}"#)
+}
+
+pub(crate) fn callback_agent_assignment(
+    data: &str,
+    message_date: u64,
+    now: u64,
+) -> Option<&'static str> {
+    if now.saturating_sub(message_date) > CALLBACK_MAX_AGE_SECS {
+        return None;
+    }
+    let role = data.strip_prefix("assign:")?;
+    TELEGRAM_AGENT_CHOICES
+        .iter()
+        .find(|(id, _)| *id == role)
+        .map(|(_, label)| *label)
+}
+
+pub(crate) fn send_agent_assignment_menu(chat: &str) -> Result<String, String> {
+    let token = bot_token()?;
+    let mid = api::send_message_with_markup(
+        &token,
+        chat,
+        &agent_assignment_menu_text(),
+        false,
+        Some(&agent_assignment_menu_markup()),
+    )?;
+    Ok(format!(
+        "message_id={mid} agents={}",
+        TELEGRAM_AGENT_CHOICES.len()
+    ))
 }
 
 pub(crate) fn bot_token() -> Result<String, String> {
