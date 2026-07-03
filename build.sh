@@ -244,6 +244,19 @@ restart_supervise_watch_if_running() {
 }
 
 
+run_file_and_dep_audit() {
+    echo "── audit: no file > 1000 lines ────────"
+    BIG=$(find crates -name '*.rs' -exec wc -l {} + | awk '$1>1000{print}' | grep -v ' total$' || true)
+    if [ -n "$BIG" ]; then echo "FAIL: files over 1000 lines:"; echo "$BIG"; exit 1; fi
+    echo "ok"
+    echo "── audit: zero crates.io deps ─────────"
+    # A crates.io dep is `name = "<version>"` (version starts with a digit or ^~*).
+    # Path deps `name = { path = ... }` and the [package] name/edition are exempt.
+    DEP=$(grep -rEl '^[a-z0-9_-]+ = "[0-9^~*<>=]' crates/*/Cargo.toml 2>/dev/null || true)
+    if [ -n "$DEP" ]; then echo "FAIL: crates.io deps found in:"; echo "$DEP"; exit 1; fi
+    echo "ok (path deps only)"
+}
+
 run_hook_gate_smoke() {
     echo "── smoke: workspace write hook gate ──"
     PAYLOAD='{"tool":"write","args":{"path":"workspaces/hook-gate-empty-project/probe.txt"}}'
@@ -266,16 +279,7 @@ gate() {
     cargo build --release --workspace --exclude desktop-agent
     echo "── test ───────────────────────────────"
     cargo test --release --workspace --exclude desktop-agent
-    echo "── audit: no file > 1000 lines ────────"
-    BIG=$(find crates -name '*.rs' -exec wc -l {} + | awk '$1>1000{print}' | grep -v ' total$' || true)
-    if [ -n "$BIG" ]; then echo "FAIL: files over 1000 lines:"; echo "$BIG"; exit 1; fi
-    echo "ok"
-    echo "── audit: zero crates.io deps ─────────"
-    # A crates.io dep is `name = "<version>"` (version starts with a digit or ^~*).
-    # Path deps `name = { path = ... }` and the [package] name/edition are exempt.
-    DEP=$(grep -rEl '^[a-z0-9_-]+ = "[0-9^~*<>=]' crates/*/Cargo.toml 2>/dev/null || true)
-    if [ -n "$DEP" ]; then echo "FAIL: crates.io deps found in:"; echo "$DEP"; exit 1; fi
-    echo "ok (path deps only)"
+    run_file_and_dep_audit
 
     echo "── audit: extensions register (silent-failure guard) ──"
     # pi extensions fail SILENTLY on a bad runtime import — the tool just never
@@ -336,6 +340,9 @@ case "${1:-}" in
         BADSTATIC=$(lint_extension_undefined_globals extensions/*.ts || true)
         if [ -n "$BADSTATIC" ]; then echo "FAIL: extension undefined global reference:"; echo "$BADSTATIC"; exit 1; fi
         echo "ok (current extensions lint clean)"
+        ;;
+    audit)
+        run_file_and_dep_audit
         ;;
     tools-smoke-test)
         run_tool_registration_smoke
