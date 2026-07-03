@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+WORK="$ROOT/target/test-scratch/bundle-seed-state"
+SRC="$WORK/src"
+DST="$WORK/dst"
+rm -rf "$WORK"
+mkdir -p "$SRC/config" "$DST"
+printf 'telegram_allowed_chats = 12345,-10067890\nother = keep\n' > "$SRC/config/smartagent.conf"
+printf 'hooks = keep\n' > "$SRC/config/hooks.conf"
+. "$ROOT/scripts/_bundle.sh"
+bundle_seed_state "$SRC" "$DST"
+grep -qE '^telegram_allowed_chats *= *$' "$DST/config/smartagent.conf"
+! grep -q '12345\|-10067890' "$DST/config/smartagent.conf"
+grep -q '^other = keep$' "$DST/config/smartagent.conf"
