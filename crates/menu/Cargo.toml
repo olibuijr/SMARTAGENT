@@ -1,0 +1,17 @@
+[package]
+name = "menu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# std-only, zero deps: interactive terminal menus (select / multiselect /
+# input / password / confirm) with a live fuzzy filter and a numbered
+# non-TTY fallback. Raw mode is driven via `stty` on /dev/tty — no libc.
+
+[lib]
+name = "menu"
+path = "src/lib.rs"
+
+[[bin]]
+name = "menu"
+path = "src/main.rs"

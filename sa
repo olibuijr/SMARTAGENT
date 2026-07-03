@@ -1,0 +1,119 @@
+#!/bin/sh
+# ============================================================================
+# sa — SMARTAGENT front door (setup wizard + launcher menu)
+# ============================================================================
+# Human entry point for a ./pi instance. Bare `sa` runs first-run setup if the
+# instance isn't configured yet, otherwise shows the launcher menu. All the
+# interactive bits are the std-only `menu` binary; this script is glue.
+#
+#   sa            first-run setup, then the launcher menu
+#   sa setup      (re)run the setup wizard
+#   sa menu       launcher menu only
+#   sa chat       shortcut → ./pi
+# ============================================================================
+set -eu
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+BIN="$ROOT/target/release"
+MENU="$BIN/menu"
+CONF="$ROOT/config/smartagent.conf"
+KEY="$ROOT/.pi/agent/akurai-router.key"
+NAME="$(basename "$ROOT")"
+
+if [ -t 1 ]; then C='\033[0;36m'; G='\033[0;32m'; Y='\033[0;33m'; D='\033[2m'; B='\033[1m'; N='\033[0m'
+else C=''; G=''; Y=''; D=''; B=''; N=''; fi
+say() { printf "%b\n" "$*"; }
+
+[ -x "$MENU" ] || { printf "sa: menu binary missing (%s) — run ./build.sh\n" "$MENU" >&2; exit 1; }
+
+# ── First-run detection: a configured instance has a non-empty router key ────
+is_configured() { [ -s "$KEY" ]; }
+
+# ── Setup wizard ─────────────────────────────────────────────────────────────
+sa_setup() {
+    say ""
+    say "${B}${C}⬡ SMARTAGENT setup — $NAME${N}"
+    say "${D}  Configure this instance. Enter to accept a default, Esc to skip a step.${N}"
+    say ""
+
+    # 1) Router API key — the one thing an instance needs to reach a model.
+    if is_configured; then
+        if ! "$MENU" confirm --title "Router key already set — replace it?" --default no >/dev/null; then
+            say "${D}  keeping existing router key${N}"
+        else
+            sa_set_key
+        fi
+    else
+        sa_set_key
+    fi
+
+    # 2) Telegram chat allow-list (optional).
+    tg="$("$MENU" input --title "Telegram chat id to allow (blank = none)" || true)"
+    if [ -n "${tg:-}" ]; then
+        if grep -q '^telegram_allowed_chats' "$CONF" 2>/dev/null; then
+            sed -i "s|^telegram_allowed_chats.*|telegram_allowed_chats = $tg|" "$CONF"
+        else
+            printf '\ntelegram_allowed_chats = %s\n' "$tg" >> "$CONF"
+        fi
+        say "${G}✔${N} telegram_allowed_chats set"
+    fi
+
+    # 3) Background services (semdb daemon + gateway fleet).
+    if "$MENU" confirm --title "Start background services now (semdb + gateway)?" --default no >/dev/null; then
+        say "${D}  starting services…${N}"
+        "$BIN/supervise" up || say "${Y}⚠${N} supervise up reported an error"
+    fi
+
+    say ""
+    say "${G}✔ setup complete${N} — instance '$NAME' is ready."
+    say ""
+}
+
+sa_set_key() {
+    k="$("$MENU" password --title "Paste your akurai-router API key" || true)"
+    if [ -n "${k:-}" ]; then
+        mkdir -p "$(dirname "$KEY")"
+        printf '%s' "$k" > "$KEY"
+        chmod 600 "$KEY"
+        say "${G}✔${N} router key saved (.pi/agent/akurai-router.key)"
+    else
+        say "${Y}⚠${N} no key entered — the agent can't reach a model until one is set"
+    fi
+}
+
+# ── Launcher menu ────────────────────────────────────────────────────────────
+sa_menu() {
+    while true; do
+        choice="$("$MENU" select --title "SMARTAGENT · $NAME" -- \
+            "💬  Chat with the agent" \
+            "📋  Tasks board" \
+            "🚦  Service status" \
+            "🧠  Skills" \
+            "⚙   Settings (re-run setup)" \
+            "🚪  Quit" || true)"
+        [ -n "${choice:-}" ] || return 0    # cancelled
+        case "$choice" in
+            *Chat*)     "$ROOT/pi" ;;
+            *board*)    "$BIN/tasks" board || true; sa_pause ;;
+            *status*)   "$BIN/supervise" status || true; sa_pause ;;
+            *Skills*)   "$BIN/skills" list "$ROOT/skills" 2>/dev/null || true; sa_pause ;;
+            *Settings*) sa_setup ;;
+            *Quit*)     return 0 ;;
+        esac
+    done
+}
+
+sa_pause() {
+    say ""
+    "$MENU" confirm --title "Back to menu?" --default yes >/dev/null 2>&1 || true
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+case "${1:-}" in
+    setup)      sa_setup ;;
+    menu)       sa_menu ;;
+    chat)       exec "$ROOT/pi" ;;
+    -h|--help)  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+    "")         is_configured || sa_setup; sa_menu ;;
+    *)          printf "sa: unknown command '%s' (try: setup, menu, chat)\n" "$1" >&2; exit 2 ;;
+esac

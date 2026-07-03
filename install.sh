@@ -30,9 +30,9 @@ set -eu
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
-    G='\033[0;32m'; Y='\033[0;33m'; C='\033[0;36m'; R='\033[0;31m'; B='\033[1m'; N='\033[0m'
+    G='\033[0;32m'; Y='\033[0;33m'; C='\033[0;36m'; R='\033[0;31m'; B='\033[1m'; D='\033[2m'; N='\033[0m'
 else
-    G=''; Y=''; C=''; R=''; B=''; N=''
+    G=''; Y=''; C=''; R=''; B=''; D=''; N=''
 fi
 say()  { printf "%b\n" "$*"; }
 step() { printf "%b→%b %s\n" "$C" "$N" "$*"; }
@@ -113,6 +113,7 @@ mkdir -p "$DEST/target/release" "$DEST/config" "$DEST/extensions" \
 # ── Launcher + docs (verbatim; all ROOT-relative, portable as-is) ───────────
 step "copying launcher, extensions, docs…"
 cp -p "$SRC/pi" "$DEST/pi"; chmod +x "$DEST/pi"
+[ -f "$SRC/sa" ] && { cp -p "$SRC/sa" "$DEST/sa"; chmod +x "$DEST/sa"; }
 cp -Rp "$SRC/extensions/." "$DEST/extensions/"
 for f in AGENTS.md AGENT_TOOLS.md CATALOG.md; do
     [ -f "$SRC/$f" ] && cp -p "$SRC/$f" "$DEST/$f"
@@ -211,11 +212,10 @@ ok "token issued (data/secrets/tokens/pi.token)"
 say ""
 ok "${B}instance '$NAME' ready${N}"
 say ""
-say "  ${B}cd $DEST && ./pi${N}"
-say ""
-if [ "$COPY_KEY" -ne 1 ]; then
-    warn "model access needs a router key — this instance has none:"
-    say  "    printf '%s' '<your-key>' > $DEST/.pi/agent/akurai-router.key && chmod 600 \$_"
-    say  "    (or re-run with --copy-router-key to inherit the source's key)"
+if [ "$COPY_KEY" -eq 1 ]; then
+    say "  ${B}cd $DEST && ./sa${N}      ${D}# launcher menu (already has a model key)${N}"
+else
+    say "  ${B}cd $DEST && ./sa${N}      ${D}# runs first-run setup (paste your router key), then the menu${N}"
 fi
+say "  ${D}or ./pi for the agent directly · ./sa setup to reconfigure${N}"
 say ""
