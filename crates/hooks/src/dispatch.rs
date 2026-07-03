@@ -87,28 +87,56 @@ fn run_hook(h: &Hook, repo: &Path, payload: &str) -> Result<(i32, String, String
         spawn_hook(&cmd_path, repo).map_err(|e| format!("hook '{}': spawn {}: {e}", h.name, cmd_path.display()))?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(payload.as_bytes());
+        // stdin drops here → EOF, so a hook that reads to end can proceed.
     }
+    // Drain stdout/stderr on dedicated threads WHILE waiting. Previously output
+    // was only read after exit via wait_with_output(); a hook writing more than
+    // the ~64KB pipe buffer blocked on write, never exited, hit the timeout, and
+    // returned timed_out=true — which FAILS OPEN, silently defeating a blocking
+    // hook. Concurrent readers keep the pipe drained so the hook can finish.
+    let out_pipe = child.stdout.take();
+    let err_pipe = child.stderr.take();
+    let out_t = std::thread::spawn(move || drain(out_pipe));
+    let err_t = std::thread::spawn(move || drain(err_pipe));
     let deadline = Instant::now() + Duration::from_secs(h.timeout_secs.max(1));
-    loop {
+    let (code, timed_out) = loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = child.wait_with_output().map_err(|e| e.to_string())?;
-                return Ok((
-                    status.code().unwrap_or(-1),
-                    String::from_utf8_lossy(&out.stdout).to_string(),
-                    String::from_utf8_lossy(&out.stderr).to_string(),
-                    false,
-                ));
-            }
+            Ok(Some(status)) => break (status.code().unwrap_or(-1), false),
             Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
+                let _ = child.kill(); // closing the pipes unblocks the readers
                 let _ = child.wait();
-                return Ok((-1, String::new(), format!("hook '{}' timed out after {}s", h.name, h.timeout_secs), true));
+                break (-1, true);
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(25)),
             Err(e) => return Err(format!("hook '{}': wait: {e}", h.name)),
         }
+    };
+    if timed_out {
+        // Do NOT join the reader threads here: a killed hook may have left an
+        // orphaned grandchild still holding the stdout/stderr pipe open (finding
+        // #36), so read_to_end would never see EOF and join() would hang forever
+        // — reintroducing the very wedge we're avoiding. Detach them; they exit
+        // when the grandchild dies. Output is discarded on timeout anyway.
+        return Ok((
+            -1,
+            String::new(),
+            format!("hook '{}' timed out after {}s", h.name, h.timeout_secs),
+            true,
+        ));
     }
+    // Clean exit → the child closed its pipes, so the readers have hit EOF.
+    let stdout = out_t.join().unwrap_or_default();
+    let stderr = err_t.join().unwrap_or_default();
+    Ok((code, stdout, stderr, false))
+}
+
+/// Read a child pipe to EOF (on its own thread) and lossy-decode it.
+fn drain(pipe: Option<impl std::io::Read>) -> String {
+    let mut buf = Vec::new();
+    if let Some(mut p) = pipe {
+        let _ = p.read_to_end(&mut buf);
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Dispatch an event to all matching hooks; fold into one Decision.
