@@ -14,6 +14,7 @@
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SOCK="${SMARTAGENT_TUI_SOCKET:-smartagent}"
 SES=cockpit
+GATEWAY_ATTACH_AGENT="${SMARTAGENT_TUI_GATEWAY_AGENT:-jeeves}"
 T() { tmux -L "$SOCK" "$@"; }
 
 if T has-session -t "$SES" 2>/dev/null; then
@@ -26,8 +27,9 @@ command -v tmux >/dev/null || { echo "error: tmux not installed" >&2; exit 1; }
 # Deterministic placement: split by immutable pane IDs (%N), no layout re-flow
 # — `select-layout tiled` reorders panes by index and scrambled the grid.
 TL=$(T new-session -d -s "$SES" -c "$ROOT" -x 220 -y 60 -P -F '#{pane_id}' "$ROOT/pi")
+T set-environment -t "$SES" SMARTAGENT_TUI_GATEWAY_AGENT "$GATEWAY_ATTACH_AGENT"
 TR=$(T split-window -h -t "$TL" -c "$ROOT" -P -F '#{pane_id}' \
-    "$ROOT/target/release/gateway attach || { echo 'gateway down — retry: ./target/release/gateway attach'; exec sh; }")
+    "$ROOT/target/release/gateway attach --agent \"\$SMARTAGENT_TUI_GATEWAY_AGENT\" || { echo \"gateway down — retry: SMARTAGENT_TUI_GATEWAY_AGENT=\$SMARTAGENT_TUI_GATEWAY_AGENT ./tui\"; exec sh; }")
 T split-window -v -t "$TL" -c "$ROOT" \
     "watch -c -n 5 $ROOT/target/release/tasks board --dir $ROOT"
 T split-window -v -t "$TR" -c "$ROOT" \
