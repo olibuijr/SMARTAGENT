@@ -12,9 +12,15 @@
 use crate::graph::{Edge, Graph, Symbol};
 use crate::lexer::{lex, Tok, Token};
 
-const KINDS: &[&str] = &["fn", "struct", "enum", "trait", "impl", "mod", "const", "static"];
+const KINDS: &[&str] = &[
+    "fn", "struct", "enum", "trait", "impl", "mod", "const", "static",
+];
 
 pub fn index_source(graph: &mut Graph, file: &str, src: &str) {
+    crate::lang::index_source(graph, file, src);
+}
+
+pub fn index_rust_source(graph: &mut Graph, file: &str, src: &str) {
     let toks = lex(src);
     extract_symbols(graph, file, &toks);
     extract_calls(graph, &toks);
@@ -49,7 +55,11 @@ fn extract_symbols(graph: &mut Graph, file: &str, toks: &[Token]) {
                                 file: file.to_string(),
                                 line: name_tok.line,
                             });
-                            graph.add_edge(Edge { kind: "defines".into(), from: file.to_string(), to: name.to_string() });
+                            graph.add_edge(Edge {
+                                kind: "defines".into(),
+                                from: file.to_string(),
+                                to: name.to_string(),
+                            });
                         }
                     }
                 }
@@ -80,7 +90,11 @@ fn extract_calls(graph: &mut Graph, toks: &[Token]) {
                     for k in (j + 1)..end {
                         if let Some(callee) = ident(&toks[k]) {
                             if toks.get(k + 1).map(|t| is_punct(t, '(')).unwrap_or(false) {
-                                graph.add_edge(Edge { kind: "calls".into(), from: fname.to_string(), to: callee.to_string() });
+                                graph.add_edge(Edge {
+                                    kind: "calls".into(),
+                                    from: fname.to_string(),
+                                    to: callee.to_string(),
+                                });
                             }
                         }
                     }
@@ -132,10 +146,24 @@ fn extract_impls(graph: &mut Graph, toks: &[Token]) {
                 // impl Trait for Type
                 let trait_name = &names[0].0;
                 let type_name = &names[names.len() - 1].0;
-                graph.add_symbol(Symbol { name: type_name.clone(), kind: "impl".into(), file: String::new(), line: names[0].1 });
-                graph.add_edge(Edge { kind: "impls".into(), from: type_name.clone(), to: trait_name.clone() });
+                graph.add_symbol(Symbol {
+                    name: type_name.clone(),
+                    kind: "impl".into(),
+                    file: String::new(),
+                    line: names[0].1,
+                });
+                graph.add_edge(Edge {
+                    kind: "impls".into(),
+                    from: type_name.clone(),
+                    to: trait_name.clone(),
+                });
             } else if let Some((type_name, line)) = names.first() {
-                graph.add_symbol(Symbol { name: type_name.clone(), kind: "impl".into(), file: String::new(), line: *line });
+                graph.add_symbol(Symbol {
+                    name: type_name.clone(),
+                    kind: "impl".into(),
+                    file: String::new(),
+                    line: *line,
+                });
             }
             i = j;
             continue;
@@ -161,10 +189,20 @@ mod tests {
         "#;
         let mut g = Graph::new();
         index_source(&mut g, "m.rs", src);
-        assert!(g.symbols.iter().any(|s| s.name == "helper" && s.kind == "fn"));
-        assert!(g.symbols.iter().any(|s| s.name == "Widget" && s.kind == "struct"));
+        assert!(g
+            .symbols
+            .iter()
+            .any(|s| s.name == "helper" && s.kind == "fn"));
+        assert!(g
+            .symbols
+            .iter()
+            .any(|s| s.name == "Widget" && s.kind == "struct"));
         // main calls helper exactly twice (both real; the string one excluded)
-        let calls = g.edges.iter().filter(|e| e.kind == "calls" && e.from == "main" && e.to == "helper").count();
+        let calls = g
+            .edges
+            .iter()
+            .filter(|e| e.kind == "calls" && e.from == "main" && e.to == "helper")
+            .count();
         assert_eq!(calls, 2);
     }
 
@@ -173,6 +211,9 @@ mod tests {
         let src = "impl Display for Widget { fn fmt() {} }";
         let mut g = Graph::new();
         index_source(&mut g, "m.rs", src);
-        assert!(g.edges.iter().any(|e| e.kind == "impls" && e.from == "Widget" && e.to == "Display"));
+        assert!(g
+            .edges
+            .iter()
+            .any(|e| e.kind == "impls" && e.from == "Widget" && e.to == "Display"));
     }
 }

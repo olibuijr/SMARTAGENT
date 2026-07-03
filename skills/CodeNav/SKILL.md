@@ -32,11 +32,14 @@ cheaper than reading files top to bottom, always before editing.
 - `codeindex index <project>` (or all) — per-repo file inventory at
   `<repo>/.smartagent/codeindex.semdb`. Rebuild after structural changes.
 
-## codegraph — Rust symbol graph
+## codegraph — multi-language symbol graph
 
 - `index` first: `--project <name>` for a workspace repo (graph at
   `workspaces/<name>/.smartagent/codegraph.json`), or `index <dir> --out <graph.json>`
   for anything else. Add `--embed` if you'll want semantic `search` later.
+- Supported language front-ends are std-only lexical extractors for Rust,
+  Python, JavaScript/JSX, TypeScript/TSX, Go, Java/Groovy, C, C++/CUDA/Metal,
+  C#, Kotlin, Scala, Ruby, PHP, and Swift.
 - Query verbs: `defs`, `refs`, `callers`, `impls`, `path` (two fn names),
   `unused`, `search`, `stats`. All accept `--project <name>` in place of a
   graph path; `--limit` caps output.
@@ -52,8 +55,9 @@ empty result without it proves nothing.
 
 ## Gotchas
 
-- **codegraph's lexer is Rust-only.** For TS/Python/anything else, structural
-  questions fall back to `codeindex search` with a regex.
+- **codegraph is a lightweight lexer, not a full parser.** It extracts common
+  definitions/calls across supported languages without tree-sitter; for exact
+  language-server semantics, fall back to `codeindex search` and file reads.
 - `codegraph search` returns nothing useful unless the graph was indexed with
   `--embed` (it's semdb-backed embedding lookup).
 - A stale graph lies: after renames/refactors, `codegraph index` again before
