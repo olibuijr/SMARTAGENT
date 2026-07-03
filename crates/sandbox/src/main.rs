@@ -25,10 +25,21 @@ fn sensitive_paths() -> Vec<PathBuf> {
     let cfg = semdb::config::Config::load();
     let data = cfg.data_dir();
     let repo = data.parent().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    [data.join("secrets"), repo.join(".pi")]
-        .into_iter()
-        .filter(|p| p.exists())
-        .collect()
+    let mut paths = vec![data.join("secrets"), repo.join(".pi")];
+    // Home-dir credential stores were previously unmasked, so a sandboxed
+    // build/test step (or an injected payload) could `cat ~/.ssh/id_ed25519`,
+    // ~/.aws/credentials, ~/.config/bw/env, etc. and exfiltrate them to the
+    // agent transcript despite "isolation". Mask the well-known credential dirs.
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for rel in [
+            ".ssh", ".aws", ".gnupg", ".config/bw", ".config/gh",
+            ".config/gcloud", ".docker", ".kube", ".netrc", ".git-credentials",
+            ".claude",
+        ] {
+            paths.push(home.join(rel));
+        }
+    }
+    paths.into_iter().filter(|p| p.exists()).collect()
 }
 
 fn run_id() -> String {

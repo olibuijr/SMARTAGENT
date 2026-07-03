@@ -105,6 +105,21 @@ pub fn run(spec: &SandboxSpec) -> Result<SandboxResult, String> {
 
     let stdout = read_capped(&out_path, spec.max_output, spec.tail);
     let mut stderr = read_capped(&err_path, spec.max_output, spec.tail);
+    // Fail-closed sentinel: a secret mask could not be mounted, so the wrapper
+    // refused to exec the command. Report isolation failure loudly and mark it
+    // NOT isolated — the untrusted command never ran, so no secret leaked.
+    if use_ns && exit == 118 {
+        return Ok(SandboxResult {
+            exit: 118,
+            timed_out,
+            workspace,
+            stdout: String::new(),
+            stderr: format!(
+                "[sandbox] isolation FAILED: could not mask a secret path; untrusted command not run. {stderr}"
+            ),
+            isolated: false,
+        });
+    }
     // Requested isolation silently downgrading to filesystem-only must be
     // loud — the caller may be relying on the namespace jail.
     if spec.isolate && !use_ns {
@@ -140,15 +155,33 @@ fn build_command(spec: &SandboxSpec, use_ns: bool) -> Command {
             c.arg("--net");
         }
         // Wrapper: apply rlimits, mask each SB_MASKS entry, then exec the real
-        // command ($@).
+        // command ($@). FAIL CLOSED — if any secret mask cannot be mounted we
+        // must NOT run the untrusted command with secrets exposed (the old
+        // `|| true` silently ran it unprotected while still reporting
+        // "isolated"). A failed mask exits with the sentinel so the parent
+        // reports isolation failure instead of leaking. NUL-safe iteration
+        // over SB_MASKS_N so paths with spaces are handled correctly.
+        // Directories get an empty tmpfs overlay; regular FILES (~/.netrc,
+        // ~/.git-credentials) can't be tmpfs mountpoints, so bind-mount
+        // /dev/null over them. Either failure is fatal (fail closed).
         c.arg("--").arg("sh").arg("-c")
-            .arg(format!("{limits}for m in $SB_MASKS; do mount -t tmpfs none \"$m\" 2>/dev/null || true; done; exec \"$@\""))
+            .arg(format!(
+                "{limits}i=0; while eval \"m=\\${{SB_MASK_$i-}}\"; [ -n \"$m\" ]; do \
+                   if [ -d \"$m\" ]; then \
+                     mount -t tmpfs none \"$m\" 2>/dev/null || {{ echo \"[sandbox] FATAL: could not mask dir $m\" >&2; exit 118; }}; \
+                   else \
+                     mount --bind /dev/null \"$m\" 2>/dev/null || {{ echo \"[sandbox] FATAL: could not mask file $m\" >&2; exit 118; }}; \
+                   fi; \
+                   i=$((i+1)); \
+                 done; exec unshare --user --map-user 65534 --map-group 65534 -- \"$@\""
+            ))
             .arg("sandbox")
             .args(&spec.cmd);
         scrub_env(&mut c);
-        if !spec.masks.is_empty() {
-            let joined: Vec<String> = spec.masks.iter().map(|p| p.display().to_string()).collect();
-            c.env("SB_MASKS", joined.join(" "));
+        // Pass each mask as its own env var (SB_MASK_0, SB_MASK_1, …) so paths
+        // containing spaces or shell metacharacters are never word-split.
+        for (i, p) in spec.masks.iter().enumerate() {
+            c.env(format!("SB_MASK_{i}"), p.as_os_str());
         }
         c
     } else {
