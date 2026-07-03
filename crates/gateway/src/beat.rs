@@ -212,7 +212,11 @@ fn prune_medvitund(db: &mut Db, keep_rows: usize) {
 fn medvitund_ts(id: &str, meta: &str) -> u128 {
     json::parse(meta)
         .ok()
-        .and_then(|v| v.get("ts").and_then(Value::as_f64).map(|n| n.max(0.0) as u128))
+        .and_then(|v| {
+            v.get("ts")
+                .and_then(Value::as_f64)
+                .map(|n| n.max(0.0) as u128)
+        })
         .or_else(|| id.strip_prefix("mv-").and_then(|s| s.parse::<u128>().ok()))
         .unwrap_or(0)
 }
@@ -422,7 +426,6 @@ pub fn human_day_prefix() -> String {
     human_now().chars().take(10).collect()
 }
 
-
 fn format_beat(now: String, up: String, busy: bool, board: &str, wf: &str) -> String {
     let state = if busy { "working" } else { "idle" };
     format!(
@@ -466,7 +469,6 @@ fn human_dur(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     fn scratch(name: &str) -> std::path::PathBuf {
         let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

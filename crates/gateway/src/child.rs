@@ -301,7 +301,14 @@ mod tests {
     fn spawn_args_model_override_appended() {
         assert_eq!(
             spawn_args("gw-a", None, Some("codex/gpt-5.4-mini")),
-            vec!["--mode", "rpc", "--session-id", "gw-a", "--model", "codex/gpt-5.4-mini"]
+            vec![
+                "--mode",
+                "rpc",
+                "--session-id",
+                "gw-a",
+                "--model",
+                "codex/gpt-5.4-mini"
+            ]
         );
     }
 

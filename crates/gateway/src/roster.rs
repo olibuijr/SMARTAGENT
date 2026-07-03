@@ -15,15 +15,60 @@ pub struct Profile {
 /// The software-dev team. Ids are the pioneers' full names (kebab-case);
 /// lanes keep the established Coordinator/Builder/QA/Ops vocabulary.
 pub const ROSTER: &[Profile] = &[
-    Profile { id: "linus-torvalds", full_name: "Linus Torvalds", lane: "Coordinator", specialty: "Team Lead" },
-    Profile { id: "ada-lovelace", full_name: "Ada Lovelace", lane: "Builder", specialty: "Backend Expert" },
-    Profile { id: "dennis-ritchie", full_name: "Dennis Ritchie", lane: "Builder", specialty: "Systems Expert" },
-    Profile { id: "steve-wozniak", full_name: "Steve Wozniak", lane: "Builder", specialty: "Frontend Expert" },
-    Profile { id: "margaret-hamilton", full_name: "Margaret Hamilton", lane: "Builder", specialty: "Database Expert" },
-    Profile { id: "grace-hopper", full_name: "Grace Hopper", lane: "QA", specialty: "QA Lead" },
-    Profile { id: "alan-turing", full_name: "Alan Turing", lane: "QA", specialty: "Verification Expert" },
-    Profile { id: "ken-thompson", full_name: "Ken Thompson", lane: "Ops", specialty: "Infrastructure Expert" },
-    Profile { id: "jeeves", full_name: "Jeeves", lane: "Assistant", specialty: "Chat" },
+    Profile {
+        id: "linus-torvalds",
+        full_name: "Linus Torvalds",
+        lane: "Coordinator",
+        specialty: "Team Lead",
+    },
+    Profile {
+        id: "ada-lovelace",
+        full_name: "Ada Lovelace",
+        lane: "Builder",
+        specialty: "Backend Expert",
+    },
+    Profile {
+        id: "dennis-ritchie",
+        full_name: "Dennis Ritchie",
+        lane: "Builder",
+        specialty: "Systems Expert",
+    },
+    Profile {
+        id: "steve-wozniak",
+        full_name: "Steve Wozniak",
+        lane: "Builder",
+        specialty: "Frontend Expert",
+    },
+    Profile {
+        id: "margaret-hamilton",
+        full_name: "Margaret Hamilton",
+        lane: "Builder",
+        specialty: "Database Expert",
+    },
+    Profile {
+        id: "grace-hopper",
+        full_name: "Grace Hopper",
+        lane: "QA",
+        specialty: "QA Lead",
+    },
+    Profile {
+        id: "alan-turing",
+        full_name: "Alan Turing",
+        lane: "QA",
+        specialty: "Verification Expert",
+    },
+    Profile {
+        id: "ken-thompson",
+        full_name: "Ken Thompson",
+        lane: "Ops",
+        specialty: "Infrastructure Expert",
+    },
+    Profile {
+        id: "jeeves",
+        full_name: "Jeeves",
+        lane: "Assistant",
+        specialty: "Chat",
+    },
 ];
 
 pub fn profile(id: &str) -> Option<&'static Profile> {
