@@ -1,11 +1,11 @@
-//! Goal state — one active goal at a time, persisted as a single semdb row
-//! (all data lives in database tables, per the storage rule). The row survives
+//! Goal state — one active goal per pi session, persisted as semdb rows
+//! (all data lives in database tables, per the storage rule). Rows survive
 //! across turns; `status` transitions active → achieved | cleared.
 
 use semdb::storage::Db;
 use std::path::PathBuf;
 
-const ROW_ID: &str = "current";
+const DEFAULT_ROW_ID: &str = "current";
 const PLACEHOLDER_VEC: [f32; 1] = [0.0];
 
 #[derive(Clone, Debug)]
@@ -69,6 +69,9 @@ fn db_path() -> PathBuf {
 
 fn open() -> Result<Db, String> {
     let p = db_path();
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
     if p.exists() {
         Db::open(&p)
     } else {
@@ -76,15 +79,31 @@ fn open() -> Result<Db, String> {
     }
 }
 
-/// The current goal, or None if none was ever set.
-pub fn load() -> Result<Option<Goal>, String> {
+/// The current goal for one pi session, or None if none was ever set.
+pub fn load_for(session: &str) -> Result<Option<Goal>, String> {
     let db = open()?;
-    Ok(db.get(ROW_ID).and_then(|e| Goal::from_meta(&e.meta)))
+    Ok(db
+        .get(&row_id(session))
+        .and_then(|e| Goal::from_meta(&e.meta)))
 }
 
-pub fn save(g: &Goal) -> Result<(), String> {
+pub fn save_for(session: &str, g: &Goal) -> Result<(), String> {
     let mut db = open()?;
-    db.put(ROW_ID, &g.to_meta(), PLACEHOLDER_VEC.to_vec())
+    db.put(&row_id(session), &g.to_meta(), PLACEHOLDER_VEC.to_vec())
+}
+
+fn row_id(session: &str) -> String {
+    let s = session.trim();
+    if s.is_empty() || s == DEFAULT_ROW_ID {
+        DEFAULT_ROW_ID.to_string()
+    } else {
+        format!(
+            "session:{}",
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                .collect::<String>()
+        )
+    }
 }
 
 fn esc(s: &str) -> String {

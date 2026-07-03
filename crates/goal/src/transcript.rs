@@ -14,6 +14,24 @@ pub struct Transcript {
 /// The newest `*.jsonl` under `sessions_dir`, condensed to the last messages
 /// that fit in `max_chars`.
 pub fn latest(sessions_dir: &Path, max_chars: usize) -> Result<Transcript, String> {
+    latest_matching(sessions_dir, max_chars, None)
+}
+
+/// Newest transcript for one session id, falling back to any newest transcript
+/// when no session is requested.
+pub fn latest_for_session(
+    sessions_dir: &Path,
+    max_chars: usize,
+    session: &str,
+) -> Result<Transcript, String> {
+    latest_matching(sessions_dir, max_chars, Some(session))
+}
+
+fn latest_matching(
+    sessions_dir: &Path,
+    max_chars: usize,
+    session: Option<&str>,
+) -> Result<Transcript, String> {
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(sessions_dir)
         .map_err(|e| format!("no sessions dir {}: {e}", sessions_dir.display()))?
         .flatten()
@@ -22,11 +40,27 @@ pub fn latest(sessions_dir: &Path, max_chars: usize) -> Result<Transcript, Strin
         .collect();
     files.sort_by(|a, b| b.0.cmp(&a.0));
     let path = files
-        .first()
-        .ok_or_else(|| format!("no session transcripts in {}", sessions_dir.display()))?
-        .1
-        .clone();
+        .into_iter()
+        .map(|(_, p)| p)
+        .find(|p| {
+            session
+                .map(|s| transcript_has_session(p, s))
+                .unwrap_or(true)
+        })
+        .ok_or_else(|| format!("no session transcripts in {}", sessions_dir.display()))?;
     parse_file(&path, max_chars)
+}
+
+fn transcript_has_session(path: &Path, session: &str) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    content.lines().take(8).any(|line| {
+        httpc::json::parse(line)
+            .ok()
+            .and_then(|v| v.get("id").and_then(|x| x.as_str()).map(|id| id == session))
+            .unwrap_or(false)
+    })
 }
 
 /// Parse a specific transcript file (used by tests and `--transcript`).
@@ -35,7 +69,9 @@ pub fn parse_file(path: &Path, max_chars: usize) -> Result<Transcript, String> {
     let mut msgs: Vec<String> = Vec::new();
     let mut worker_model = String::new();
     for line in content.lines() {
-        let Ok(v) = httpc::json::parse(line) else { continue };
+        let Ok(v) = httpc::json::parse(line) else {
+            continue;
+        };
         match v.get("type").and_then(|x| x.as_str()) {
             Some("model_change") => {
                 if let Some(m) = v.get("modelId").and_then(|x| x.as_str()) {

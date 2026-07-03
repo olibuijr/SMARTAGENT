@@ -10,9 +10,12 @@
 //!   goal clear|stop|off|reset|none|cancel  drop the active goal
 //!   goal check [--sessions DIR] [--transcript F] [--model M] [--max-chars N]
 //!                                          evaluate (stop-hook entry point)
+//!   goal run "<prompt>"                    spawn headless ./pi turns until check passes
+//! All verbs accept --session ID (or PI_SESSION_ID) so gateway agents do not
+//! clobber each other's active goals.
 
 use httpc::args::flag;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod eval;
@@ -44,6 +47,7 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
+        Some("help") | Some("--help") | Some("-h") => Ok(HELP.into()),
         Some("set") => {
             let condition = rest(args, 1);
             if condition.trim().is_empty() {
@@ -52,28 +56,34 @@ fn run(args: &[String]) -> Result<String, String> {
             if condition.chars().count() > 4000 {
                 return Err("condition too long (max 4000 chars)".into());
             }
+            let session = session_key(args);
             let g = Goal::new(condition.trim(), now());
-            store::save(&g)?;
+            store::save_for(&session, &g)?;
             Ok(format!(
                 "◎ goal set — working until: {}\n(a fresh evaluator checks after each turn; `goal clear` to stop)",
                 g.condition
             ))
         }
-        Some("status") | None => match store::load()? {
+        Some("status") | None => match store::load_for(&session_key(args))? {
             None => Ok("no goal set".into()),
             Some(g) => Ok(render_status(&g)),
         },
-        Some(a) if CLEAR_ALIASES.contains(&a) => match store::load()? {
-            Some(mut g) if g.is_active() => {
-                g.status = "cleared".into();
-                store::save(&g)?;
-                Ok("◎ goal cleared".into())
+        Some(a) if CLEAR_ALIASES.contains(&a) => {
+            let session = session_key(args);
+            match store::load_for(&session)? {
+                Some(mut g) if g.is_active() => {
+                    g.status = "cleared".into();
+                    store::save_for(&session, &g)?;
+                    Ok("◎ goal cleared".into())
+                }
+                _ => Ok("no active goal to clear".into()),
             }
-            _ => Ok("no active goal to clear".into()),
-        },
+        }
         Some("check") => check(args),
-        Some("help") | Some("--help") | Some("-h") => Ok(HELP.into()),
-        Some(other) => Err(format!("unknown verb '{other}' — try: set|status|clear|check|help")),
+        Some("run") => run_driver(args),
+        Some(other) => Err(format!(
+            "unknown verb '{other}' — try: set|status|clear|check|run|help"
+        )),
     }
 }
 
@@ -81,7 +91,8 @@ fn run(args: &[String]) -> Result<String, String> {
 ///   not met  → {"decision":"block","reason":"..."}   (agent keeps working)
 ///   met/none → nothing                                 (turn ends normally)
 fn check(args: &[String]) -> Result<String, String> {
-    let Some(mut g) = store::load()? else {
+    let session = session_key(args);
+    let Some(mut g) = store::load_for(&session)? else {
         return Ok(String::new()); // no goal ever set
     };
     if !g.is_active() {
@@ -95,7 +106,7 @@ fn check(args: &[String]) -> Result<String, String> {
         Some(f) => transcript::parse_file(std::path::Path::new(&f), max_chars)?,
         None => {
             let dir = flag(args, "--sessions").unwrap_or_else(|| DEFAULT_SESSIONS_DIR.to_string());
-            transcript::latest(std::path::Path::new(&dir), max_chars)?
+            transcript::latest_for_session(std::path::Path::new(&dir), max_chars, &session)?
         }
     };
 
@@ -106,12 +117,15 @@ fn check(args: &[String]) -> Result<String, String> {
     g.last_reason = verdict.reason.clone();
     if verdict.met {
         g.status = "achieved".into();
-        store::save(&g)?;
+        store::save_for(&session, &g)?;
         // Turn ends normally; announce achievement on stderr (non-blocking note).
-        eprintln!("◎ goal achieved after {} turn(s): {}", g.turns, verdict.reason);
+        eprintln!(
+            "◎ goal achieved after {} turn(s): {}",
+            g.turns, verdict.reason
+        );
         Ok(String::new())
     } else {
-        store::save(&g)?;
+        store::save_for(&session, &g)?;
         Ok(format!(
             r#"{{"decision":"block","reason":"◎ GOAL NOT MET (turn {}): {}. Keep working toward the goal: {}"}}"#,
             g.turns,
@@ -121,16 +135,58 @@ fn check(args: &[String]) -> Result<String, String> {
     }
 }
 
+fn run_driver(args: &[String]) -> Result<String, String> {
+    let prompt = rest(args, 1);
+    if prompt.trim().is_empty() {
+        return Err("usage: goal run \"<prompt>\"".into());
+    }
+    let session = session_key(args);
+    let max_turns = flag(args, "--max-turns")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(10)
+        .clamp(1, 100);
+    let mut last = String::new();
+    for turn in 1..=max_turns {
+        let status = Command::new("./pi")
+            .arg("-p")
+            .arg(&prompt)
+            .env("PI_SESSION_ID", &session)
+            .stdin(Stdio::null())
+            .status()
+            .map_err(|e| format!("spawn ./pi failed: {e}"))?;
+        if !status.success() {
+            return Err(format!("./pi turn {turn} exited with {status}"));
+        }
+        last = check(args)?;
+        if last.trim().is_empty() {
+            return Ok(format!("◎ goal run complete after {turn} turn(s)"));
+        }
+    }
+    Ok(format!(
+        "◎ goal run stopped after {max_turns} turn(s); last check: {last}"
+    ))
+}
+
 /// Evaluator model: flag > config `goal_eval_model` > default. Verifier
 /// independence is best when it differs from the worker model.
 fn eval_model(args: &[String], worker: &str) -> String {
     let chosen = semdb::config::Config::load()
-        .resolve("goal_eval_model", "GOAL_EVAL_MODEL", flag(args, "--model").as_deref())
+        .resolve(
+            "goal_eval_model",
+            "GOAL_EVAL_MODEL",
+            flag(args, "--model").as_deref(),
+        )
         .unwrap_or_else(|| DEFAULT_EVAL_MODEL.to_string());
     if !worker.is_empty() && chosen == worker {
         eprintln!("note: goal evaluator uses the same model as the worker ({worker}); set goal_eval_model to a different model for independent verification");
     }
     chosen
+}
+
+fn session_key(args: &[String]) -> String {
+    flag(args, "--session")
+        .or_else(|| std::env::var("PI_SESSION_ID").ok())
+        .unwrap_or_else(|| "current".to_string())
 }
 
 fn render_status(g: &Goal) -> String {
@@ -150,7 +206,26 @@ fn render_status(g: &Goal) -> String {
 }
 
 fn rest(args: &[String], from: usize) -> String {
-    args.iter().skip(from).cloned().collect::<Vec<_>>().join(" ")
+    let mut out = Vec::new();
+    let mut skip_next = false;
+    for a in args.iter().skip(from) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if matches!(
+            a.as_str(),
+            "--session" | "--max-turns" | "--sessions" | "--transcript" | "--model" | "--max-chars"
+        ) {
+            skip_next = true;
+            continue;
+        }
+        if a.starts_with("--") {
+            continue;
+        }
+        out.push(a.clone());
+    }
+    out.join(" ")
 }
 
 fn now() -> i64 {
@@ -166,11 +241,18 @@ const HELP: &str = r#"goal — work until an independently-verified condition ho
   goal status                condition, turns evaluated, last reason
   goal clear                 drop the active goal (aliases: stop off reset none cancel)
   goal check                 evaluate now; prints a hooks block-decision if unmet
+  goal run "<prompt>"        run repeated `./pi -p` turns until check passes
     --sessions DIR           session transcripts dir (default .pi/sessions)
     --transcript FILE        evaluate a specific transcript instead
     --model M                evaluator model (default: config goal_eval_model)
     --max-chars N            transcript budget fed to the evaluator (default 24000)
+    --session ID             isolate state for one gateway/pi session
+    --max-turns N            run driver turn limit (default 10)
 
 The evaluator is a small model that only reads the transcript — it never grades
 its own work. Write conditions the transcript can prove, e.g. "cargo test passes
-(exit 0) and no file over 1000 lines". Bound a run with "... or stop after N turns"."#;
+(exit 0) and no file over 1000 lines". Bound a run with "... or stop after N turns".
+
+Interactive TUI caveat: pi's agent_end hook is notification-only. It can surface
+an unmet-goal reason, but it cannot itself start the next interactive turn; use
+`goal run` or the gateway driver for fully unattended continuation."#;

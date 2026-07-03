@@ -57,8 +57,12 @@ pub fn evaluate(goal: &Goal, tr: &Transcript, model: &str) -> Result<Verdict, St
 /// Pull the `{met, reason}` object out of the model reply, tolerating prose or
 /// code fences around it.
 pub fn parse_verdict(content: &str) -> Result<Verdict, String> {
-    let start = content.find('{').ok_or("evaluator reply had no JSON object")?;
-    let end = content.rfind('}').ok_or("evaluator reply had no JSON object")?;
+    let start = content
+        .find('{')
+        .ok_or("evaluator reply had no JSON object")?;
+    let end = content
+        .rfind('}')
+        .ok_or("evaluator reply had no JSON object")?;
     if end < start {
         return Err("evaluator reply had malformed JSON".into());
     }
@@ -115,8 +119,16 @@ mod tests {
 
     #[test]
     fn parses_met_true_false_and_fenced() {
-        assert!(parse_verdict("{\"met\": true, \"reason\": \"all green\"}").unwrap().met);
-        assert!(!parse_verdict("{\"met\": false, \"reason\": \"2 failing\"}").unwrap().met);
+        assert!(
+            parse_verdict("{\"met\": true, \"reason\": \"all green\"}")
+                .unwrap()
+                .met
+        );
+        assert!(
+            !parse_verdict("{\"met\": false, \"reason\": \"2 failing\"}")
+                .unwrap()
+                .met
+        );
         // Prose and code fences around the object are tolerated.
         let v = parse_verdict("Sure:\n```json\n{\"met\": true, \"reason\":\"done\"}\n```").unwrap();
         assert!(v.met);
