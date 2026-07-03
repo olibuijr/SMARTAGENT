@@ -110,6 +110,7 @@ fn poll(args: &[String]) -> Result<String, String> {
     let token = bot_token()?;
     let timeout = flag(args, "--timeout").unwrap_or_else(|| "25".into());
     let offset = offset()?;
+    let bot_username = api::get_me_username(&token).ok();
     let result = api::get_updates(&token, offset, timeout.parse::<u64>().unwrap_or(0))?;
     let mut max_id = offset.saturating_sub(1);
     let mut out = Vec::new();
@@ -186,10 +187,27 @@ fn poll(args: &[String]) -> Result<String, String> {
                 .and_then(|c| c.get("id"))
                 .map(val_s)
                 .unwrap_or_default();
-            if allow_chat(&chat).is_err() {
+            let raw_text = msg.get("text").and_then(Value::as_str).unwrap_or("");
+            let chat_type = msg
+                .get("chat")
+                .and_then(|c| c.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let mention_ok = bot_username
+                .as_deref()
+                .map(|name| is_group_mention(chat_type, raw_text, name))
+                .unwrap_or(false);
+            if allow_chat(&chat).is_err() && !mention_ok {
                 continue;
             }
-            let text = msg.get("text").and_then(Value::as_str).unwrap_or("");
+            let text = if mention_ok {
+                bot_username
+                    .as_deref()
+                    .map(|name| strip_bot_mention(raw_text, name))
+                    .unwrap_or_else(|| raw_text.to_string())
+            } else {
+                raw_text.to_string()
+            };
             let from = msg
                 .get("from")
                 .and_then(|f| f.get("username"))
@@ -203,11 +221,41 @@ fn poll(args: &[String]) -> Result<String, String> {
             let message_id = msg.get("message_id").map(val_s).unwrap_or_default();
             let thread = msg.get("message_thread_id").map(val_s).unwrap_or_default();
             let date = u64v(msg.get("date")).unwrap_or_else(unix_secs);
-            out.push(format!(r#"{{"update_id":{uid},"chat":"{}","thread":"{}","message_id":"{}","user":"{}","from":"{}","date":{},"text":"{}"}}"#, json::escape(&chat), json::escape(&thread), json::escape(&message_id), json::escape(&user), json::escape(from), date, json::escape(text)));
+            out.push(format!(r#"{{"update_id":{uid},"chat":"{}","thread":"{}","message_id":"{}","user":"{}","from":"{}","date":{},"text":"{}"}}"#, json::escape(&chat), json::escape(&thread), json::escape(&message_id), json::escape(&user), json::escape(from), date, json::escape(&text)));
         }
     }
     set_offset(max_id + 1)?;
     Ok(out.join("\n"))
+}
+
+fn is_group_mention(chat_type: &str, text: &str, bot_username: &str) -> bool {
+    matches!(chat_type, "group" | "supergroup") && contains_bot_mention(text, bot_username)
+}
+
+fn contains_bot_mention(text: &str, bot_username: &str) -> bool {
+    let needle = format!("@{}", bot_username.trim_start_matches('@')).to_ascii_lowercase();
+    text.split_whitespace().any(|part| {
+        part.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '@')
+            .eq_ignore_ascii_case(&needle)
+    })
+}
+
+fn strip_bot_mention(text: &str, bot_username: &str) -> String {
+    let needle = format!("@{}", bot_username.trim_start_matches('@')).to_ascii_lowercase();
+    let stripped = text
+        .split_whitespace()
+        .filter(|part| {
+            !part
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '@')
+                .eq_ignore_ascii_case(&needle)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if stripped.trim().is_empty() {
+        text.trim().to_string()
+    } else {
+        stripped
+    }
 }
 
 #[cfg(test)]
