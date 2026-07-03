@@ -32,8 +32,8 @@ pub fn parse(text: &str) -> Result<Vec<Hook>, String> {
     let mut hooks = Vec::new();
     let mut cur: Option<Hook> = None;
     for (ln, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let line = strip_inline_comment(raw).trim();
+        if line.is_empty() {
             continue;
         }
         if line == "[hook]" {
@@ -61,6 +61,22 @@ pub fn parse(text: &str) -> Result<Vec<Hook>, String> {
         hooks.push(validate(h, 0)?);
     }
     Ok(hooks)
+}
+
+fn strip_inline_comment(line: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut prev_ws = true;
+    for (i, c) in line.char_indices() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '#' && prev_ws => return &line[..i],
+            None => {}
+        }
+        prev_ws = c.is_whitespace();
+    }
+    line
 }
 
 fn validate(h: Hook, ln: usize) -> Result<Hook, String> {
@@ -104,6 +120,17 @@ mod tests {
     fn rejects_unknown_event_and_missing_fields() {
         assert!(parse("[hook]\nname = a\nevent = nope\ncommand = x\n").is_err());
         assert!(parse("[hook]\nname = a\nevent = stop\n").is_err());
+    }
+
+    #[test]
+    fn strips_trailing_inline_comments() {
+        let text = "[hook]\nname = a # label\nevent = tool_call # event comment\nmatcher = bash#literal\ncommand = hooks.d/a.sh # path comment\ntimeout = 7 # seconds\n";
+        let hs = parse(text).unwrap();
+        assert_eq!(hs[0].name, "a");
+        assert_eq!(hs[0].event, "tool_call");
+        assert_eq!(hs[0].matcher, "bash#literal");
+        assert_eq!(hs[0].command, "hooks.d/a.sh");
+        assert_eq!(hs[0].timeout_secs, 7);
     }
 
     #[test]

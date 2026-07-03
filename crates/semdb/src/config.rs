@@ -16,15 +16,7 @@ impl Config {
         let mut map = HashMap::new();
         if let Some(path) = find() {
             if let Ok(text) = std::fs::read_to_string(&path) {
-                for line in text.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    if let Some((k, v)) = line.split_once('=') {
-                        map.insert(k.trim().to_string(), v.trim().to_string());
-                    }
-                }
+                map = parse_map(&text);
             }
         }
         Config { map }
@@ -61,6 +53,48 @@ impl Config {
             .and_then(|p| p.parent().and_then(|d| d.parent()).map(Path::to_path_buf))
             .unwrap_or_else(|| PathBuf::from("."));
         base.join(rel)
+    }
+}
+
+fn parse_map(text: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in text.lines() {
+        let line = strip_inline_comment(line).trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            map.insert(k.trim().to_string(), unquote(v.trim()).to_string());
+        }
+    }
+    map
+}
+
+fn strip_inline_comment(line: &str) -> &str {
+    let mut quote: Option<char> = None;
+    let mut prev_ws = true;
+    for (i, c) in line.char_indices() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c == '#' && prev_ws => return &line[..i],
+            None => {}
+        }
+        prev_ws = c.is_whitespace();
+    }
+    line
+}
+
+fn unquote(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
     }
 }
 
@@ -112,5 +146,18 @@ mod tests {
         assert_eq!(cfg.resolve("k", "NOPE_ENV", Some("flag")).as_deref(), Some("flag"));
         assert_eq!(cfg.resolve("k", "NOPE_ENV", None).as_deref(), Some("fromfile"));
         assert_eq!(cfg.resolve("missing", "NOPE_ENV", None), None);
+    }
+
+    #[test]
+    fn strips_inline_comments_without_losing_literal_hashes() {
+        let cfg = Config {
+            map: parse_map(
+                "embeddings_endpoint = http://host/path#frag # comment\nquoted = 'value # kept' # comment\nplain = value # comment\nliteral = value#kept\n",
+            ),
+        };
+        assert_eq!(cfg.map["embeddings_endpoint"], "http://host/path#frag");
+        assert_eq!(cfg.map["quoted"], "value # kept");
+        assert_eq!(cfg.map["plain"], "value");
+        assert_eq!(cfg.map["literal"], "value#kept");
     }
 }
