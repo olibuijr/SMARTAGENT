@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="is">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Elísabet — fyrsta bekkjar fullscreen dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #243042;
+      --muted: #526070;
+      --sun: #ffd166;
+      --pink: #ff7aa2;
+      --blue: #62d2ff;
+      --green: #9be564;
+      --purple: #b692ff;
+      --card: rgba(255,255,255,.88);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: "Trebuchet MS", "Arial Rounded MT Bold", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 15%, rgba(255,255,255,.8) 0 7rem, transparent 7.2rem),
+        radial-gradient(circle at 90% 8%, rgba(255,255,255,.5) 0 6rem, transparent 6.2rem),
+        linear-gradient(135deg, #8ee3ff 0%, #f9d1ff 48%, #fff0b8 100%);
+    }
+    .sky { position: fixed; inset: 0; pointer-events: none; opacity: .95; }
+    .star { position: absolute; font-size: clamp(2rem, 4vw, 4.5rem); animation: bob 5s ease-in-out infinite; }
+    .star:nth-child(1) { left: 4vw; top: 10vh; animation-delay: -.6s; }
+    .star:nth-child(2) { right: 8vw; top: 16vh; animation-delay: -2s; }
+    .star:nth-child(3) { left: 40vw; bottom: 7vh; animation-delay: -1.3s; }
+    @keyframes bob { 50% { transform: translateY(-1.2rem) rotate(7deg); } }
+    main {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      padding: clamp(1.4rem, 2.3vw, 3rem);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: clamp(1rem, 1.8vw, 2rem);
+    }
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 2rem;
+      align-items: center;
+      padding: clamp(1rem, 2vw, 2rem);
+      border-radius: 2rem;
+      background: rgba(255,255,255,.72);
+      box-shadow: 0 1rem 3rem rgba(56, 74, 99, .14);
+      backdrop-filter: blur(8px);
+    }
+    h1 { margin: 0; font-size: clamp(2.8rem, 6vw, 7rem); line-height: .95; letter-spacing: -.05em; }
+    .subtitle { margin-top: .7rem; font-size: clamp(1.3rem, 2.1vw, 2.4rem); color: var(--muted); font-weight: 800; }
+    .clock { text-align: right; font-weight: 900; }
+    #time { font-size: clamp(3rem, 6.6vw, 7.4rem); line-height: .9; }
+    #date { font-size: clamp(1.2rem, 2vw, 2.2rem); color: var(--muted); margin-top: .5rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: clamp(1rem, 1.5vw, 1.7rem);
+      min-height: 0;
+    }
+    .card {
+      min-height: 0;
+      padding: clamp(1rem, 1.7vw, 2rem);
+      border-radius: 2rem;
+      background: var(--card);
+      border: .35rem solid rgba(255,255,255,.7);
+      box-shadow: 0 .9rem 2rem rgba(47, 62, 84, .13);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .big { grid-row: span 2; }
+    .label { font-size: clamp(1rem, 1.5vw, 1.7rem); color: var(--muted); font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+    h2 { margin: .35rem 0 .9rem; font-size: clamp(2rem, 3.2vw, 4rem); line-height: 1; }
+    p, li { font-size: clamp(1.25rem, 2vw, 2.45rem); line-height: 1.16; font-weight: 800; }
+    p { margin: .25rem 0; }
+    ul { margin: .3rem 0 0; padding-left: 1.4em; }
+    li + li { margin-top: .45rem; }
+    .weather { background: linear-gradient(145deg, rgba(255,255,255,.9), rgba(255,241,170,.9)); }
+    .school { background: linear-gradient(145deg, rgba(255,255,255,.9), rgba(155,229,100,.75)); }
+    .routine { background: linear-gradient(145deg, rgba(255,255,255,.9), rgba(98,210,255,.72)); }
+    .stars-card { background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(255,122,162,.52)); }
+    .message { background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(182,146,255,.55)); }
+    .pillrow { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1rem; }
+    .pill { font-size: clamp(1rem, 1.55vw, 1.8rem); font-weight: 900; padding: .55rem .8rem; border-radius: 999px; background: rgba(255,255,255,.78); }
+    .stars { font-size: clamp(2.4rem, 4vw, 5rem); letter-spacing: .05em; line-height: 1.05; }
+    .tiny { font-size: clamp(.9rem, 1.1vw, 1.25rem); color: var(--muted); margin-top: .8rem; font-weight: 800; }
+    @media (max-width: 1100px) {
+      body { overflow: auto; }
+      header, .grid { grid-template-columns: 1fr; }
+      .big { grid-row: auto; }
+      .clock { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sky" aria-hidden="true"><span class="star">⭐</span><span class="star">🌈</span><span class="star">🦄</span></div>
+  <main>
+    <header>
+      <div>
+        <h1>Góðan dag, Elísabet!</h1>
+        <div class="subtitle">Fyrsti bekkur · 1st grade · gleði á hverjum degi</div>
+      </div>
+      <div class="clock" aria-live="polite">
+        <div id="time">--:--</div>
+        <div id="date">Í dag</div>
+      </div>
+    </header>
+
+    <section class="grid" aria-label="TV dashboard cards">
+      <article class="card big weather">
+        <div class="label">Í dag / Today</div>
+        <h2>Veður og dagur</h2>
+        <p id="weather-line">Kíkjum út: er peysu-, regnjakka- eða sólgleraugnadagur?</p>
+        <div class="pillrow"><span class="pill">🎒 Skólataska</span><span class="pill">🧥 Útiföt</span><span class="pill">💧 Vatnsbrúsi</span></div>
+        <p class="tiny">Engin staðsetning eða einkagögn eru notuð — þetta er örugg áminning fyrir TV.</p>
+      </article>
+
+      <article class="card school">
+        <div class="label">Naustaskóli</div>
+        <h2>Skóladagur</h2>
+        <ul>
+          <li>Telja niður: nýr lærdómsdagur bíður!</li>
+          <li>Spyrja: hvað var skemmtilegast í dag?</li>
+          <li>Calendar spot: bæta má opinberum Naustaskóla viðburðum hér.</li>
+        </ul>
+      </article>
+
+      <article class="card routine">
+        <div class="label">Rútína</div>
+        <h2>Morgunn / Kvöld</h2>
+        <ul>
+          <li>Klæða sig · bursta tennur · greiða hár</li>
+          <li>Lesa 10 mínútur eða skoða bók</li>
+          <li>Velja eitt góðverk fyrir fjölskylduna</li>
+        </ul>
+      </article>
+
+      <article class="card stars-card">
+        <div class="label">Stjörnur</div>
+        <h2>Lestur og hjálp</h2>
+        <div class="stars" aria-label="five gold stars">⭐ ⭐ ⭐ ⭐ ⭐</div>
+        <p>Fáðu stjörnu fyrir lestur, tiltekt, hjálpsemi og hugrekki.</p>
+      </article>
+
+      <article class="card message">
+        <div class="label">Skilaboð dagsins</div>
+        <h2 id="message-title">Þú getur þetta!</h2>
+        <p id="message-body">Be curious, be kind, and ask one brilliant question today.</p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const messages = [
+      ["Þú getur þetta!", "Be curious, be kind, and ask one brilliant question today."],
+      ["Lestrarhetja", "Every page is a tiny adventure. Pick a book and explore."],
+      ["Góð vinkona", "A smile and a helpful hand make the classroom brighter."],
+      ["Sterkur dagur", "Mistakes are practice in disguise. Try again with courage."],
+      ["Gleðidagur", "Find one rainbow moment and tell someone about it."]
+    ];
+    const weatherLines = [
+      "Kíkjum út: er peysu-, regnjakka- eða sólgleraugnadagur?",
+      "Look outside together and choose cozy clothes for the adventure.",
+      "Muna útiföt: Icelandic weather can be silly and surprising!"
+    ];
+    function tick() {
+      const now = new Date();
+      document.getElementById('time').textContent = now.toLocaleTimeString('is-IS', { hour: '2-digit', minute: '2-digit' });
+      document.getElementById('date').textContent = now.toLocaleDateString('is-IS', { weekday: 'long', day: 'numeric', month: 'long' });
+      const day = Math.floor(now.getTime() / 86400000);
+      const message = messages[day % messages.length];
+      document.getElementById('message-title').textContent = message[0];
+      document.getElementById('message-body').textContent = message[1];
+      document.getElementById('weather-line').textContent = weatherLines[day % weatherLines.length];
+    }
+    tick();
+    setInterval(tick, 30000);
+  </script>
+</body>
+</html>
