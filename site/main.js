@@ -30,6 +30,7 @@ const REPO = "https://github.com/olibuijr/SMARTAGENT";
 const INSTALL_CMD = "git clone https://github.com/olibuijr/SMARTAGENT && SMARTAGENT/install.sh my-agent";
 const BG = "#161620", PANEL = "#262626", SKINC = "#fccda5";
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const isTouch = matchMedia("(pointer: coarse)").matches;
 
 // ── Level metrics (world units = pixels) ────────────────────────────────────
 const VIEW_H = 270;
@@ -279,6 +280,7 @@ scene.add(camera);
 // landscape: 270-tall retro view. portrait: hold world WIDTH at 420 and let
 // the view grow tall — more sky and street, nothing stretches.
 let hudRef = null; // set once the HUD group exists; resize() repositions it
+let ctrlBand = 0;  // reserved controller shelf height (touch portrait)
 let viewW = 480, viewH = VIEW_H, DIST = (VIEW_H / 2) / TAN, CAM_Y = VIEW_H / 2 - 24;
 function resize() {
 	const aspect = innerWidth / innerHeight;
@@ -291,8 +293,11 @@ function resize() {
 		viewH = VIEW_H;
 		viewW = Math.round(Math.min(760, Math.max(340, viewH * aspect)));
 	}
+	// Game-Boy layout on touch portrait: the world sits above a dedicated
+	// controller shelf instead of the pads floating over the street
+	ctrlBand = isTouch && aspect < .9 ? Math.round(Math.min(200, viewH * .22)) : 0;
 	DIST = (viewH / 2) / TAN;
-	CAM_Y = viewH / 2 - 24;
+	CAM_Y = viewH / 2 - 24 - ctrlBand;
 	camera.position.set(camera.position.x, CAM_Y, DIST);
 	if (hudRef) hudRef.position.set(0, -CAM_Y, -DIST);
 	scene.fog = new THREE.Fog(new THREE.Color(BG), DIST + 60, DIST + 900);
@@ -673,7 +678,6 @@ title.position.set(0, 70, 5);
 subtitle.position.set(0, 44, 5);
 hintCtl.position.set(0, 22, 5);
 hud.add(title, subtitle, hintCtl);
-const isTouch = matchMedia("(pointer: coarse)").matches;
 // ── Game Boy controller overlay ──
 function pxCircle(x, cx2, cy, r, col) {
 	x.fillStyle = col;
@@ -721,8 +725,21 @@ function roundBtn(label, pressed = false) {
 	return c;
 }
 const pads = [];
-let dpadMesh = null, dpadMaps = null;
+let dpadMesh = null, dpadMaps = null, shellPanel = null, shellEdge = null;
 if (isTouch) {
+	shellPanel = new THREE.Mesh(
+		new THREE.PlaneGeometry(1, 1),
+		new THREE.MeshBasicMaterial({ color: "#17171f" })
+	);
+	shellPanel.material.depthTest = false;
+	shellPanel.renderOrder = 9;
+	shellEdge = new THREE.Mesh(
+		new THREE.PlaneGeometry(1, 1),
+		new THREE.MeshBasicMaterial({ color: "#2a2a36" })
+	);
+	shellEdge.material.depthTest = false;
+	shellEdge.renderOrder = 9;
+	hud.add(shellPanel, shellEdge);
 	dpadMaps = {
 		idle: tex(dpadCanvas()), left: tex(dpadCanvas("left")),
 		right: tex(dpadCanvas("right")), jump: tex(dpadCanvas("jump")),
@@ -912,7 +929,8 @@ function step(dt, now) {
 	// title: lower-third at rest, parks top-left after the first input —
 	// positions derive from viewH so portrait and landscape both compose
 	{
-		const startY = viewH * .26, parkY = viewH - 90;
+		const topY = CAM_Y + viewH / 2;
+		const startY = viewH * .26, parkY = topY - 66;
 		const k = !started ? 0 : reduceMotion ? 1 : Math.min(1, (now - lastStart) / 800);
 		const e = 1 - Math.pow(1 - k, 4); // ease-out-quart
 		title.scale.setScalar(1 - .6 * e);
@@ -923,16 +941,25 @@ function step(dt, now) {
 		subtitle.material.opacity = 1 - e;
 		hintCtl.material.opacity = Math.max(0, 1 - e * 1.2);
 	}
-	coinHud.position.set(viewW / 2 - 54, viewH - 58, 5); // top-right, any aspect
+	coinHud.position.set(viewW / 2 - 54, CAM_Y + viewH / 2 - 34, 5); // top-right, any aspect
 	{
 		const bottom = CAM_Y - viewH / 2;
+		const mid = ctrlBand > 0 ? bottom + ctrlBand / 2 : 0;
+		if (shellPanel) {
+			shellPanel.visible = shellEdge.visible = ctrlBand > 0;
+			shellPanel.scale.set(viewW, Math.max(1, ctrlBand), 1);
+			shellPanel.position.set(0, bottom + ctrlBand / 2, 4);
+			shellEdge.scale.set(viewW, 2, 1);
+			shellEdge.position.set(0, bottom + ctrlBand, 4.5);
+		}
 		if (dpadMesh) {
 			dpadMesh.position.x = -viewW / 2 + 66;
-			dpadMesh.position.y = bottom + 62;
+			dpadMesh.position.y = ctrlBand > 0 ? mid : bottom + 62;
 		}
 		for (const p of pads) {
 			p.mesh.position.x = viewW / 2 - p.off;
-			p.mesh.position.y = bottom + p.lift;   // diagonal A/B, Game Boy style
+			// diagonal A/B: around the shelf midline, or legacy lift overlay
+			p.mesh.position.y = ctrlBand > 0 ? mid + (p.lift - 51) : bottom + p.lift;
 			p.mesh.material.map = p.held ? p.down : p.up;
 			p.mesh.material.opacity = p.held ? 1 : .92;
 		}
