@@ -1,0 +1,64 @@
+:root {
+  --bg: #161620;
+  --panel: #1c1c26;
+  --rail: #12121a;
+  --ink: #e8e2d8;
+  --muted: #8a8a9a;
+  --accent: #7dff9a;
+  --amber: #ffaf5f;
+  --line: #2a2a36;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  background: var(--bg); color: var(--ink);
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+.app { display: flex; height: 100vh; }
+
+.rail {
+  width: 68px; flex: 0 0 68px;
+  background: var(--rail);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 0; gap: 18px;
+}
+.logo { color: var(--amber); font-size: 26px; }
+.rail nav { display: flex; flex-direction: column; gap: 8px; width: 100%; align-items: center; }
+.tab {
+  background: transparent; color: var(--muted);
+  border: 0; font: inherit; font-size: 11px;
+  padding: 8px 4px; width: 56px; border-radius: 8px; cursor: pointer;
+}
+.tab:hover { color: var(--ink); background: #ffffff0d; }
+.tab.active { color: var(--accent); background: #7dff9a14; }
+.rail-foot { margin-top: auto; color: var(--muted); font-size: 10px; }
+
+.pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.topbar { padding: 22px 26px 8px; border-bottom: 1px solid var(--line); }
+.topbar h1 { margin: 0; font-size: 22px; letter-spacing: 1px; }
+.topbar .sub { color: var(--muted); font-size: 12px; }
+
+.hero { padding: 40px 26px; display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.phase { color: var(--amber); margin: 0; }
+.cta {
+  align-self: flex-start;
+  background: var(--accent); color: #101018;
+  border: 0; font: inherit; font-weight: 700;
+  padding: 12px 20px; border-radius: 10px; cursor: pointer;
+}
+.cta:active { transform: translateY(1px); }
+.count { color: var(--muted); margin: 0; }
+
+/* Mobile: the rail collapses to a bottom bar (parity plan detail). */
+@media (max-width: 560px) {
+  .app { flex-direction: column-reverse; }
+  .rail {
+    width: 100%; flex-basis: auto; flex-direction: row;
+    border-right: 0; border-top: 1px solid var(--line);
+    padding: 8px 0; justify-content: space-around;
+  }
+  .rail nav { flex-direction: row; }
+  .rail-foot, .logo { display: none; }
+}

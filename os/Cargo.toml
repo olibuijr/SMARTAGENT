@@ -1,0 +1,29 @@
+[package]
+name = "smartagent-os"
+version = "0.1.0"
+edition = "2021"
+description = "SMARTAGENT OS — one Dioxus fullstack frontend for web, desktop, and mobile over the fleet gateway"
+
+# Standalone workspace: keeps the pure-Rust `crates/*` workspace (std-only,
+# zero-dep) clean and free of the Dioxus/wasm/tokio dependency universe.
+[workspace]
+
+[dependencies]
+dioxus = { version = "0.7", features = ["router"] }
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]
+server = ["dioxus/server"]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
