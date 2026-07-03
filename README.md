@@ -1,44 +1,3 @@
-<div align="center">
-
-[![SMARTAGENT — the legendary developer fleet](assets/readme/banner-title.png)](https://smartagent.olibuijr.com)
-
-**[▶ PLAY THE LANDING PAGE](https://smartagent.olibuijr.com)** — a walkable
-pixel world built on three.js WebGPU. Meet the fleet, bump the ?-blocks,
-reach the castle.
-
-</div>
-
-## Meet The Fleet
-
-Eight autonomous agents — the legendary developer team — run this workspace
-around the clock: pulling tasks from the kanban board, running workflows,
-reviewing each other's work. Their pixel faces below are the exact sprites
-from the TUI sidebar and the landing page.
-
-| | | | |
-|:---:|:---:|:---:|:---:|
-| ![Linus Torvalds](assets/readme/linus.png) | ![Ada Lovelace](assets/readme/ada.png) | ![Dennis Ritchie](assets/readme/dennis.png) | ![Steve Wozniak](assets/readme/woz.png) |
-| **Linus Torvalds**<br>Team Lead | **Ada Lovelace**<br>Backend Expert | **Dennis Ritchie**<br>Systems Expert | **Steve Wozniak**<br>Frontend Expert |
-| ![Margaret Hamilton](assets/readme/margaret.png) | ![Grace Hopper](assets/readme/grace.png) | ![Alan Turing](assets/readme/turing.png) | ![Ken Thompson](assets/readme/ken.png) |
-| **Margaret Hamilton**<br>Database Expert | **Grace Hopper**<br>QA Lead | **Alan Turing**<br>Verification Expert | **Ken Thompson**<br>Infrastructure Expert |
-
-## Install
-
-```sh
-git clone https://github.com/olibuijr/SMARTAGENT && SMARTAGENT/install.sh my-agent
-```
-
-(Also copyable in-game: walk to the terminal at the end of the level and
-press **C**.)
-
-<div align="center">
-
-| | |
-|:---:|:---:|
-| [![Ada Lovelace's station](assets/readme/station-ada.jpg)](https://smartagent.olibuijr.com) | [![The GitHub castle](assets/readme/castle-github.png)](https://smartagent.olibuijr.com) |
-
-</div>
-
 # SMARTAGENT
 
 SMARTAGENT is a personal AI agent workspace built around
@@ -87,8 +46,7 @@ explicitly want the launcher to check upstream and replace `.pi/runtime/`.
 ## What You Can Do
 
 - Ask the agent to work in this repo or any project under `workspaces/`.
-- Search code with `codeindex` and navigate a multi-language symbol graph with
-  `codegraph`.
+- Search and index code with `codeindex` and `codegraph`.
 - Store and recall project memory with `memory`.
 - Browse real pages through Chrome with `browser` or the visual `sa-browser`.
 - Pull tasks from the kanban board and run evidence-gated workflows.
@@ -127,8 +85,9 @@ supervise restart chromium
 supervise watch
 
 # Secure mail checks via Himalaya. Passwords must live only in the
-# SMARTAGENT secrets store as `mail_olibuijr_password`.
-cargo build --release -p secrets
+# SMARTAGENT secrets store as `mail_olibuijr_password`; Himalaya reads them
+# through the audited `mail-secret` bridge, never from plaintext config/env.
+cargo build --release -p secrets -p mail-secret
 himalaya -c config/himalaya.toml account list
 himalaya -c config/himalaya.toml folder list -a olibuijr
 himalaya -c config/himalaya.toml envelope list -a olibuijr --page-size 10
@@ -147,7 +106,6 @@ hooks.d/        lifecycle hook scripts
 skills/         SKILL.md files, including Kanban methodology
 workflows/      workflow definitions for evidence-gated task runs
 ops/            supervisor boot, backup, and preflight docs
-site/           pixel-world landing page (smartagent.olibuijr.com), three.js WebGPU
 pi              project-local launcher using the vendored runtime in .pi/
 build.sh        build, test, audit, smoke, and release entrypoint
 AGENTS.md       architecture, conventions, security posture, tool catalog
@@ -196,7 +154,7 @@ The core active tool catalog is 22 standalone Rust binaries exposed to pi by thi
 |------|-------------------|--------------|
 | `semdb` | vector store | Semantic database: embed, search, get, delete, stats |
 | `memory` | [mem0](https://github.com/mem0ai/mem0) | Working/episodic/semantic memory with recall and promotion |
-| `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Multi-language symbol graph for Rust, Python, JS/TS, Go, Java, C/C++, C#, Kotlin, Scala, Ruby, PHP, Swift; defs, refs, callers, impls, paths, semantic code search |
+| `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust symbols, refs, callers, impls, paths, semantic code search |
 | `codeindex` | ripgrep-style search | Fast code search plus per-project file inventory |
 | `vault` | Obsidian-style vault | Markdown notes, links, backlinks, graph, keyword search |
 | `skills` | [Agent Skills](https://github.com/anthropics/skills) | `SKILL.md` loader, matcher, validator |
