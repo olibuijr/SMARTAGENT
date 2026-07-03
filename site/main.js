@@ -256,7 +256,16 @@ function signBoard(w, h, accent) {
 // ── Boot ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById("g");
 const renderer = new THREE.WebGPURenderer({ canvas, antialias: false });
-await renderer.init();
+try {
+	await renderer.init();
+} catch (e) {
+	// No WebGPU and no WebGL2 (ancient browser / headless): reveal the
+	// semantic content instead of a black screen.
+	document.querySelector(".sr").removeAttribute("class");
+	canvas.remove();
+	document.body.style.cssText = "background:#161620;color:#fccda5;font:14px/1.7 monospace;padding:2rem;overflow:auto";
+	throw e;
+}
 await document.fonts.load(`8px ${FONT}`).catch(() => {});
 renderer.setClearColor(new THREE.Color(BG));
 
@@ -264,24 +273,34 @@ const scene = new THREE.Scene();
 // Perspective diorama: the gameplay plane sits at z=0 and spans VIEW_H
 // vertically, exactly like the old ortho view — but depth is now real.
 const FOV = 38;
-const DIST = (VIEW_H / 2) / Math.tan((FOV / 2) * Math.PI / 180); // ≈392
+const TAN = Math.tan((FOV / 2) * Math.PI / 180);
 const camera = new THREE.PerspectiveCamera(FOV, 16 / 9, 10, 2600);
 scene.add(camera);
-let viewW = 480;
+// landscape: 270-tall retro view. portrait: hold world WIDTH at 420 and let
+// the view grow tall — more sky and street, nothing stretches.
+let hudRef = null; // set once the HUD group exists; resize() repositions it
+let viewW = 480, viewH = VIEW_H, DIST = (VIEW_H / 2) / TAN, CAM_Y = VIEW_H / 2 - 24;
 function resize() {
 	const aspect = innerWidth / innerHeight;
 	camera.aspect = aspect;
 	camera.updateProjectionMatrix();
-	viewW = Math.round(Math.min(760, Math.max(340, VIEW_H * aspect)));
-	renderer.setSize(viewW, VIEW_H, false);
+	if (aspect < .9) {
+		viewW = 420;
+		viewH = Math.round(Math.min(1040, 420 / aspect));
+	} else {
+		viewH = VIEW_H;
+		viewW = Math.round(Math.min(760, Math.max(340, viewH * aspect)));
+	}
+	DIST = (viewH / 2) / TAN;
+	CAM_Y = viewH / 2 - 24;
+	camera.position.set(camera.position.x, CAM_Y, DIST);
+	if (hudRef) hudRef.position.set(0, -CAM_Y, -DIST);
+	scene.fog = new THREE.Fog(new THREE.Color(BG), DIST + 60, DIST + 900);
+	renderer.setSize(viewW, viewH, false);
 }
 addEventListener("resize", resize);
 resize();
-
-// world y: screen bottom at y=0 → camera rides above the ground line
-const CAM_Y = VIEW_H / 2 - 24;
 camera.position.set(0, CAM_Y, DIST);
-scene.fog = new THREE.Fog(new THREE.Color(BG), DIST + 60, DIST + 900);
 
 // ── Build world ─────────────────────────────────────────────────────────────
 const world = new THREE.Group();
@@ -289,7 +308,7 @@ scene.add(world);
 
 // sky bands (deep background — fog-exempt)
 {
-	const bands = [["#12121c", 1100, 620], ["#161624", 420, 210], ["#1a1a2c", 230, -10]];
+	const bands = [["#12121c", 2400, 1200], ["#161624", 420, 210], ["#1a1a2c", 230, -10]];
 	for (const [col, h, y] of bands) {
 		const m = new THREE.Mesh(
 			new THREE.PlaneGeometry(LEVEL_END * 4, h),
@@ -308,39 +327,153 @@ const stars = [];
 	for (let i = 0; i < 90; i++) {
 		const s = plane(sc, 2);
 		s.material.fog = false;
-		s.position.set(rnd() * LEVEL_END * 1.4 - 200, 120 + rnd() * 420, -820 + rnd() * 120);
+		s.position.set(rnd() * LEVEL_END * 1.4 - 200, 120 + rnd() * 860, -820 + rnd() * 120);
 		s.material.opacity = .3 + rnd() * .7;
 		s.userData.tw = rnd() * 6.28;
 		scene.add(s); stars.push(s);
 	}
 }
-// city: actual 3D boxes at depth — perspective gives the parallax for free
+// city: a detailed 2.5D night skyline — real boxes, textured on front AND
+// sides, rooftop props, crate-name neon signs, blinking antennas, a moon.
+const blinkers = [], neons = [];
 {
 	let seed = 13;
 	const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-	const mat = (canvas) => new THREE.MeshBasicMaterial({ map: tex(canvas) });
 	const flat = (col) => new THREE.MeshBasicMaterial({ color: col });
-	function buildingFace(w, h) {
+	// muted facade palette — night-blue, warm-gray, brown-gray
+	const FACADES = ["#20202c", "#242028", "#1e222c", "#262229", "#1c1f28"];
+	const WINDOW_COLS = ["#43536b", "#3f4c40", "#6b5a43", "#4a4358"];
+
+	function facade(w, h, { storefront = false } = {}) {
 		const [c, x] = cv(Math.ceil(w / 4) * 4, Math.ceil(h / 4) * 4);
-		x.fillStyle = "#20202c"; x.fillRect(0, 0, c.width, c.height);
-		x.fillStyle = rnd() > .5 ? "#43536b" : "#3f4c40";
-		for (let wy = 8; wy < h - 10; wy += 12)
-			for (let wx = 5; wx < w - 8; wx += 10)
-				if (rnd() > .62) x.fillRect(wx, wy, 4, 5);
+		const base = FACADES[Math.floor(rnd() * FACADES.length)];
+		x.fillStyle = base; x.fillRect(0, 0, c.width, c.height);
+		// cornice + roofline trim
+		x.fillStyle = "#2c2c3a"; x.fillRect(0, 0, w, 3);
+		// per-building window style
+		const ww = rnd() > .5 ? 4 : 3, wh = rnd() > .5 ? 5 : 6;
+		const gx = ww + 4 + Math.floor(rnd() * 4), gy = wh + 6 + Math.floor(rnd() * 3);
+		const litCol = WINDOW_COLS[Math.floor(rnd() * WINDOW_COLS.length)];
+		const litRate = .25 + rnd() * .45;
+		for (let wy = 8; wy < h - (storefront ? 22 : 10); wy += gy) {
+			const darkFloor = rnd() > .85; // whole floor asleep
+			for (let wx = 5; wx < w - ww - 3; wx += gx) {
+				if (darkFloor || rnd() > litRate) {
+					x.fillStyle = "#15151d"; x.fillRect(wx, wy, ww, wh); // dark pane
+				} else {
+					x.fillStyle = litCol; x.fillRect(wx, wy, ww, wh);
+					x.fillStyle = "#0f0f14"; x.fillRect(wx + ww - 1, wy + wh - 2, 1, 2); // mullion nick
+					x.fillStyle = litCol;
+				}
+			}
+		}
+		if (storefront) {
+			// lit ground floor: awning band + door + shop windows
+			x.fillStyle = "#101018"; x.fillRect(0, h - 20, w, 20);
+			x.fillStyle = rnd() > .5 ? "#6b5a43" : "#43536b";
+			for (let wx = 4; wx < w - 12; wx += 18) x.fillRect(wx, h - 16, 10, 10);
+			x.fillStyle = "#2c2c3a"; x.fillRect(0, h - 22, w, 3); // awning
+		}
 		return c;
 	}
-	for (let i = 0; i < 46; i++) {
-		const bw = 44 + rnd() * 70, bh = 70 + rnd() * 190, bd = 36 + rnd() * 40;
-		const z = -(90 + rnd() * 320);
-		const front = mat(buildingFace(bw, bh));
-		const side = flat("#181822"), top = flat("#14141c");
-		const b = new THREE.Mesh(
-			new THREE.BoxGeometry(bw, bh, bd),
-			[side, side, top, side, front, side]
-		);
-		b.position.set(-350 + rnd() * (LEVEL_END + 900), GROUND + bh / 2 - 6, z - bd / 2);
-		scene.add(b);
+	function sideFace(w, h) {
+		// sparser, dimmer windows on the flank — reads as depth when tilting
+		const [c, x] = cv(Math.ceil(w / 4) * 4, Math.ceil(h / 4) * 4);
+		x.fillStyle = "#181822"; x.fillRect(0, 0, c.width, c.height);
+		x.fillStyle = "#242c3a";
+		for (let wy = 10; wy < h - 10; wy += 14)
+			for (let wx = 5; wx < w - 6; wx += 12)
+				if (rnd() > .82) x.fillRect(wx, wy, 3, 4);
+		return c;
 	}
+	const NEON_WORDS = [
+		["SEMDB", "#87d7ff"], ["MEMORY", "#ff87d7"], ["TASKS", "#ffaf5f"],
+		["CODEGRAPH", "#afd787"], ["VAULT", "#af87ff"], ["WORKFLOW", "#5fd7d7"],
+		["RUST", "#ffaf5f"],
+	];
+	let neonIdx = 0;
+
+	for (let i = 0; i < 46; i++) {
+		const near = i % 3 === 0; // every third building sits in the near row
+		const bw = (near ? 60 : 44) + rnd() * 70;
+		const bh = (near ? 90 : 70) + rnd() * 190;
+		const bd = 36 + rnd() * 40;
+		const z = near ? -(70 + rnd() * 90) : -(180 + rnd() * 240);
+		const bx = -350 + rnd() * (LEVEL_END + 900);
+		const front = new THREE.MeshBasicMaterial({ map: tex(facade(bw, bh, { storefront: near })) });
+		const side = new THREE.MeshBasicMaterial({ map: tex(sideFace(bd, bh)) });
+		const top = flat("#14141c");
+		const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), [side, side, top, flat("#101018"), front, flat("#181822")]);
+		b.position.set(bx, GROUND + bh / 2 - 6, z - bd / 2);
+		scene.add(b);
+		const roofY = GROUND + bh - 6, roofZ = z - bd / 2;
+
+		// rooftop furniture: water tank, AC boxes, antenna with blinker
+		if (rnd() > .45) {
+			const tank = new THREE.Mesh(new THREE.BoxGeometry(10, 12, 10), flat("#2a2530"));
+			tank.position.set(bx - bw / 4, roofY + 6, roofZ);
+			const legs = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 8), flat("#1b1820"));
+			legs.position.set(bx - bw / 4, roofY + 1, roofZ);
+			scene.add(tank, legs);
+		}
+		if (rnd() > .5) {
+			const ac = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 8), flat("#232330"));
+			ac.position.set(bx + bw / 5, roofY + 2.5, roofZ + 4);
+			scene.add(ac);
+		}
+		if (rnd() > .55) {
+			const mastH = 12 + rnd() * 20;
+			const mast = new THREE.Mesh(new THREE.BoxGeometry(1.6, mastH, 1.6), flat("#3a3a46"));
+			mast.position.set(bx + bw / 3, roofY + mastH / 2, roofZ);
+			scene.add(mast);
+			const [lc, lx] = cv(2, 2); lx.fillStyle = "#ff5f5f"; lx.fillRect(0, 0, 2, 2);
+			const lamp = plane(lc, 2);
+			lamp.position.set(bx + bw / 3, roofY + mastH + 2, roofZ + 1);
+			lamp.userData.ph = rnd() * 6.28;
+			scene.add(lamp);
+			blinkers.push(lamp);
+		}
+		// crate-name neon on select mid-height near buildings
+		if (near && neonIdx < NEON_WORDS.length && bh > 120 && rnd() > .35) {
+			const [word, col] = NEON_WORDS[neonIdx++];
+			const sign = plane(textCanvas(word, 8, col, { glow: col, pad: 4 }));
+			sign.position.set(bx, roofY - 14 - rnd() * 30, z + 1);
+			sign.userData.base = .95;
+			scene.add(sign);
+			const halo = plane(glowDisc(col, 40));
+			halo.material.blending = THREE.AdditiveBlending;
+			halo.material.depthWrite = false;
+			halo.position.set(bx, sign.position.y, z + .5);
+			neons.push({ sign, halo, ph: rnd() * 9 });
+			scene.add(halo);
+		}
+	}
+
+	// pixel moon with craters + halo
+	{
+		const R = 26;
+		const [mc, mx] = cv(R * 2, R * 2);
+		for (let y = 0; y < R * 2; y++) for (let x2 = 0; x2 < R * 2; x2++) {
+			const d = Math.hypot(x2 - R, y - R);
+			if (d < R) mx.fillStyle = "#d8d8c8", mx.fillRect(x2, y, 1, 1);
+		}
+		mx.fillStyle = "#b8b8aa";
+		for (const [cx, cy, cr] of [[16, 14, 5], [34, 30, 7], [30, 12, 3], [14, 34, 4], [40, 18, 3]]) {
+			for (let y = -cr; y <= cr; y++) for (let x2 = -cr; x2 <= cr; x2++)
+				if (x2 * x2 + y * y <= cr * cr && Math.hypot(cx + x2 - R, cy + y - R) < R - 1) mx.fillRect(cx + x2, cy + y, 1, 1);
+		}
+		const moon = plane(mc, 3);
+		moon.material.fog = false;
+		moon.position.set(LEVEL_START + 1250, 350, -780);
+		scene.add(moon);
+		const halo = plane(glowDisc("#d8d8c8", 90), 3);
+		halo.material.blending = THREE.AdditiveBlending;
+		halo.material.depthWrite = false;
+		halo.material.fog = false;
+		halo.position.set(moon.position.x, moon.position.y, -781);
+		scene.add(halo);
+	}
+
 	// soft hills silhouette behind the city
 	const hil = hillsStrip();
 	for (let px = -480; px < LEVEL_END + 960; px += 480) {
@@ -358,6 +491,7 @@ const stars = [];
 		scene.add(c);
 	}
 }
+
 // ground: one long slab with real depth — front face bricks, walkable top
 {
 	const g = groundStrip(480);
@@ -367,10 +501,10 @@ const stars = [];
 	const top = new THREE.MeshBasicMaterial({ color: "#232028" });
 	const side = new THREE.MeshBasicMaterial({ color: "#1b1820" });
 	const slab = new THREE.Mesh(
-		new THREE.BoxGeometry(LEVEL_END + 1920, GROUND, 240),
+		new THREE.BoxGeometry(LEVEL_END + 1920, GROUND, 520),
 		[side, side, top, side, front, side]
 	);
-	slab.position.set(LEVEL_END / 2, GROUND / 2, -120);
+	slab.position.set(LEVEL_END / 2, GROUND / 2, -260);
 	world.add(slab);
 }
 
@@ -526,12 +660,13 @@ const P = { x: spawnX, y: 0, vx: 0, vy: 0, onGround: true, face: 1, coins: 0 };
 // ── HUD (camera-space) ──────────────────────────────────────────────────────
 const hud = new THREE.Group();
 camera.add(hud);
-hud.position.set(0, -CAM_Y, -DIST); // children keep their world-y semantics
+hudRef = hud;
+resize(); // positions the HUD for the current aspect
 const title = plane(textCanvas("SMARTAGENT", 26, SKINC, { glow: "#ffaf5f", pad: 8 }));
 const subtitle = plane(textCanvas("THE LEGENDARY DEVELOPER TEAM", 9, "#87d7ff", { pad: 4 }));
 const hintCtl = plane(textCanvas(
 	matchMedia("(pointer: coarse)").matches
-		? "WALK WITH THE PAD - A JUMPS - B USES"
+		? "D-PAD WALKS - A JUMPS - B USES"
 		: "ARROWS / AD TO WALK - SPACE TO JUMP",
 	8, "#8a8a9a", { pad: 4 }));
 title.position.set(0, 70, 5);
@@ -539,31 +674,72 @@ subtitle.position.set(0, 44, 5);
 hintCtl.position.set(0, 22, 5);
 hud.add(title, subtitle, hintCtl);
 const isTouch = matchMedia("(pointer: coarse)").matches;
-function padButton(label, w = 36) {
-	const [c, x] = cv(w + (64 - w % 64) % 64, 36); // row-aligned width
-	const ox = Math.floor((c.width - w) / 2);
-	x.fillStyle = "#262626"; x.fillRect(ox, 0, w, 36);
-	x.strokeStyle = "#8a8a9a"; x.lineWidth = 2; x.strokeRect(ox + 1, 1, w - 2, 34);
-	x.fillStyle = "#e8e2d8"; x.font = `12px ${FONT}`; x.textBaseline = "top";
-	x.fillText(label, ox + Math.floor((w - x.measureText(label).width) / 2), 11);
-	return { canvas: c, w };
+// ── Game Boy controller overlay ──
+function pxCircle(x, cx2, cy, r, col) {
+	x.fillStyle = col;
+	for (let y = -r; y <= r; y++) for (let x2 = -r; x2 <= r; x2++)
+		if (x2 * x2 + y * y <= r * r) x.fillRect(cx2 + x2, cy + y, 1, 1);
+}
+function dpadCanvas(pressed = null) {
+	// classic cross: dark body, beveled arms, engraved arrows, center dimple
+	const S = 96, A = 32;                    // size, arm thickness
+	const [c, x] = cv(S + 32, S);            // row-aligned width
+	const ox = 16, m = (S - A) / 2;
+	const arm = (px, py, w, h, dir) => {
+		const down = pressed === dir;
+		x.fillStyle = "#0a0a10"; x.fillRect(ox + px - 2, py - 2, w + 4, h + 4);
+		x.fillStyle = down ? "#101018" : "#22222c"; x.fillRect(ox + px, py, w, h);
+		if (!down) {
+			x.fillStyle = "#3c3c4a";
+			x.fillRect(ox + px, py, w, 3); x.fillRect(ox + px, py, 3, h);
+		}
+	};
+	arm(0, m, S, A, null);                    // horizontal bar (base coat)
+	arm(m, 0, A, S, null);                    // vertical bar
+	arm(0, m, Math.floor(S / 3), A, "left");
+	arm(S - Math.floor(S / 3), m, Math.floor(S / 3), A, "right");
+	arm(m, 0, A, Math.floor(S / 3), "jump");
+	arm(m, S - Math.floor(S / 3), A, Math.floor(S / 3), "down");
+	// engraved arrows
+	x.fillStyle = "#0e0e14";
+	const t = (cx2, cy, dx, dy) => { for (let i = 0; i < 6; i++) x.fillRect(ox + cx2 + dx * i - (dy ? 6 - i : 0), cy + dy * i - (dx ? 6 - i : 0), dy ? 2 * (6 - i) : 2, dx ? 2 * (6 - i) : 2); };
+	t(12, S / 2 - 1, -1, 0); t(S - 14, S / 2 - 1, 1, 0); t(S / 2 - 1, 12, 0, -1); t(S / 2 - 1, S - 14, 0, 1);
+	pxCircle(x, ox + S / 2, S / 2, 11, "#1a1a24");
+	pxCircle(x, ox + S / 2, S / 2, 8, "#14141c");
+	return c;
+}
+function roundBtn(label, pressed = false) {
+	// Game Boy magenta face button, engraved letter
+	const R = 25;
+	const [c, x] = cv(64, 56);
+	pxCircle(x, 32, 28, R + 2, "#0a0a10");                       // outline
+	pxCircle(x, 32, 28 + (pressed ? 1 : 2), R, "#5e1c36");       // lower body
+	pxCircle(x, 32, 28 + (pressed ? 1 : 0) - 2, R, pressed ? "#7c2848" : "#a13a5e");
+	if (!pressed) pxCircle(x, 32 - 7, 28 - 9, 7, "#c25579");     // sheen
+	x.fillStyle = "#2a0e1c"; x.font = `14px ${FONT}`; x.textBaseline = "top";
+	x.fillText(label, 32 - Math.floor(x.measureText(label).width / 2), 21 + (pressed ? 1 : 0));
+	return c;
 }
 const pads = [];
+let dpadMesh = null, dpadMaps = null;
 if (isTouch) {
-	// [id, label, dx-from-edge(sign = side), action]
-	const defs = [
-		{ label: "<", side: -1, off: 26, act: "left" },
-		{ label: ">", side: -1, off: 70, act: "right" },
-		{ label: "B", side: 1, off: 70, act: "use" },
-		{ label: "A", side: 1, off: 26, act: "jump" },
-	];
-	for (const d of defs) {
-		const { canvas } = padButton(d.label);
-		const m = plane(canvas);
-		m.material.opacity = .72;
-		m.position.set(0, 0, 6);
+	dpadMaps = {
+		idle: tex(dpadCanvas()), left: tex(dpadCanvas("left")),
+		right: tex(dpadCanvas("right")), jump: tex(dpadCanvas("jump")),
+		down: tex(dpadCanvas("down")),
+	};
+	dpadMesh = overlay(plane(dpadCanvas()), 6);
+	dpadMesh.material.opacity = .92;
+	hud.add(dpadMesh);
+	for (const d of [
+		{ label: "B", act: "use", off: 96, lift: 40 },
+		{ label: "A", act: "jump", off: 40, lift: 62 },   // A sits higher — GB diagonal
+	]) {
+		const m = overlay(plane(roundBtn(d.label)), 6);
+		const up = m.material.map, down = tex(roundBtn(d.label, true));
+		m.material.opacity = .92;
 		hud.add(m);
-		pads.push({ ...d, mesh: m, held: false });
+		pads.push({ ...d, mesh: m, up, down, held: false });
 	}
 }
 let coinHud = plane(textCanvas("FACTS 0/8", 8, "#ffd75f", { pad: 3 }));
@@ -612,19 +788,31 @@ let touchDir = 0, touchJump = false;
 const activePointers = new Map(); // pointerId -> pad
 function padAt(clientX, clientY) {
 	const vx = (clientX / innerWidth - .5) * viewW;
-	const vy = (.5 - clientY / innerHeight) * VIEW_H;
-	return pads.find((p) =>
-		Math.abs(vx - p.mesh.position.x) < 24 && Math.abs(vy - p.mesh.position.y) < 26);
+	const vy = (.5 - clientY / innerHeight) * viewH + CAM_Y; // world-y like the meshes
+	if (dpadMesh) {
+		const dx = vx - dpadMesh.position.x, dy = vy - dpadMesh.position.y;
+		if (Math.abs(dx) < 54 && Math.abs(dy) < 54) {
+			const act = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy > 0 ? "jump" : "down");
+			return { dpad: true, act };
+		}
+	}
+	return pads.find((p) => {
+		const dx = vx - p.mesh.position.x, dy = vy - p.mesh.position.y;
+		return dx * dx + dy * dy < 30 * 30;
+	});
 }
 function recomputeTouch() {
 	touchDir = 0; touchJump = false;
+	let dpadAct = null;
 	for (const p of activePointers.values()) {
 		if (!p) continue;
 		if (p.act === "left") touchDir = -1;
 		if (p.act === "right") touchDir = 1;
 		if (p.act === "jump") touchJump = true;
+		if (p.dpad) dpadAct = p.act;
 	}
 	for (const p of pads) p.held = [...activePointers.values()].includes(p);
+	if (dpadMesh) dpadMesh.material.map = dpadMaps[dpadAct ?? "idle"];
 }
 canvas.addEventListener("pointerdown", (e) => {
 	start();
@@ -721,21 +909,33 @@ function step(dt, now) {
 	camera.position.x = camX + tiltX * 26 + lean * 10;
 	camera.position.y = CAM_Y + 6 - tiltY * 16;
 	camera.lookAt(camX - tiltX * 22, CAM_Y - 8 + tiltY * 10, 0);
-	// title parks top-left after the first input
-	if (started) {
-		const k = reduceMotion ? 1 : Math.min(1, (now - lastStart) / 800);
+	// title: lower-third at rest, parks top-left after the first input —
+	// positions derive from viewH so portrait and landscape both compose
+	{
+		const startY = viewH * .26, parkY = viewH - 90;
+		const k = !started ? 0 : reduceMotion ? 1 : Math.min(1, (now - lastStart) / 800);
 		const e = 1 - Math.pow(1 - k, 4); // ease-out-quart
 		title.scale.setScalar(1 - .6 * e);
 		title.position.x = (-viewW / 2 + 86) * e;
-		title.position.y = 70 + 42 * e;
+		title.position.y = startY + (parkY - startY) * e;
+		subtitle.position.y = startY - 26;
+		hintCtl.position.y = startY - 48;
 		subtitle.material.opacity = 1 - e;
 		hintCtl.material.opacity = Math.max(0, 1 - e * 1.2);
 	}
-	coinHud.position.set(viewW / 2 - 54, VIEW_H / 2 - 34, 5);
-	for (const p of pads) {
-		p.mesh.position.x = p.side * (viewW / 2 - p.off);
-		p.mesh.position.y = -VIEW_H / 2 + 30;
-		p.mesh.material.opacity = p.held ? 1 : .72;
+	coinHud.position.set(viewW / 2 - 54, viewH - 58, 5); // top-right, any aspect
+	{
+		const bottom = CAM_Y - viewH / 2;
+		if (dpadMesh) {
+			dpadMesh.position.x = -viewW / 2 + 66;
+			dpadMesh.position.y = bottom + 62;
+		}
+		for (const p of pads) {
+			p.mesh.position.x = viewW / 2 - p.off;
+			p.mesh.position.y = bottom + p.lift;   // diagonal A/B, Game Boy style
+			p.mesh.material.map = p.held ? p.down : p.up;
+			p.mesh.material.opacity = p.held ? 1 : .92;
+		}
 	}
 
 	// stations: bob + dialog proximity
@@ -767,6 +967,15 @@ function step(dt, now) {
 	}
 	// stars twinkle
 	if (!reduceMotion) for (const s of stars) s.material.opacity = .4 + .4 * Math.sin(now / 900 + s.userData.tw);
+	// antenna blinkers: slow red pulse; neon signs: occasional flicker dip
+	if (!reduceMotion) {
+		for (const l of blinkers) l.material.opacity = Math.sin(now / 700 + l.userData.ph) > .1 ? 1 : .12;
+		for (const n of neons) {
+			const flick = Math.sin(now / 90 + n.ph * 7) > .97 ? .35 : 1;
+			n.sign.material.opacity = n.sign.userData.base * flick;
+			n.halo.material.opacity = .8 * flick;
+		}
+	}
 }
 
 function loop(now) {
