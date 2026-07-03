@@ -3,11 +3,20 @@
 //! Best-effort by default: if cwd is not a git repo, lifecycle is skipped so
 //! task boards remain usable in tests/scratch repos. Set
 //! `SMARTAGENT_WORKTREE_STRICT=1` to turn lifecycle failures into task errors.
+//!
+//! Task merges (`finish_done`) never run `git merge` in the shared main
+//! checkout. Concurrent fleet agents calling `tasks done` at the same time
+//! used to race on `git merge` there, leaving `UU`/`M` residue with no
+//! MERGE_HEAD that then blocked every subsequent merge. Instead the merge is
+//! computed in an isolated, throwaway `git worktree` and the main checkout is
+//! only ever fast-forwarded onto the resulting commit — a fast-forward can
+//! neither conflict nor leave residue. See `merge_lock`/`merge_isolated`.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn strict() -> bool { std::env::var("SMARTAGENT_WORKTREE_STRICT").is_ok() }
 fn disabled() -> bool { std::env::var("SMARTAGENT_WORKTREE_DISABLE").is_ok() }
@@ -84,23 +93,141 @@ pub fn finish_done(id: &str) -> Result<String, String> {
     if run(&dir, &["diff", "--cached", "--quiet"]).is_err() {
         let _ = run(&dir, &["commit", "-m", &format!("{id}: task changes")]);
     }
-    // Fast-forward if we can; otherwise a real merge. If that merge CONFLICTS,
-    // abort it — never leave the base branch half-merged with conflict markers —
-    // and PRESERVE the worktree + branch so the work survives for a manual merge.
-    // Only a clean merge removes the worktree/branch.
-    if run(&root, &["merge", "--ff-only", &branch]).is_err() {
-        if let Err(e) = run(&root, &["merge", "--no-edit", &branch]) {
-            // Abort any in-progress merge so {base} stays clean and buildable.
-            let _ = run(&root, &["merge", "--abort"]);
+
+    // Serialize merges across concurrent fleet agents. Held for the whole
+    // compute-then-fast-forward sequence below so no two merges can ever
+    // interleave against the shared main checkout.
+    let _lock = match MergeLock::acquire(&root) {
+        Ok(l) => l,
+        Err(e) => {
+            let msg = format!("\nworktree: merge lock unavailable for {branch} — worktree/branch preserved for retry ({e})");
+            return if strict() { Err(msg) } else { Ok(msg) };
+        }
+    };
+
+    // Compute the merge in an isolated throwaway worktree — never in {root}.
+    // A CONFLICT there never touches the base branch at all: abort it,
+    // preserve the task worktree/branch for a manual merge.
+    match merge_isolated(&root, &base, &branch) {
+        Ok(MergeOutcome::Merged(sha)) => {
+            // {sha} is a descendant of {base}'s current tip (we computed it
+            // from {base} under the lock, so nothing else could have moved
+            // {base} meanwhile), so this can only ever fast-forward — it
+            // cannot conflict and cannot leave residue.
+            if let Err(e) = run(&root, &["merge", "--ff-only", &sha]) {
+                let msg = format!(
+                    "\nworktree: fast-forward of {base} to merged {branch} ({sha}) failed — base left untouched, worktree/branch preserved for manual merge ({e})"
+                );
+                return if strict() { Err(msg) } else { Ok(msg) };
+            }
+            let _ = run(&root, &["worktree", "remove", "--force", dir.to_str().unwrap_or("")]);
+            let _ = run(&root, &["branch", "-D", &branch]);
+            Ok(format!("\nworktree: merged {branch} and removed {}", dir.display()))
+        }
+        Ok(MergeOutcome::Conflict(e)) => {
             let msg = format!(
                 "\nworktree: MERGE CONFLICT for {branch} — aborted to protect {base}; worktree/branch preserved for manual merge ({e})"
             );
-            return if strict() { Err(msg) } else { Ok(msg) };
+            if strict() { Err(msg) } else { Ok(msg) }
+        }
+        Err(e) => {
+            let msg = format!("\nworktree: merge of {branch} failed — worktree/branch preserved for manual merge ({e})");
+            if strict() { Err(msg) } else { Ok(msg) }
         }
     }
-    let _ = run(&root, &["worktree", "remove", "--force", dir.to_str().unwrap_or("")]);
-    let _ = run(&root, &["branch", "-D", &branch]);
-    Ok(format!("\nworktree: merged {branch} and removed {}", dir.display()))
+}
+
+/// Outcome of computing a task branch's merge against `base` in isolation.
+enum MergeOutcome {
+    /// Merge succeeded; carries the resulting commit SHA (a descendant of
+    /// `base`'s tip, safe to fast-forward onto).
+    Merged(String),
+    /// Merge conflicted; the throwaway worktree was already aborted/removed.
+    /// Carries the git error text for diagnostics.
+    Conflict(String),
+}
+
+/// Compute `git merge --no-ff --no-edit {branch}` against `{base}` in a
+/// throwaway worktree detached at `base`'s current tip, never in `root`
+/// itself. The throwaway worktree is always removed before returning,
+/// success or failure.
+fn merge_isolated(root: &Path, base: &str, branch: &str) -> Result<MergeOutcome, String> {
+    fs::create_dir_all(root.join("worktrees")).map_err(|e| e.to_string())?;
+    let tmp = merge_tmp_dir(root, branch);
+    let _ = fs::remove_dir_all(&tmp); // clear any residue from a prior crash
+    let tmp_str = tmp.to_str().ok_or("bad merge tmp path")?.to_string();
+
+    let outcome = run(root, &["worktree", "add", "--detach", &tmp_str, base]).and_then(|_| {
+        match run(&tmp, &["merge", "--no-ff", "--no-edit", branch]) {
+            Ok(_) => run(&tmp, &["rev-parse", "HEAD"]).map(MergeOutcome::Merged),
+            Err(e) => {
+                // Never leave the throwaway worktree mid-merge either.
+                let _ = run(&tmp, &["merge", "--abort"]);
+                Ok(MergeOutcome::Conflict(e))
+            }
+        }
+    });
+
+    // Always try to remove the throwaway worktree, whether or not it was
+    // fully set up — merge scratch state must never linger.
+    let _ = run(root, &["worktree", "remove", "--force", &tmp_str]);
+    let _ = fs::remove_dir_all(&tmp);
+    outcome
+}
+
+fn merge_tmp_dir(root: &Path, branch: &str) -> PathBuf {
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let safe = branch.replace('/', "_");
+    root.join("worktrees").join(format!(".merge-{safe}-{ts}"))
+}
+
+const MERGE_LOCK_STALE_SECS: u64 = 120;
+const MERGE_LOCK_WAIT_SECS: u64 = 180;
+const MERGE_LOCK_POLL_MS: u64 = 100;
+
+/// O_EXCL lockfile serializing all task merges against one repo root. Held
+/// for the lifetime of the guard; released (best-effort) on drop, covering
+/// every exit path including early returns via `?`.
+struct MergeLock(PathBuf);
+
+impl MergeLock {
+    fn acquire(root: &Path) -> Result<Self, String> {
+        let path = root.join(".git").join("tasks-merge.lock");
+        let deadline = Instant::now() + Duration::from_secs(MERGE_LOCK_WAIT_SECS);
+        loop {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut f) => {
+                    let _ = write!(f, "{}", std::process::id());
+                    return Ok(MergeLock(path));
+                }
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                    if lock_is_stale(&path) {
+                        // Prior holder almost certainly died mid-merge; reclaim.
+                        let _ = fs::remove_file(&path);
+                        continue;
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(format!("held by another process after {MERGE_LOCK_WAIT_SECS}s wait"));
+                    }
+                    std::thread::sleep(Duration::from_millis(MERGE_LOCK_POLL_MS));
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+    }
+}
+
+impl Drop for MergeLock {
+    fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+}
+
+fn lock_is_stale(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| SystemTime::now().duration_since(t).ok())
+        .map(|age| age.as_secs() > MERGE_LOCK_STALE_SECS)
+        .unwrap_or(false)
 }
 
 pub fn current_task_path(id: &str) -> Result<PathBuf, String> {
