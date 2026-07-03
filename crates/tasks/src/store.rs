@@ -8,6 +8,8 @@ use semdb::json::{self, Value};
 use semdb::storage::Db;
 
 const PLACEHOLDER_VEC: [f32; 1] = [0.0];
+const COMPACT_MIN_RECORDS: u64 = 4096;
+const COMPACT_RATIO: u64 = 4;
 
 /// Kanban columns, in flow order. Blocked is a flag, not a column.
 pub const COLUMNS: [&str; 5] = ["backlog", "ready", "doing", "review", "done"];
@@ -100,7 +102,8 @@ impl Store {
 
     pub fn put(&self, t: &Task) -> Result<(), String> {
         let mut db = self.db()?;
-        db.put(&t.id, &encode(t), PLACEHOLDER_VEC.to_vec())
+        db.put(&t.id, &encode(t), PLACEHOLDER_VEC.to_vec())?;
+        compact_if_bloated(&mut db)
     }
 
     pub fn get(&self, id: &str) -> Result<Task, String> {
@@ -111,7 +114,9 @@ impl Store {
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
         let mut db = self.db()?;
-        db.delete(id)
+        let removed = db.delete(id)?;
+        compact_if_bloated(&mut db)?;
+        Ok(removed)
     }
 
     pub fn all(&self) -> Result<Vec<Task>, String> {
@@ -204,8 +209,26 @@ impl Store {
             "_board",
             &format!(r#"{{"doing":{},"review":{}}}"#, w.doing, w.review),
             PLACEHOLDER_VEC.to_vec(),
-        )
+        )?;
+        compact_if_bloated(&mut db)
     }
+}
+
+fn compact_min_records() -> u64 {
+    std::env::var("SMARTAGENT_STORE_COMPACT_MIN_RECORDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(COMPACT_MIN_RECORDS)
+}
+
+fn compact_if_bloated(db: &mut Db) -> Result<(), String> {
+    if db.records > compact_min_records()
+        && db.records > COMPACT_RATIO * (db.index.len() as u64).max(1)
+    {
+        db.compact()?;
+    }
+    Ok(())
 }
 
 fn encode(t: &Task) -> String {
@@ -322,6 +345,33 @@ mod tests {
             .join(name);
         let _ = std::fs::remove_dir_all(&d);
         d.join("tasks.semdb")
+    }
+
+    #[test]
+    fn opportunistic_compaction_bounds_overwrite_bloat() {
+        let s = Store::open(&scratch("tasks-compact-bloat")).unwrap();
+        let mut t = Task {
+            id: "T-1".into(),
+            title: "compact me".into(),
+            col: "doing".into(),
+            prio: "p2".into(),
+            created: 1,
+            ..Task::default()
+        };
+        std::env::set_var("SMARTAGENT_STORE_COMPACT_MIN_RECORDS", "16");
+        for i in 0..21 {
+            t.title = format!("compact me {i}");
+            s.put(&t).unwrap();
+        }
+        let db = s.db().unwrap();
+        assert!(
+            db.records <= (db.index.len() as u64) + 8,
+            "records={} entries={}",
+            db.records,
+            db.index.len()
+        );
+        std::env::remove_var("SMARTAGENT_STORE_COMPACT_MIN_RECORDS");
+        assert_eq!(s.get("T-1").unwrap().title, "compact me 20");
     }
 
     #[test]

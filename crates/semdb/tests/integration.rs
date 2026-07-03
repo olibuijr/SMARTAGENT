@@ -17,6 +17,16 @@ fn tmp(name: &str) -> PathBuf {
     p
 }
 
+fn sock(name: &str) -> PathBuf {
+    // Unix socket paths have a small OS limit; worktree absolute paths can be
+    // too long, so use a short in-repo relative path.
+    let dir = PathBuf::from(".scratch");
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join(format!("semdb-it-{name}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&p);
+    p
+}
+
 fn rand_vec(seed: &mut u64, dim: usize) -> Vec<f32> {
     let mut v = Vec::with_capacity(dim);
     for _ in 0..dim {
@@ -35,8 +45,7 @@ fn cli_roundtrip() {
     // client↔daemon roundtrip: an isolated daemon subprocess (its own socket,
     // no clash with production) and CLI subprocesses pointed at it via env.
     let path = tmp("cli");
-    let sock = path.with_extension("sock");
-    let _ = std::fs::remove_file(&sock);
+    let sock = sock("cli");
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
     let run = |args: &[&str]| -> (bool, String) {
@@ -45,7 +54,10 @@ fn cli_roundtrip() {
             .env("SMARTAGENT_SEMDB_SOCKET", &sock)
             .output()
             .unwrap();
-        (out.status.success(), String::from_utf8_lossy(&out.stdout).to_string())
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).to_string(),
+        )
     };
 
     let mut daemon = Command::new(bin)
@@ -63,14 +75,34 @@ fn cli_roundtrip() {
     }
 
     assert!(run(&["create", &db]).0);
-    assert!(run(&["put", &db, "--id", "a", "--vector", "1,0,0", "--meta", r#"{"t":"first"}"#]).0);
+    assert!(
+        run(&[
+            "put",
+            &db,
+            "--id",
+            "a",
+            "--vector",
+            "1,0,0",
+            "--meta",
+            r#"{"t":"first"}"#
+        ])
+        .0
+    );
     assert!(run(&["put", &db, "--id", "b", "--vector", "0,1,0"]).0);
 
     let (ok, got) = run(&["get", &db, "--id", "a"]);
     assert!(ok);
     assert!(got.contains("first"));
 
-    let (ok, hits) = run(&["search", &db, "--vector", "0.9,0.1,0", "--k", "1", "--exact"]);
+    let (ok, hits) = run(&[
+        "search",
+        &db,
+        "--vector",
+        "0.9,0.1,0",
+        "--k",
+        "1",
+        "--exact",
+    ]);
     assert!(ok);
     assert!(hits.lines().next().unwrap().contains("\ta\t"));
 
@@ -146,8 +178,7 @@ fn brute_force_matches_manual_cosine() {
 fn kill9_recovery() {
     let path = tmp("kill9");
     Db::create(&path).unwrap();
-    let sock = path.with_extension("sock");
-    let _ = std::fs::remove_file(&sock);
+    let sock = sock("kill9");
     let bin = env!("CARGO_BIN_EXE_semdb");
     let db = path.to_string_lossy().to_string();
 
