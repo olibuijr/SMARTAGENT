@@ -46,7 +46,8 @@ explicitly want the launcher to check upstream and replace `.pi/runtime/`.
 ## What You Can Do
 
 - Ask the agent to work in this repo or any project under `workspaces/`.
-- Search and index code with `codeindex` and `codegraph`.
+- Search code with `codeindex` and navigate a multi-language symbol graph with
+  `codegraph`.
 - Store and recall project memory with `memory`.
 - Browse real pages through Chrome with `browser` or the visual `sa-browser`.
 - Pull tasks from the kanban board and run evidence-gated workflows.
@@ -146,7 +147,7 @@ The core active tool catalog is 22 standalone Rust binaries exposed to pi by thi
 |------|-------------------|--------------|
 | `semdb` | vector store | Semantic database: embed, search, get, delete, stats |
 | `memory` | [mem0](https://github.com/mem0ai/mem0) | Working/episodic/semantic memory with recall and promotion |
-| `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Rust symbols, refs, callers, impls, paths, semantic code search |
+| `codegraph` | [CodeGraph](https://github.com/codegraph-ai/CodeGraph) | Multi-language symbol graph for Rust, Python, JS/TS, Go, Java, C/C++, C#, Kotlin, Scala, Ruby, PHP, Swift; defs, refs, callers, impls, paths, semantic code search |
 | `codeindex` | ripgrep-style search | Fast code search plus per-project file inventory |
 | `vault` | Obsidian-style vault | Markdown notes, links, backlinks, graph, keyword search |
 | `skills` | [Agent Skills](https://github.com/anthropics/skills) | `SKILL.md` loader, matcher, validator |
