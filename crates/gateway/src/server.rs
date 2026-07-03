@@ -175,6 +175,11 @@ pub fn serve(args: &[String]) -> Result<(), String> {
         if flags.autonomous { ", AUTONOMOUS" } else { "" }
     );
 
+    // Optional TCP bridge for network clients (the SMARTAGENT OS phone/web app):
+    // a token-gated byte-proxy in front of THIS unix socket, so the whole
+    // protocol handler is reused unchanged. Enabled by config `gateway_tcp_addr`.
+    start_tcp_bridge(sock.clone());
+
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let agents = agents.clone();
@@ -618,6 +623,76 @@ fn mute_action(previous_empty_turns: u32, text: &str, usage: crate::child::Usage
         2 => MuteAction::CompactRetry,
         _ => MuteAction::Rotate,
     }
+}
+
+/// Optional TCP → unix-socket bridge for network clients. A first line
+/// `{"token":"…"}` must match `gateway_tcp_token` (when configured); then bytes
+/// are pumped both ways to a fresh connection on the local unix socket, so the
+/// exact same line-JSON protocol serves phone/web clients over the LAN/VPN.
+fn start_tcp_bridge(sock: std::path::PathBuf) {
+    let cfg = semdb::config::Config::load();
+    let Some(addr) = cfg.resolve("gateway_tcp_addr", "SMARTAGENT_GATEWAY_TCP_ADDR", None) else {
+        return;
+    };
+    let token = cfg
+        .resolve("gateway_tcp_token", "SMARTAGENT_GATEWAY_TCP_TOKEN", None)
+        .unwrap_or_default();
+    std::thread::spawn(move || {
+        let listener = match std::net::TcpListener::bind(&addr) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("[gateway] tcp bridge bind {addr}: {e}");
+                return;
+            }
+        };
+        eprintln!("[gateway] tcp bridge on {addr}");
+        for stream in listener.incoming() {
+            let Ok(tcp) = stream else { continue };
+            let sock = sock.clone();
+            let token = token.clone();
+            std::thread::spawn(move || bridge_conn(tcp, &sock, &token));
+        }
+    });
+}
+
+fn bridge_conn(tcp: std::net::TcpStream, sock: &std::path::Path, token: &str) {
+    let mut reader = BufReader::new(match tcp.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    });
+    let mut tcp_w = tcp;
+    if !token.is_empty() {
+        let mut line = String::new();
+        if reader.read_line(&mut line).is_err() {
+            return;
+        }
+        let ok = json::parse(line.trim())
+            .ok()
+            .and_then(|v| v.get("token").and_then(Value::as_str).map(|t| t == token))
+            .unwrap_or(false);
+        if !ok {
+            let _ = tcp_w.write_all(b"{\"ev\":\"info\",\"data\":\"auth failed\"}\n{\"ev\":\"done\"}\n");
+            return;
+        }
+        let _ = tcp_w.write_all(b"{\"ev\":\"info\",\"data\":\"auth ok\"}\n");
+    }
+    let unix = match UnixStream::connect(sock) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let unix_w = match unix.try_clone() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    // tcp → unix (drains reader's buffer first, so any bytes read past the auth
+    // line are forwarded); unix → tcp on this thread.
+    let up = std::thread::spawn(move || {
+        let mut w = unix_w;
+        let _ = std::io::copy(&mut reader, &mut w);
+    });
+    let mut down = BufReader::new(unix);
+    let _ = std::io::copy(&mut down, &mut tcp_w);
+    let _ = up.join();
 }
 
 fn handle_client(stream: UnixStream, agents: Agents) {
