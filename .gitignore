@@ -1,8 +1,15 @@
 # SMARTAGENT runtime & data (never commit)
 # .refrepos = cloned reference repos (read-only, large, embedded git repos)
 .refrepos/
-# .pi = vendored pi runtime, sessions, agent config + router key/auth
-.pi/
+# .pi = vendored pi runtime, sessions, agent config + router key/auth.
+# Everything ignored EXCEPT the pinned runtime manifest (package.json + bun.lock),
+# which release CI needs to build bundles. node_modules, agent/ (keys/settings),
+# and sessions/ stay ignored.
+.pi/*
+!.pi/runtime/
+.pi/runtime/*
+!.pi/runtime/package.json
+!.pi/runtime/bun.lock
 # agent CLI state/history (local only)
 .agents/
 .claude/
@@ -25,6 +32,9 @@ secrets.key
 config/*.local.conf
 # local mail config (himalaya) — user-specific; password fetched via secrets bridge
 config/himalaya*.toml
+
+# Release bundles (built by scripts/package.sh + CI; uploaded to GH Releases)
+dist/
 
 # Rust
 target/

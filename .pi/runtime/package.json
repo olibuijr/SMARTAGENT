@@ -1,0 +1,7 @@
+{
+  "name": "smartagent-pi-runtime",
+  "private": true,
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.3"
+  }
+}

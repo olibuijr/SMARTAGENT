@@ -1,0 +1,67 @@
+name: release
+
+# Cut a release by pushing a tag:  git tag v0.2.1 && git push origin v0.2.1
+# (bump the version first with ./build.sh patch|minor|major "<changelog>").
+#
+# Each matrix entry builds prebuilt binaries for one platform and uploads a
+# self-contained bundle (smartagent-<version>-<triple>.tar.gz + SHA256SUMS)
+# that `sa update` / `install.sh --from` consume. The matrix starts at Linux
+# x86_64 (the reference platform); adding an entry is exactly what a
+# platform-support PR does — see PLATFORM_SUPPORT.md.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the GitHub release (once)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+
+  bundle:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+          # Uncomment / add as platform-support PRs land (PLATFORM_SUPPORT.md):
+          # - os: ubuntu-24.04-arm
+          #   triple: aarch64-unknown-linux-gnu
+          # - os: macos-latest
+          #   triple: aarch64-apple-darwin
+          # - os: macos-13
+          #   triple: x86_64-apple-darwin
+          # - os: windows-latest
+          #   triple: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+
+      - name: Build release binaries
+        run: cargo build --release --workspace --exclude desktop-agent
+
+      - name: Package bundle
+        shell: bash
+        run: ./scripts/package.sh
+
+      - name: Upload bundle to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS --clobber
