@@ -66,7 +66,11 @@ fn main() {
             client_send("status", &agent, "")
         }
         "agents" => client_send("agents", "", ""),
-        "autonomy" => client_send("autonomy", "", rest.first().map(String::as_str).unwrap_or("")),
+        "autonomy" => client_send(
+            "autonomy",
+            "",
+            rest.first().map(String::as_str).unwrap_or(""),
+        ),
         "statusline" => statusline(),
         "stop" => {
             let (agent, _) = parse_client_args(&rest);

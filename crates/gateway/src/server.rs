@@ -289,7 +289,10 @@ fn spawn_agent(
         child.clone(),
         busy_since.clone(),
     );
-    let prompt_gate = Arc::new(Mutex::new(PromptGate { last: None, cooldown_secs: 20 }));
+    let prompt_gate = Arc::new(Mutex::new(PromptGate {
+        last: None,
+        cooldown_secs: 20,
+    }));
     if autonomous {
         start_work_chaser(
             name.to_string(),
@@ -412,7 +415,9 @@ fn start_heartbeat(
     // the period instead of all firing together — a restart or a new task no
     // longer wakes the whole fleet in the same instant.
     let stagger = {
-        let h: u32 = agent.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+        let h: u32 = agent
+            .bytes()
+            .fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
         Duration::from_secs((h % 8) as u64 * 9)
     };
     std::thread::spawn(move || {
@@ -461,15 +466,14 @@ struct PromptGate {
 }
 
 impl PromptGate {
-    fn allow(&mut self) -> bool {
-        let ok = self
-            .last
+    fn ready(&self) -> bool {
+        self.last
             .map(|t| t.elapsed() >= Duration::from_secs(self.cooldown_secs))
-            .unwrap_or(true);
-        if ok {
-            self.last = Some(std::time::Instant::now());
-        }
-        ok
+            .unwrap_or(true)
+    }
+
+    fn commit(&mut self) {
+        self.last = Some(std::time::Instant::now());
     }
 }
 
@@ -563,12 +567,33 @@ static AUTONOMY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// ALL agents. One new task wakes one agent; the next agent's beat sees the
 /// task already claimed. Kills the thundering herd without slowing a deep
 /// queue much (8 pickups still start within ~2 minutes).
-static GLOBAL_DISPATCH: Mutex<PromptGate> = Mutex::new(PromptGate { last: None, cooldown_secs: 15 });
+static GLOBAL_DISPATCH: Mutex<PromptGate> = Mutex::new(PromptGate {
+    last: None,
+    cooldown_secs: 15,
+});
 
 fn autonomous_allowed(per_agent: &Arc<Mutex<PromptGate>>) -> bool {
-    AUTONOMY.load(std::sync::atomic::Ordering::Relaxed)
-        && GLOBAL_DISPATCH.lock().unwrap().allow()
-        && per_agent.lock().unwrap().allow()
+    autonomous_allowed_with_global(&GLOBAL_DISPATCH, per_agent)
+}
+
+fn autonomous_allowed_with_global(
+    global: &Mutex<PromptGate>,
+    per_agent: &Arc<Mutex<PromptGate>>,
+) -> bool {
+    if !AUTONOMY.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
+    let mut per = per_agent.lock().unwrap();
+    if !per.ready() {
+        return false;
+    }
+    let mut fleet = global.lock().unwrap();
+    if !fleet.ready() {
+        return false;
+    }
+    per.commit();
+    fleet.commit();
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -616,7 +641,11 @@ fn handle_client(stream: UnixStream, agents: Agents) {
                     "off" => AUTONOMY.store(false, Ordering::Relaxed),
                     _ => {}
                 }
-                let state = if AUTONOMY.load(Ordering::Relaxed) { "on" } else { "off" };
+                let state = if AUTONOMY.load(Ordering::Relaxed) {
+                    "on"
+                } else {
+                    "off"
+                };
                 write_info_done(&mut write_side, &format!("fleet autonomy: {state}"));
             }
             "send" | "steer" | "attach" | "ask" | "status" | "stop" => {
@@ -919,6 +948,26 @@ mod tests {
         assert_eq!(prompt, beat);
         assert!(!prompt.contains("AUTONOMOUS MODE"));
         assert!(AUTONOMOUS_RULES.contains("AUTONOMOUS MODE"));
+    }
+
+    #[test]
+    fn blocked_per_agent_gate_does_not_consume_global_dispatch() {
+        let global = Mutex::new(PromptGate {
+            last: None,
+            cooldown_secs: 15,
+        });
+        let per = Arc::new(Mutex::new(PromptGate {
+            last: Some(Instant::now()),
+            cooldown_secs: 20,
+        }));
+
+        assert!(!autonomous_allowed_with_global(&global, &per));
+        assert!(global.lock().unwrap().last.is_none());
+
+        per.lock().unwrap().last = None;
+        assert!(autonomous_allowed_with_global(&global, &per));
+        assert!(global.lock().unwrap().last.is_some());
+        assert!(per.lock().unwrap().last.is_some());
     }
 
     #[test]
