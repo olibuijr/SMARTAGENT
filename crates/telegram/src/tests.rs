@@ -51,6 +51,21 @@ fn group_mentions_are_recognized_and_cleaned_for_gateway_prompt() {
 }
 
 #[test]
+fn reply_to_bot_is_treated_as_addressed() {
+    let msg = httpc::json::parse(
+        r#"{"reply_to_message":{"from":{"id":8808599154,"is_bot":true,"username":"olafurs_bot"}}}"#,
+    )
+    .unwrap();
+    assert!(super::is_reply_to_bot(&msg, "8808599154", "olafurs_bot"));
+    assert!(super::is_reply_to_bot(&msg, "", "OLAFURS_BOT"));
+    let other = httpc::json::parse(
+        r#"{"reply_to_message":{"from":{"id":1,"is_bot":true,"username":"other_bot"}}}"#,
+    )
+    .unwrap();
+    assert!(!super::is_reply_to_bot(&other, "8808599154", "olafurs_bot"));
+}
+
+#[test]
 fn telegram_agent_assignment_keyboard_is_multiple_choice() {
     let markup = super::agent_assignment_menu_markup();
     assert!(markup.contains("inline_keyboard"), "{markup}");
