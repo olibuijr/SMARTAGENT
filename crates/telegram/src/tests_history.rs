@@ -1,0 +1,479 @@
+//! Telegram history/scope + streaming-simulation tests (split from tests.rs
+//! to keep every source file under the 1000-line cap).
+#![cfg(test)]
+
+use super::*;
+
+#[test]
+fn history_scope_separates_chats_and_threads() {
+    assert_ne!(
+        super::history_scope("1", "main"),
+        super::history_scope("2", "main")
+    );
+    assert_ne!(
+        super::history_scope("1", "10"),
+        super::history_scope("1", "11")
+    );
+    assert_eq!(super::history_scope("chat:1", ""), "chat_1:main");
+}
+
+
+#[test]
+fn history_prune_is_scope_local() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch/telegram-history");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("history-prune.semdb");
+    let _ = std::fs::remove_file(&path);
+    let mut db = semdb::storage::Db::create(&path).unwrap();
+    for i in 0..4 {
+        db.put(
+            &format!("hist:chat_a:main:{i:020}:0:in"),
+            "{}",
+            super::VEC0.to_vec(),
+        )
+        .unwrap();
+    }
+    db.put(
+        "hist:chat_b:main:00000000000000000000:0:in",
+        "{}",
+        super::VEC0.to_vec(),
+    )
+    .unwrap();
+    super::prune_history(&mut db, "chat_a:main", 2).unwrap();
+    assert_eq!(
+        db.index
+            .keys()
+            .filter(|id| id.starts_with("hist:chat_a:main:"))
+            .count(),
+        2
+    );
+    assert!(db
+        .index
+        .contains_key("hist:chat_b:main:00000000000000000000:0:in"));
+}
+
+#[test]
+fn inbound_and_reply_history_round_trip_in_scope() {
+    let mut db = super::test_db("telegram-history-roundtrip");
+    super::log_history_to_db(
+        &mut db,
+        &super::HistoryEvent {
+            direction: "in",
+            chat: "chat-a",
+            thread: "main",
+            user: "u1",
+            from: "oli",
+            update_id: 1,
+            message_id: "m1",
+            reply_to_update: 0,
+            ts: 10,
+            text: "remember the blue key",
+        },
+    )
+    .unwrap();
+    super::log_history_to_db(
+        &mut db,
+        &super::HistoryEvent {
+            direction: "out",
+            chat: "chat-a",
+            thread: "main",
+            user: "bot",
+            from: "assistant",
+            update_id: 2,
+            message_id: "m2",
+            reply_to_update: 1,
+            ts: 11,
+            text: "blue key noted",
+        },
+    )
+    .unwrap();
+    let h = super::scoped_history_from_db(&db, "chat-a", "main").unwrap();
+    assert!(h.contains("- oli: remember the blue key"), "{h}");
+    assert!(h.contains("- assistant: blue key noted"), "{h}");
+}
+
+#[test]
+fn scoped_history_does_not_leak_between_chats() {
+    let mut db = super::test_db("telegram-history-isolation");
+    for (chat, text) in [("chat-a", "alpha secret"), ("chat-b", "beta secret")] {
+        super::log_history_to_db(
+            &mut db,
+            &super::HistoryEvent {
+                direction: "in",
+                chat,
+                thread: "main",
+                user: "u1",
+                from: "user",
+                update_id: if chat == "chat-a" { 1 } else { 2 },
+                message_id: "m",
+                reply_to_update: 0,
+                ts: if chat == "chat-a" { 10 } else { 11 },
+                text,
+            },
+        )
+        .unwrap();
+    }
+    let a = super::scoped_history_from_db(&db, "chat-a", "main").unwrap();
+    let b = super::scoped_history_from_db(&db, "chat-b", "main").unwrap();
+    assert!(
+        a.contains("alpha secret") && !a.contains("beta secret"),
+        "{a}"
+    );
+    assert!(
+        b.contains("beta secret") && !b.contains("alpha secret"),
+        "{b}"
+    );
+}
+
+#[test]
+fn headless_telegram_simulation_context_persists_across_turns() {
+    let mut db = super::test_db("telegram-headless-sim");
+    super::log_history_to_db(
+        &mut db,
+        &super::HistoryEvent {
+            direction: "in",
+            chat: "sim-chat",
+            thread: "main",
+            user: "u1",
+            from: "tester",
+            update_id: 1,
+            message_id: "m1",
+            reply_to_update: 0,
+            ts: 10,
+            text: "My project codename is aurora",
+        },
+    )
+    .unwrap();
+    super::log_history_to_db(
+        &mut db,
+        &super::HistoryEvent {
+            direction: "out",
+            chat: "sim-chat",
+            thread: "main",
+            user: "agent",
+            from: "agent",
+            update_id: 2,
+            message_id: "m2",
+            reply_to_update: 1,
+            ts: 11,
+            text: "I will remember aurora in this chat context.",
+        },
+    )
+    .unwrap();
+
+    let second_turn_context = super::scoped_history_from_db(&db, "sim-chat", "main").unwrap();
+    assert!(
+        second_turn_context.contains("aurora"),
+        "{second_turn_context}"
+    );
+    assert!(
+        second_turn_context.contains("tester"),
+        "{second_turn_context}"
+    );
+    assert!(
+        second_turn_context.contains("agent"),
+        "{second_turn_context}"
+    );
+}
+
+#[test]
+fn reset_clears_only_current_chat_thread_history() {
+    let mut db = super::test_db("telegram-history-reset");
+    for (chat, thread, text, ts) in [
+        ("chat-a", "main", "delete me", 10),
+        ("chat-a", "topic-2", "keep thread", 11),
+        ("chat-b", "main", "keep chat", 12),
+    ] {
+        super::log_history_to_db(
+            &mut db,
+            &super::HistoryEvent {
+                direction: "in",
+                chat,
+                thread,
+                user: "u1",
+                from: "user",
+                update_id: ts,
+                message_id: "m",
+                reply_to_update: 0,
+                ts,
+                text,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        super::reset_context_in_db(&mut db, "chat-a", "main").unwrap(),
+        1
+    );
+    assert!(super::scoped_history_from_db(&db, "chat-a", "main").is_none());
+    assert!(super::scoped_history_from_db(&db, "chat-a", "topic-2")
+        .unwrap()
+        .contains("keep thread"));
+    assert!(super::scoped_history_from_db(&db, "chat-b", "main")
+        .unwrap()
+        .contains("keep chat"));
+}
+
+#[test]
+fn stop_cancel_token_is_scope_local() {
+    let mut db = super::test_db("telegram-stop-scope");
+    super::set_cancel_token_in_db(&mut db, "chat-a", "main", 10).unwrap();
+    assert_eq!(
+        super::cancel_token_from_db(&db, "chat-a", "main").unwrap(),
+        10
+    );
+    assert_eq!(
+        super::cancel_token_from_db(&db, "chat-a", "topic-2").unwrap(),
+        0
+    );
+    assert_eq!(
+        super::cancel_token_from_db(&db, "chat-b", "main").unwrap(),
+        0
+    );
+    assert!(super::stop_requested_in_db(&db, "chat-a", "main", 9));
+    assert!(!super::stop_requested_in_db(&db, "chat-a", "main", 10));
+    assert!(!super::stop_requested_in_db(&db, "chat-b", "main", 9));
+}
+
+#[test]
+fn stop_command_is_listed_and_visible() {
+    let body = command_menu_body();
+    let help = command_help();
+    assert!(body.contains("\"command\":\"stop\""), "{body}");
+    assert!(help.contains("/stop"), "{help}");
+    assert_eq!(slash_name("/stop@smartagent_bot"), Some("stop"));
+}
+
+#[test]
+fn remember_command_is_listed_and_usable() {
+    let body = command_menu_body();
+    let help = command_help();
+    assert!(body.contains("\"command\":\"remember\""), "{body}");
+    assert!(body.contains("Remember a fact"), "{body}");
+    assert!(help.contains("/remember"), "{help}");
+    assert_eq!(
+        slash_name("/remember@smartagent_bot fact"),
+        Some("remember")
+    );
+    let usage = slash_command("/remember", "50020485", "", "u1")
+        .expect("recognized")
+        .unwrap();
+    assert!(usage.contains("Usage: /remember"), "{usage}");
+}
+
+#[test]
+fn command_permissions_are_classified() {
+    assert_eq!(
+        super::command_class("help"),
+        Some(super::CommandClass::UserSafe)
+    );
+    assert_eq!(
+        super::command_class("remember"),
+        Some(super::CommandClass::ChatScoped)
+    );
+    assert_eq!(
+        super::command_class("model"),
+        Some(super::CommandClass::AdminOnly)
+    );
+    assert_eq!(
+        super::command_class("status"),
+        Some(super::CommandClass::AdminOnly)
+    );
+}
+
+#[test]
+fn unauthorized_chat_gets_safe_denial_without_state() {
+    let out = slash_command("/board", "not-allowed", "", "u1")
+        .expect("recognized")
+        .unwrap();
+    assert_eq!(out, super::safe_denial());
+    assert!(!out.contains("READY"), "{out}");
+    assert!(!out.contains("T-"), "{out}");
+}
+
+#[test]
+fn admin_only_commands_require_admin_when_admins_configured() {
+    assert!(super::authorize_slash_command_with_lists(
+        "model",
+        "chat-a",
+        "admin-user",
+        "chat-a",
+        "admin-user",
+        ""
+    )
+    .is_ok());
+    assert!(super::authorize_slash_command_with_lists(
+        "model",
+        "chat-a",
+        "normal-user",
+        "chat-a",
+        "admin-user",
+        ""
+    )
+    .is_err());
+    assert!(super::authorize_slash_command_with_lists(
+        "remember",
+        "chat-a",
+        "normal-user",
+        "chat-a",
+        "admin-user",
+        ""
+    )
+    .is_ok());
+}
+
+#[test]
+fn model_command_lists_keyboard_and_stores_scope_local_preference() {
+    let body = command_menu_body();
+    let help = command_help();
+    assert!(body.contains("\"command\":\"model\""), "{body}");
+    assert!(help.contains("/model"), "{help}");
+    assert_eq!(
+        super::normalize_model_choice("1"),
+        Some(super::TELEGRAM_MODELS[0])
+    );
+    assert_eq!(
+        super::normalize_model_choice(super::TELEGRAM_MODELS[1]),
+        Some(super::TELEGRAM_MODELS[1])
+    );
+    let markup = super::model_menu_markup();
+    assert!(markup.contains("inline_keyboard"), "{markup}");
+    assert!(markup.contains("model:"), "{markup}");
+
+    let mut db = super::test_db("telegram-model-pref");
+    super::set_model_preference_in_db(&mut db, "chat-a", "main", "u1", super::TELEGRAM_MODELS[1])
+        .unwrap();
+    assert_eq!(
+        super::selected_model_from_db(&db, "chat-a", "main", "u1").as_deref(),
+        Some(super::TELEGRAM_MODELS[1])
+    );
+    assert!(super::selected_model_from_db(&db, "chat-a", "main", "u2").is_none());
+    assert!(super::selected_model_from_db(&db, "chat-b", "main", "u1").is_none());
+}
+
+#[test]
+fn model_callback_is_scoped_and_stale_protected() {
+    let now = 100_000;
+    assert_eq!(
+        super::callback_model_choice(&format!("model:{}", super::TELEGRAM_MODELS[0]), now, now),
+        Some(super::TELEGRAM_MODELS[0])
+    );
+    assert_eq!(super::callback_model_choice("other:data", now, now), None);
+    assert_eq!(
+        super::callback_model_choice(
+            &format!("model:{}", super::TELEGRAM_MODELS[0]),
+            now - super::CALLBACK_MAX_AGE_SECS - 1,
+            now
+        ),
+        None
+    );
+}
+
+#[test]
+fn model_callback_selection_returns_confirmation() {
+    let ok = super::set_model_preference_in_db;
+    let mut db = super::test_db("telegram-model-callback-confirm");
+    ok(
+        &mut db,
+        "chat-a",
+        "topic-1",
+        "u1",
+        super::TELEGRAM_MODELS[2],
+    )
+    .unwrap();
+    assert_eq!(
+        super::selected_model_from_db(&db, "chat-a", "topic-1", "u1").as_deref(),
+        Some(super::TELEGRAM_MODELS[2])
+    );
+    assert!(
+        super::set_model_preference("chat-a", "topic-1", "u1", "999")
+            .unwrap()
+            .contains("Choose a model")
+    );
+}
+
+#[test]
+fn chunks_long_messages() {
+    let s = "x".repeat(9000);
+    let c = chunks(&s, 4096);
+    assert_eq!(c.len(), 3);
+    assert!(c.iter().all(|x| x.chars().count() <= 4096));
+}
+
+#[test]
+fn gateway_prompt_names_current_chat_scope() {
+    let p1 = build_gateway_prompt("oli", "u1", "hello", "chat-a", "thread-1");
+    let p2 = build_gateway_prompt("oli", "u1", "hello", "chat-b", "thread-2");
+    assert!(p1.contains("chat/thread chat-a/thread-1"), "{p1}");
+    assert!(p2.contains("chat/thread chat-b/thread-2"), "{p2}");
+    assert!(!p1.contains("chat-b"), "{p1}");
+    assert!(!p2.contains("chat-a"), "{p2}");
+}
+
+#[test]
+fn verbosity_command_is_listed_and_stores_scope_local_preference() {
+    let help = command_help();
+    assert!(help.contains("/verbosity"), "{help}");
+    assert!(help.contains("/verbose"), "{help}");
+    assert_eq!(
+        slash_name("/verbosity@smartagent_bot quiet"),
+        Some("verbosity")
+    );
+    assert_eq!(slash_name("/verbose@smartagent_bot quiet"), Some("verbose"));
+    assert_eq!(
+        super::command_class("verbose"),
+        Some(super::CommandClass::ChatScoped)
+    );
+    let out = slash_command("/verbose quiet", "50020485", "alias-thread", "alias-user")
+        .expect("slash command handled")
+        .expect("slash command ok");
+    assert!(out.contains("Telegram verbosity set to quiet"), "{out}");
+    assert_eq!(
+        super::verbosity("50020485", "alias-thread", "alias-user"),
+        super::VerbosityLevel::Quiet
+    );
+    let mut db = super::test_db("telegram-verbosity-pref");
+    super::set_verbosity_in_db(
+        &mut db,
+        "chat-a",
+        "main",
+        "u1",
+        super::VerbosityLevel::Quiet,
+    )
+    .unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main", "u1"),
+        super::VerbosityLevel::Quiet
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main", "u2"),
+        super::VerbosityLevel::Normal
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-b", "main", "u1"),
+        super::VerbosityLevel::Normal
+    );
+}
+
+#[test]
+fn verbosity_filters_progress_task_workflow_notifications() {
+    let mut db = super::test_db("telegram-verbosity-filter");
+    super::set_verbosity_in_db(&mut db, "chat-a", "", "*", super::VerbosityLevel::Quiet).unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "", "*"),
+        super::VerbosityLevel::Quiet
+    );
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "progress"
+    ));
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "task"
+    ));
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "workflow"
+    ));
+    assert!(super::notification_allowed_in_db(
+        &db, "chat-b", "", "*", "task"
+    ));
+}

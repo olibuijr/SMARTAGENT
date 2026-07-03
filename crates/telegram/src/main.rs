@@ -511,5 +511,19 @@ fn strip_bot_mention(text: &str, bot_username: &str) -> String {
     }
 }
 
+
+#[cfg(test)]
+pub(crate) fn test_db(name: &str) -> semdb::storage::Db {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("telegram.semdb");
+    let _ = std::fs::remove_file(&path);
+    semdb::storage::Db::create(&path).unwrap()
+}
+
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_history;
