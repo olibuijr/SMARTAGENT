@@ -281,9 +281,15 @@ scene.add(camera);
 // the view grow tall — more sky and street, nothing stretches.
 let hudRef = null; // set once the HUD group exists; resize() repositions it
 let ctrlBand = 0;  // reserved controller shelf height (touch portrait)
+let topBand = 0;   // console bezel above the screen (touch portrait)
+let rebuildShellFn = null;
+const pillZones = []; // START/SELECT hit zones in world coords
 let viewW = 480, viewH = VIEW_H, DIST = (VIEW_H / 2) / TAN, CAM_Y = VIEW_H / 2 - 24;
 function resize() {
-	const aspect = innerWidth / innerHeight;
+	// measure the CANVAS, not the window: on phones 100vh ≠ innerHeight
+	// (URL bar), and that mismatch silently offset every touch hit-test
+	const rect = canvas.getBoundingClientRect();
+	const aspect = (rect.width || innerWidth) / (rect.height || innerHeight);
 	camera.aspect = aspect;
 	camera.updateProjectionMatrix();
 	if (aspect < .9) {
@@ -295,15 +301,18 @@ function resize() {
 	}
 	// Game-Boy layout on touch portrait: the world sits above a dedicated
 	// controller shelf instead of the pads floating over the street
-	ctrlBand = isTouch && aspect < .9 ? Math.round(Math.min(200, viewH * .22)) : 0;
+	ctrlBand = isTouch && aspect < .9 ? Math.round(Math.min(260, viewH * .29)) : 0;
+	topBand = ctrlBand > 0 ? 46 : 0;
 	DIST = (viewH / 2) / TAN;
 	CAM_Y = viewH / 2 - 24 - ctrlBand;
 	camera.position.set(camera.position.x, CAM_Y, DIST);
 	if (hudRef) hudRef.position.set(0, -CAM_Y, -DIST);
 	scene.fog = new THREE.Fog(new THREE.Color(BG), DIST + 60, DIST + 900);
 	renderer.setSize(viewW, viewH, false);
+	if (rebuildShellFn) rebuildShellFn();
 }
 addEventListener("resize", resize);
+window.visualViewport?.addEventListener("resize", resize);
 resize();
 camera.position.set(0, CAM_Y, DIST);
 
@@ -725,21 +734,71 @@ function roundBtn(label, pressed = false) {
 	return c;
 }
 const pads = [];
-let dpadMesh = null, dpadMaps = null, shellPanel = null, shellEdge = null;
+let dpadMesh = null, dpadMaps = null, shellMesh = null;
 if (isTouch) {
-	shellPanel = new THREE.Mesh(
+	shellMesh = new THREE.Mesh(
 		new THREE.PlaneGeometry(1, 1),
-		new THREE.MeshBasicMaterial({ color: "#17171f" })
+		new THREE.MeshBasicMaterial({ transparent: true, depthTest: false })
 	);
-	shellPanel.material.depthTest = false;
-	shellPanel.renderOrder = 9;
-	shellEdge = new THREE.Mesh(
-		new THREE.PlaneGeometry(1, 1),
-		new THREE.MeshBasicMaterial({ color: "#2a2a36" })
-	);
-	shellEdge.material.depthTest = false;
-	shellEdge.renderOrder = 9;
-	hud.add(shellPanel, shellEdge);
+	shellMesh.renderOrder = 11;
+	shellMesh.visible = false;
+	hud.add(shellMesh);
+	// Draws the whole console around the screen hole: pinstriped top bezel
+	// with brand + power LED, inset screen bezel, tagline, START/SELECT
+	// pills, speaker grille. Rebuilt on resize/rotation.
+	rebuildShellFn = function rebuildShell() {
+		pillZones.length = 0;
+		if (ctrlBand <= 0) { shellMesh.visible = false; return; }
+		const w = viewW, h = viewH;
+		const cw = Math.ceil(w / 64) * 64;
+		const [c, x] = cv(cw, h);
+		const ox = (cw - w) >> 1;
+		const holeX = 12, holeY = topBand, holeW = w - 24, holeH = h - ctrlBand - topBand;
+		x.fillStyle = "#23232e"; x.fillRect(ox, 0, w, h);                       // shell body
+		x.fillStyle = "#2e2e3a"; x.fillRect(ox, 0, w, 2);                       // top edge light
+		x.fillStyle = "#5e2a44"; x.fillRect(ox, 7, w, 2);                       // GB pinstripes
+		x.fillStyle = "#2a3a5e"; x.fillRect(ox, 11, w, 2);
+		x.font = `8px ${FONT}`; x.textBaseline = "top";
+		x.fillStyle = "#8a8a9a";
+		x.fillText("SMARTAGENT", ox + Math.floor((w - x.measureText("SMARTAGENT").width) / 2), 22);
+		pxCircle(x, ox + 20, 27, 4, "#3a1218");                                 // power LED
+		pxCircle(x, ox + 20, 26, 2, "#ff4f4f");
+		// screen bezel inset
+		x.fillStyle = "#0d0d12"; x.fillRect(ox + holeX - 8, holeY - 8, holeW + 16, holeH + 16);
+		x.fillStyle = "#050508"; x.fillRect(ox + holeX - 8, holeY - 8, holeW + 16, 2);
+		x.fillStyle = "#33333f"; x.fillRect(ox + holeX - 8, holeY + holeH + 4, holeW + 16, 2);
+		x.clearRect(ox + holeX, holeY, holeW, holeH);                           // the screen
+		const tag = "LEGENDARY DEV SYSTEM";
+		x.fillStyle = "#6a6a7a";
+		x.fillText(tag, ox + Math.floor((w - x.measureText(tag).width) / 2), holeY + holeH + 12);
+		// START / SELECT pills + engraved labels
+		const pillY = h - 34;
+		for (const [cx2, label, act] of [[w / 2 - 44, "SELECT", "select"], [w / 2 + 44, "START", "start"]]) {
+			x.fillStyle = "#0a0a10";
+			x.fillRect(ox + cx2 - 16, pillY - 6, 32, 12);
+			pxCircle(x, ox + cx2 - 16, pillY, 6, "#0a0a10"); pxCircle(x, ox + cx2 + 16, pillY, 6, "#0a0a10");
+			x.fillStyle = "#191922";
+			x.fillRect(ox + cx2 - 15, pillY - 4, 30, 8);
+			pxCircle(x, ox + cx2 - 15, pillY, 4, "#191922"); pxCircle(x, ox + cx2 + 15, pillY, 4, "#191922");
+			x.fillStyle = "#6a6a7a";
+			x.fillText(label, ox + cx2 - Math.floor(x.measureText(label).width / 2), pillY + 10);
+			pillZones.push({ x: cx2 - w / 2, y: CAM_Y + viewH / 2 - pillY, act });
+		}
+		// speaker grille: stepped diagonal slots, bottom-right
+		for (let i = 0; i < 5; i++)
+			for (let j = 0; j < 9; j++) {
+				x.fillStyle = "#14141c";
+				x.fillRect(ox + w - 76 + i * 11 + j, h - 26 - j * 2, 3, 3);
+			}
+		const old = shellMesh.material.map;
+		shellMesh.material.map = tex(c);
+		if (old) old.dispose();
+		shellMesh.geometry.dispose();
+		shellMesh.geometry = new THREE.PlaneGeometry(cw, h);
+		shellMesh.position.set(0, CAM_Y, 4);
+		shellMesh.visible = true;
+	};
+	rebuildShellFn();
 	dpadMaps = {
 		idle: tex(dpadCanvas()), left: tex(dpadCanvas("left")),
 		right: tex(dpadCanvas("right")), jump: tex(dpadCanvas("jump")),
@@ -747,6 +806,7 @@ if (isTouch) {
 	};
 	dpadMesh = overlay(plane(dpadCanvas()), 6);
 	dpadMesh.material.opacity = .92;
+	dpadMesh.renderOrder = 12;
 	hud.add(dpadMesh);
 	for (const d of [
 		{ label: "B", act: "use", off: 96, lift: 40 },
@@ -755,6 +815,7 @@ if (isTouch) {
 		const m = overlay(plane(roundBtn(d.label)), 6);
 		const up = m.material.map, down = tex(roundBtn(d.label, true));
 		m.material.opacity = .92;
+		m.renderOrder = 12;
 		hud.add(m);
 		pads.push({ ...d, mesh: m, up, down, held: false });
 	}
@@ -804,8 +865,13 @@ addEventListener("keyup", (e) => (keys[e.code] = false));
 let touchDir = 0, touchJump = false;
 const activePointers = new Map(); // pointerId -> pad
 function padAt(clientX, clientY) {
-	const vx = (clientX / innerWidth - .5) * viewW;
-	const vy = (.5 - clientY / innerHeight) * viewH + CAM_Y; // world-y like the meshes
+	// map through the canvas rect — NOT innerWidth/innerHeight, which drift
+	// from the painted canvas when mobile URL bars show/hide
+	const r = canvas.getBoundingClientRect();
+	const vx = ((clientX - r.left) / r.width - .5) * viewW;
+	const vy = (.5 - (clientY - r.top) / r.height) * viewH + CAM_Y;
+	for (const z of pillZones)
+		if (Math.abs(vx - z.x) < 26 && Math.abs(vy - z.y) < 16) return { pill: true, act: z.act };
 	if (dpadMesh) {
 		const dx = vx - dpadMesh.position.x, dy = vy - dpadMesh.position.y;
 		if (Math.abs(dx) < 54 && Math.abs(dy) < 54) {
@@ -831,22 +897,23 @@ function recomputeTouch() {
 	for (const p of pads) p.held = [...activePointers.values()].includes(p);
 	if (dpadMesh) dpadMesh.material.map = dpadMaps[dpadAct ?? "idle"];
 }
+function doUse() {
+	if (nearCastle()) { location.href = REPO; return; }
+	if (nearInstall()) copyInstall();
+}
 canvas.addEventListener("pointerdown", (e) => {
+	e.preventDefault(); // no synthetic mouse events / long-press selection
 	start();
 	const p = padAt(e.clientX, e.clientY);
 	if (p) {
-		if (p.act === "use") {
-			if (nearCastle()) { location.href = REPO; return; }
-			if (nearInstall()) copyInstall();
-		}
+		if (p.act === "use" || p.act === "start") doUse();
+		if (p.act === "select") { P.x = 60; P.y = 0; camX = 60; beep(392, .08); return; }
+		if (p.pill) return;
 		activePointers.set(e.pointerId, p);
 		recomputeTouch();
 		return;
 	}
-	if (!isTouch) { // desktop click fallbacks
-		if (nearCastle()) { location.href = REPO; return; }
-		if (nearInstall()) { copyInstall(); return; }
-	}
+	if (!isTouch) doUse(); // desktop click fallback
 });
 canvas.addEventListener("pointermove", (e) => {
 	if (!activePointers.has(e.pointerId)) return;
@@ -929,7 +996,7 @@ function step(dt, now) {
 	// title: lower-third at rest, parks top-left after the first input —
 	// positions derive from viewH so portrait and landscape both compose
 	{
-		const topY = CAM_Y + viewH / 2;
+		const topY = CAM_Y + viewH / 2 - topBand;
 		const startY = viewH * .26, parkY = topY - 66;
 		const k = !started ? 0 : reduceMotion ? 1 : Math.min(1, (now - lastStart) / 800);
 		const e = 1 - Math.pow(1 - k, 4); // ease-out-quart
@@ -941,25 +1008,22 @@ function step(dt, now) {
 		subtitle.material.opacity = 1 - e;
 		hintCtl.material.opacity = Math.max(0, 1 - e * 1.2);
 	}
-	coinHud.position.set(viewW / 2 - 54, CAM_Y + viewH / 2 - 34, 5); // top-right, any aspect
+	coinHud.position.set(viewW / 2 - 60, CAM_Y + viewH / 2 - topBand - 40, 5); // inside the screen hole
 	{
 		const bottom = CAM_Y - viewH / 2;
-		const mid = ctrlBand > 0 ? bottom + ctrlBand / 2 : 0;
-		if (shellPanel) {
-			shellPanel.visible = shellEdge.visible = ctrlBand > 0;
-			shellPanel.scale.set(viewW, Math.max(1, ctrlBand), 1);
-			shellPanel.position.set(0, bottom + ctrlBand / 2, 4);
-			shellEdge.scale.set(viewW, 2, 1);
-			shellEdge.position.set(0, bottom + ctrlBand, 4.5);
-		}
+		// controls row sits in the upper half of the shell shelf, above the
+		// START/SELECT pills and speaker grille the shell texture draws
+		const row = bottom + ctrlBand - 88;
 		if (dpadMesh) {
-			dpadMesh.position.x = -viewW / 2 + 66;
-			dpadMesh.position.y = ctrlBand > 0 ? mid : bottom + 62;
+			dpadMesh.position.x = -viewW / 2 + 72;
+			dpadMesh.position.y = ctrlBand > 0 ? row : bottom + 62;
 		}
 		for (const p of pads) {
 			p.mesh.position.x = viewW / 2 - p.off;
-			// diagonal A/B: around the shelf midline, or legacy lift overlay
-			p.mesh.position.y = ctrlBand > 0 ? mid + (p.lift - 51) : bottom + p.lift;
+			// A rides higher than B — the Game Boy diagonal
+			p.mesh.position.y = ctrlBand > 0
+				? row + (p.act === "jump" ? 14 : -10)
+				: bottom + p.lift;
 			p.mesh.material.map = p.held ? p.down : p.up;
 			p.mesh.material.opacity = p.held ? 1 : .92;
 		}
@@ -987,6 +1051,8 @@ function step(dt, now) {
 	// install terminal: reveal command + copy hint when near, toast after copy
 	{
 		const inst = window.__install, near = nearInstall() ? 1 : 0;
+		// keep the long command line inside the visible screen width
+		inst.cmd.scale.setScalar(Math.min(.62, (viewW - 36) / inst.cmd.userData.canvas.width));
 		inst.cmd.material.opacity += (near - inst.cmd.material.opacity) * Math.min(1, dt * 6);
 		inst.copyHint.material.opacity += (near - inst.copyHint.material.opacity) * Math.min(1, dt * 6);
 		const showToast = copied && now - copied < 2500 ? 1 : 0;

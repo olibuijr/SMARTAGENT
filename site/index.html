@@ -9,8 +9,8 @@
 <meta property="og:description" content="A playable pixel world. 27 pure-Rust crates, zero dependencies, 8 autonomous agents.">
 <style>
 @font-face{font-family:'Press Start 2P';src:url(vendor/pressstart2p.woff2) format('woff2');font-display:swap}
-html,body{margin:0;height:100%;background:#161620;overflow:hidden}
-canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated;touch-action:none}
+html,body{margin:0;height:100%;background:#161620;overflow:hidden;user-select:none;-webkit-user-select:none;overscroll-behavior:none}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%;image-rendering:pixelated;touch-action:none}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 noscript div{color:#fccda5;font:16px/1.6 monospace;padding:2rem;max-width:60ch}
 noscript a{color:#87d7ff}
@@ -35,6 +35,6 @@ noscript a{color:#87d7ff}
 </section>
 <noscript><div><b>SMARTAGENT</b> — a pure-Rust, zero-dependency AI agent platform run by an autonomous fleet of eight legendary developers. This page is a playable pixel world and needs JavaScript; the code lives at <a href="https://github.com/olibuijr/SMARTAGENT">github.com/olibuijr/SMARTAGENT</a>.</div></noscript>
 <script type="importmap">{"imports":{"three":"./vendor/three.webgpu.min.js","three/webgpu":"./vendor/three.webgpu.min.js"}}</script>
-<script type="module" src="main.js?v=17"></script>
+<script type="module" src="main.js?v=18"></script>
 </body>
 </html>
