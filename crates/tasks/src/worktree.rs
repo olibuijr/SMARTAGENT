@@ -84,8 +84,20 @@ pub fn finish_done(id: &str) -> Result<String, String> {
     if run(&dir, &["diff", "--cached", "--quiet"]).is_err() {
         let _ = run(&dir, &["commit", "-m", &format!("{id}: task changes")]);
     }
-    let merged = run(&root, &["merge", "--ff-only", &branch]).or_else(|_| run(&root, &["merge", "--no-edit", &branch]));
-    if let Err(e) = merged { if strict() { return Err(format!("worktree merge failed from {branch} into {base}: {e}")); } }
+    // Fast-forward if we can; otherwise a real merge. If that merge CONFLICTS,
+    // abort it — never leave the base branch half-merged with conflict markers —
+    // and PRESERVE the worktree + branch so the work survives for a manual merge.
+    // Only a clean merge removes the worktree/branch.
+    if run(&root, &["merge", "--ff-only", &branch]).is_err() {
+        if let Err(e) = run(&root, &["merge", "--no-edit", &branch]) {
+            // Abort any in-progress merge so {base} stays clean and buildable.
+            let _ = run(&root, &["merge", "--abort"]);
+            let msg = format!(
+                "\nworktree: MERGE CONFLICT for {branch} — aborted to protect {base}; worktree/branch preserved for manual merge ({e})"
+            );
+            return if strict() { Err(msg) } else { Ok(msg) };
+        }
+    }
     let _ = run(&root, &["worktree", "remove", "--force", dir.to_str().unwrap_or("")]);
     let _ = run(&root, &["branch", "-D", &branch]);
     Ok(format!("\nworktree: merged {branch} and removed {}", dir.display()))

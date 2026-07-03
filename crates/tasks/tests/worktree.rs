@@ -62,6 +62,24 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     run(&d.join("worktrees/T-911"), &["commit", "-m", "T-911 work"]);
     assert!(worktree::changed("T-911").unwrap(), "committed-ahead counts as changed");
 
+    // Conflict-abort: a task branch that conflicts with the base must NOT corrupt
+    // the base — finish_done aborts the merge and preserves the worktree/branch.
+    std::fs::write(d.join("conflict.txt"), "base line\n").unwrap();
+    run(&d, &["add", "-A"]);
+    run(&d, &["commit", "-m", "add conflict.txt"]);
+    worktree::ensure_for_doing("T-920").unwrap();
+    std::fs::write(d.join("worktrees/T-920/conflict.txt"), "worktree version\n").unwrap();
+    run(&d.join("worktrees/T-920"), &["add", "-A"]);
+    run(&d.join("worktrees/T-920"), &["commit", "-m", "T-920 change"]);
+    std::fs::write(d.join("conflict.txt"), "main version\n").unwrap();
+    run(&d, &["add", "-A"]);
+    run(&d, &["commit", "-m", "main diverges same line"]);
+    let out = worktree::finish_done("T-920").unwrap();
+    assert!(out.contains("MERGE CONFLICT"), "expected conflict abort, got: {out}");
+    assert!(!d.join(".git/MERGE_HEAD").exists(), "base left mid-merge");
+    assert_eq!(std::fs::read_to_string(d.join("conflict.txt")).unwrap(), "main version\n", "base corrupted by aborted merge");
+    assert!(d.join("worktrees/T-920").exists(), "worktree must be preserved on conflict");
+
     worktree::ensure_for_doing("T-904").unwrap();
     let out = worktree::reap_abandoned(0).unwrap();
     assert!(out.contains("reaped"), "{out}");
