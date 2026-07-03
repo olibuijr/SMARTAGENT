@@ -3,24 +3,17 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Scan /proc for the lowest live pid whose argv contains `needle`, excluding
-/// this process. Lets the supervisor ADOPT an already-running service instead
-/// of spawning a duplicate that would exit on the service's own single-instance
-/// guard (the gateway's "already running" socket check) — the churn source:
-/// the duplicate exits, the store tracks its dead pid, watch respawns, loop.
-pub fn pid_by_needle(needle: &str) -> Option<u32> {
-    if needle.is_empty() {
+/// Scan /proc for the lowest live pid matching this service in this repo
+/// instance, excluding this process. Lets the supervisor ADOPT an
+/// already-running service instead of spawning a duplicate, but never adopts a
+/// same-named service from another SMARTAGENT checkout.
+pub fn pid_by_service(needle: &str, argv: &[String], workdir: &Path) -> Option<u32> {
+    if needle.is_empty() || argv.is_empty() {
         return None;
     }
-    // The needle is `<binary> <subcommand>` (e.g. "gateway serve"). Match ONLY
-    // real service processes: argv[0]'s basename must equal the binary word.
-    // Without this, ANY process whose cmdline merely CONTAINS "gateway serve"
-    // — a shell, a grep, this supervisor's own probe — falsely matches, so
-    // `alive()` adopts a bogus pid and the real service never starts.
-    let binary = needle.split_whitespace().next().unwrap_or(needle);
     let me = std::process::id();
     let mut found: Vec<u32> = Vec::new();
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {
@@ -31,20 +24,49 @@ pub fn pid_by_needle(needle: &str) -> Option<u32> {
         if pid == me {
             continue;
         }
-        if let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) {
-            let argv: Vec<String> = bytes
-                .split(|&b| b == 0)
-                .filter(|s| !s.is_empty())
-                .map(|s| String::from_utf8_lossy(s).into_owned())
-                .collect();
-            let Some(arg0) = argv.first() else { continue };
-            let base = arg0.rsplit('/').next().unwrap_or(arg0);
-            if base == binary && argv.join(" ").contains(needle) {
-                found.push(pid);
-            }
+        if service_process_matches(pid, needle, argv, workdir) {
+            found.push(pid);
         }
     }
     found.into_iter().min()
+}
+
+fn service_process_matches(pid: u32, needle: &str, argv: &[String], workdir: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    let actual: Vec<String> = bytes
+        .split(|&b| b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect();
+    let Some(actual_arg0) = actual.first() else {
+        return false;
+    };
+    if !actual.join(" ").contains(needle) {
+        return false;
+    }
+    let expected_arg0 = resolve_program(&argv[0], workdir);
+    let actual_arg0 = resolve_program(actual_arg0, workdir);
+    if actual_arg0 != expected_arg0 {
+        return false;
+    }
+    let Ok(cwd) = std::fs::read_link(format!("/proc/{pid}/cwd")) else {
+        return false;
+    };
+    same_path(&cwd, workdir)
+}
+
+fn resolve_program(program: &str, workdir: &Path) -> PathBuf {
+    let path = Path::new(program);
+    let full = if path.is_absolute() { path.to_path_buf() } else { workdir.join(path) };
+    std::fs::canonicalize(&full).unwrap_or(full)
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    let l = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let r = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    l == r
 }
 
 /// Spawn a detached child: stdout/stderr appended to `log`, stdin from
@@ -87,21 +109,14 @@ pub fn unix_secs() -> i64 {
 /// Is `pid` a live process whose command line still contains `needle`? The
 /// needle guard defeats PID reuse — a recycled pid running something else
 /// won't match the service's recorded command.
-pub fn is_alive(pid: u32, needle: &str) -> bool {
+pub fn is_alive(pid: u32, needle: &str, argv: &[String], workdir: &Path) -> bool {
     if pid == 0 {
         return false;
     }
-    let cmdline = match std::fs::read(format!("/proc/{pid}/cmdline")) {
-        Ok(b) => b,
-        Err(_) => return false, // no /proc entry → dead
-    };
-    // cmdline is NUL-separated argv; join with spaces for a substring check.
-    let joined: String = cmdline
-        .split(|&b| b == 0)
-        .map(|s| String::from_utf8_lossy(s).into_owned())
-        .collect::<Vec<_>>()
-        .join(" ");
-    needle.is_empty() || joined.contains(needle)
+    if needle.is_empty() {
+        return Path::new(&format!("/proc/{pid}")).exists();
+    }
+    service_process_matches(pid, needle, argv, workdir)
 }
 
 /// Terminate a pid (SIGTERM, then SIGKILL after a grace period). Uses the
@@ -131,7 +146,7 @@ mod tests {
         // The test process itself is alive; its cmdline contains the test binary
         // name. An empty needle just checks liveness.
         let me = std::process::id();
-        assert!(is_alive(me, ""));
+        assert!(is_alive(me, "", &[], Path::new(".")));
     }
 
     #[test]
@@ -169,16 +184,45 @@ mod tests {
 
     #[test]
     fn is_alive_false_for_dead_and_pid_zero() {
-        assert!(!is_alive(0, ""));
+        assert!(!is_alive(0, "", &[], Path::new(".")));
         // A pid that (almost certainly) does not exist.
-        assert!(!is_alive(4_000_000_000, ""));
+        assert!(!is_alive(4_000_000_000, "", &[], Path::new(".")));
     }
 
     #[test]
     fn is_alive_needle_guards_against_reuse() {
         // Live pid, but a needle that won't appear in this process's cmdline.
         let me = std::process::id();
-        assert!(!is_alive(me, "definitely-not-in-this-cmdline-xyzzy"));
+        assert!(!is_alive(me, "definitely-not-in-this-cmdline-xyzzy", &["definitely-not-in-this-cmdline-xyzzy".into()], Path::new(".")));
+    }
+
+    #[test]
+    fn pid_by_service_scopes_same_binary_to_workdir() {
+        let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/supervise-instance-scope");
+        let one = scratch.join("one");
+        let two = scratch.join("two");
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::create_dir_all(&two).unwrap();
+        let mut child_one = Command::new("/bin/sleep")
+            .arg("77")
+            .current_dir(&one)
+            .spawn()
+            .unwrap();
+        let mut child_two = Command::new("/bin/sleep")
+            .arg("77")
+            .current_dir(&two)
+            .spawn()
+            .unwrap();
+        let argv = vec!["/bin/sleep".to_string(), "77".to_string()];
+        let found_one = pid_by_service("sleep 77", &argv, &one);
+        let found_two = pid_by_service("sleep 77", &argv, &two);
+        let _ = child_one.kill();
+        let _ = child_two.kill();
+        let _ = child_one.wait();
+        let _ = child_two.wait();
+        assert_eq!(found_one, Some(child_one.id()));
+        assert_eq!(found_two, Some(child_two.id()));
     }
 
     #[test]
