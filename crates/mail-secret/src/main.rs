@@ -26,7 +26,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
 }
 
 fn get_secret(name: &str) -> Result<String, String> {
-    let store = if std::path::Path::new("data/secrets").exists() {
+    let local_token = std::path::Path::new(TOKEN_PATH);
+    let worktree_token = std::path::Path::new(WORKTREE_TOKEN_PATH);
+    let store = if local_token.exists() {
+        "data/secrets"
+    } else if worktree_token.exists() {
+        "../../data/secrets"
+    } else if std::path::Path::new("data/secrets").exists() {
         "data/secrets"
     } else {
         "../../data/secrets"
@@ -34,7 +40,7 @@ fn get_secret(name: &str) -> Result<String, String> {
     let mut cmd = Command::new("target/release/secrets");
     cmd.args(["get", "--store", store, "--name", name, "--as", "pi"]);
     if std::env::var("SMARTAGENT_CALLER_TOKEN").is_err() {
-        let token_path = if std::path::Path::new(TOKEN_PATH).exists() { TOKEN_PATH } else { WORKTREE_TOKEN_PATH };
+        let token_path = if local_token.exists() { local_token } else { worktree_token };
         if let Ok(tok) = std::fs::read_to_string(token_path) {
             cmd.env("SMARTAGENT_CALLER_TOKEN", tok.trim());
         }
