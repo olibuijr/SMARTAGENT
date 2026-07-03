@@ -187,6 +187,7 @@ impl Db {
     /// which costs one fsync per row — minutes for a many-thousand-row code
     /// index. Same length/dimension guards as `put`.
     pub fn put_many(&mut self, rows: &[(String, String, Vec<f32>)]) -> Result<usize, String> {
+        let mut dim = self.dim();
         for (id, meta, vector) in rows {
             if id.len() > u16::MAX as usize {
                 return Err(format!("id too long: {} bytes (max {})", id.len(), u16::MAX));
@@ -195,12 +196,16 @@ impl Db {
                 return Err("meta too long (max u32)".into());
             }
             if vector.len() > 1 {
-                if let Some(d) = self.dim() {
-                    if vector.len() != d {
+                match dim {
+                    Some(d) if vector.len() != d => {
                         return Err(format!("vector dim {} does not match db dim {d}", vector.len()));
                     }
+                    None => dim = Some(vector.len()),
+                    _ => {}
                 }
             }
+        }
+        for (id, meta, vector) in rows {
             let body = encode_put(id, meta, vector);
             write_framed(&mut self.file, &body)?;
             self.records += 1;
@@ -439,6 +444,29 @@ mod tests {
         drop(db);
         let db = Db::open(&path).unwrap();
         assert!(db.get("keep").is_some() && db.get("after").is_some());
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn put_many_validation_failure_writes_no_rows() {
+        let path = tmp("put-many-atomic");
+        let mut db = Db::create(&path).unwrap();
+        let rows = vec![
+            ("first".to_string(), "".to_string(), vec![1.0, 0.0]),
+            ("bad".to_string(), "".to_string(), vec![1.0, 0.0, 0.0]),
+        ];
+        let before_records = db.records;
+        let before_len = std::fs::metadata(&path).unwrap().len();
+        let err = db.put_many(&rows).unwrap_err();
+        assert!(err.contains("vector dim 3 does not match db dim 2"));
+        assert_eq!(db.records, before_records);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), before_len);
+        assert!(db.get("first").is_none());
+        assert!(db.get("bad").is_none());
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        assert!(db.get("first").is_none());
+        assert!(db.get("bad").is_none());
         std::fs::remove_file(&path).unwrap();
     }
 
