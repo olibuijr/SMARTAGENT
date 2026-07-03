@@ -63,6 +63,14 @@ function plane(canvas, scale = 1, transparent = true) {
 	m.userData.canvas = canvas;
 	return m;
 }
+function overlay(mesh, z = 40) {
+	// speech/UI planes: pull forward and skip the depth test so 3D world
+	// geometry (blocks, lamps, buildings) can never clip them
+	mesh.position.z = z;
+	mesh.material.depthTest = false;
+	mesh.renderOrder = 10;
+	return mesh;
+}
 const FONT = '"Press Start 2P"';
 function textCanvas(str, size, color, { bg = null, pad = 0, glow = null } = {}) {
 	const [, mx] = cv(8, 8);
@@ -391,8 +399,8 @@ AGENTS.forEach((a, i) => {
 	glow.position.set(ax - 60, GROUND + 88, -1);
 	world.add(glow);
 	// nameplate (always visible, small)
-	const np = plane(textCanvas(a.name, 8, a.accent, { bg: PANEL, pad: 5 }));
-	np.position.set(ax, GROUND + 90, 1);
+	const np = overlay(plane(textCanvas(a.name, 8, a.accent, { bg: PANEL, pad: 5 })));
+	np.position.set(ax, GROUND + 90, 40);
 	world.add(np);
 	// dialog card (hidden until near)
 	const [dc, dx] = signBoard(256, 64, a.accent);
@@ -407,8 +415,8 @@ AGENTS.forEach((a, i) => {
 		line += w + " ";
 	}
 	dx.fillText(line.trim(), 8, ly);
-	const card = plane(dc);
-	card.position.set(ax, GROUND + 138, 2);
+	const card = overlay(plane(dc));
+	card.position.set(ax, GROUND + 138, 40);
 	card.material.opacity = 0;
 	world.add(card);
 	stations.push({ x: ax, spr, card, bob: Math.random() * 6.28 });
@@ -423,12 +431,13 @@ FACTS.forEach((fact, i) => {
 	const b = new THREE.Mesh(new THREE.BoxGeometry(24, 24, 24), [qs, qs, qs, qs, qt, qs]);
 	b.position.set(bx, BLOCK_Y, 0);
 	world.add(b);
-	const toast = plane(textCanvas(fact, 8, "#ffd75f", { bg: PANEL, pad: 5 }));
-	toast.position.set(bx, BLOCK_Y + 34, 2);
+	const toast = overlay(plane(textCanvas(fact, 8, "#ffd75f", { bg: PANEL, pad: 5 })));
+	toast.position.set(bx, BLOCK_Y + 34, 40);
 	toast.material.opacity = 0;
 	world.add(toast);
 	const cn = plane(coin());
-	cn.position.set(bx, BLOCK_Y + 20, 14);
+	overlay(cn, 30);
+	cn.position.set(bx, BLOCK_Y + 20, 30);
 	cn.material.opacity = 0;
 	world.add(cn);
 	blocks.push({ x: bx, mesh: b, toast, coin: cn, hit: false, anim: 0 });
@@ -448,19 +457,23 @@ let copied = 0;
 	term.position.set(INSTALL_X, GROUND + 22, 1);
 	world.add(term);
 	const label = plane(textCanvas("INSTALL", 8, "#7dff9a", { bg: PANEL, pad: 5 }));
-	label.position.set(INSTALL_X, GROUND + 58, 1);
+	overlay(label);
+	label.position.set(INSTALL_X, GROUND + 58, 40);
 	world.add(label);
 	const cmd = plane(textCanvas(INSTALL_CMD, 8, "#e8e2d8", { bg: PANEL, pad: 6 }));
 	cmd.scale.setScalar(.62); // long line — shrink to fit the view
-	cmd.position.set(INSTALL_X, GROUND + 110, 2);
+	overlay(cmd);
+	cmd.position.set(INSTALL_X, GROUND + 110, 40);
 	cmd.material.opacity = 0;
 	world.add(cmd);
 	const copyHint = plane(textCanvas(matchMedia("(pointer: coarse)").matches ? "PRESS B TO COPY" : "PRESS C OR CLICK TO COPY", 8, "#7dff9a", { bg: PANEL, pad: 5 }));
-	copyHint.position.set(INSTALL_X, GROUND + 84, 2);
+	overlay(copyHint);
+	copyHint.position.set(INSTALL_X, GROUND + 84, 40);
 	copyHint.material.opacity = 0;
 	world.add(copyHint);
 	const copiedToast = plane(textCanvas("COPIED! PASTE IT IN YOUR TERMINAL", 8, "#161620", { bg: "#7dff9a", pad: 5 }));
-	copiedToast.position.set(INSTALL_X, GROUND + 136, 3);
+	overlay(copiedToast);
+	copiedToast.position.set(INSTALL_X, GROUND + 136, 40);
 	copiedToast.material.opacity = 0;
 	world.add(copiedToast);
 	window.__install = { cmd, copyHint, copiedToast };
@@ -490,7 +503,8 @@ async function copyInstall() {
 	flag.position.set(LEVEL_END - 160, GROUND + 126, 1);
 	world.add(flag);
 	const hint = plane(textCanvas(matchMedia("(pointer: coarse)").matches ? "PRESS B TO ENTER THE REPO" : "PRESS UP TO ENTER THE REPO", 8, "#7dff9a", { bg: PANEL, pad: 5 }));
-	hint.position.set(LEVEL_END - 120, GROUND + 150, 2);
+	overlay(hint);
+	hint.position.set(LEVEL_END - 120, GROUND + 150, 40);
 	hint.material.opacity = 0;
 	world.add(hint);
 	window.__castleHint = hint;
@@ -737,7 +751,7 @@ function step(dt, now) {
 			const k = 1 - b.anim;
 			b.mesh.position.y = BLOCK_Y + Math.sin(k * Math.PI) * 8;
 			b.coin.material.opacity = b.anim;
-			b.coin.position.y = BLOCK_Y + 20 + k * 30; b.coin.position.z = 14;
+			b.coin.position.y = BLOCK_Y + 20 + k * 30; b.coin.position.z = 30;
 		}
 		if (b.hit) b.toast.material.opacity += (1 - b.toast.material.opacity) * Math.min(1, dt * 6);
 	}
