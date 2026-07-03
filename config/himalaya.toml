@@ -1,0 +1,29 @@
+# Himalaya mail configuration for SMARTAGENT.
+#
+# SECURITY: do not put raw passwords or tokens in this file. Himalaya obtains
+# the IMAP/SMTP password through target/release/mail-secret, which delegates to
+# the SMARTAGENT secrets store using caller-token auth and audit logging.
+# Required secret name: mail_olibuijr_password
+# Required policy: caller `pi` may read `mail_olibuijr_password`.
+
+[accounts.olibuijr]
+default = true
+email = "olibuijr@olibuijr.com"
+
+backend.type = "imap"
+backend.host = "mail.olibuijr.com"
+backend.port = 993
+backend.encryption.type = "tls"
+backend.login = "olibuijr@olibuijr.com"
+backend.auth.type = "password"
+backend.auth.cmd = "target/release/mail-secret mail_olibuijr_password"
+
+message.send.backend.type = "smtp"
+message.send.backend.host = "mail.olibuijr.com"
+message.send.backend.port = 465
+message.send.backend.encryption.type = "tls"
+message.send.backend.login = "olibuijr@olibuijr.com"
+message.send.backend.auth.type = "password"
+message.send.backend.auth.cmd = "target/release/mail-secret mail_olibuijr_password"
+
+folder.aliases.inbox = "INBOX"

@@ -84,6 +84,14 @@ supervise up
 supervise restart chromium
 supervise watch
 
+# Secure mail checks via Himalaya. Passwords must live only in the
+# SMARTAGENT secrets store as `mail_olibuijr_password`; Himalaya reads them
+# through the audited `mail-secret` bridge, never from plaintext config/env.
+cargo build --release -p secrets -p mail-secret
+himalaya -c config/himalaya.toml account list
+himalaya -c config/himalaya.toml folder list -a olibuijr
+himalaya -c config/himalaya.toml envelope list -a olibuijr --page-size 10
+
 # Release flow.
 ./build.sh minor "changelog line"
 ```

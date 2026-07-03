@@ -8,6 +8,7 @@ members = [
     "crates/schedule",
     "crates/vault",
     "crates/notify",
+    "crates/mail-secret",
     "crates/memory",
     "crates/codegraph",
     "crates/search",
