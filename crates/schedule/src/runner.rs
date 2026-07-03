@@ -7,13 +7,6 @@ use std::process::Command;
 use crate::cron::Cron;
 use crate::journal::{Event, Job, Journal};
 
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 fn run_cmd(cmd: &str) -> i32 {
     Command::new("sh")
         .arg("-c")
@@ -45,14 +38,14 @@ impl TickLock {
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
                 Ok(mut f) => {
                     use std::io::Write;
-                    let _ = write!(f, "{}", now_unix());
+                    let _ = write!(f, "{}", procutil::unix_secs());
                     return Ok(TickLock(path));
                 }
                 Err(_) => {
                     let stale = std::fs::read_to_string(&path)
                         .ok()
                         .and_then(|t| t.trim().parse::<i64>().ok())
-                        .map(|t| now_unix() - t > 120)
+                        .map(|t| procutil::unix_secs() - t > 120)
                         .unwrap_or(true);
                     if stale {
                         let _ = std::fs::remove_file(&path);
@@ -75,7 +68,7 @@ impl Drop for TickLock {
 pub fn tick(journal: &Journal) -> Result<Vec<(String, i32)>, String> {
     let _lock = TickLock::acquire(journal)?;
     let jobs = journal.replay()?;
-    let now = now_unix();
+    let now = procutil::unix_secs();
     let mut results = Vec::new();
     for job in jobs.values() {
         if !job.enabled {
@@ -103,7 +96,7 @@ pub fn tick(journal: &Journal) -> Result<Vec<(String, i32)>, String> {
 /// Daemon loop: sleep to the next whole minute, tick, repeat.
 pub fn daemon(journal: &Journal) -> Result<(), String> {
     loop {
-        let now = now_unix();
+        let now = procutil::unix_secs();
         let sleep_secs = 60 - (now % 60);
         std::thread::sleep(std::time::Duration::from_secs(sleep_secs as u64));
         for (id, exit) in tick(journal)? {

@@ -16,7 +16,9 @@ pub fn discover(root: &Path) -> Result<Vec<Skill>, String> {
     let mut skills = Vec::new();
     for p in paths {
         // One unreadable SKILL.md must not hide every other skill.
-        let Ok(content) = std::fs::read_to_string(&p) else { continue };
+        let Ok(content) = std::fs::read_to_string(&p) else {
+            continue;
+        };
         let fm = frontmatter::parse(&content);
         // Fall back to the directory name when frontmatter lacks a name.
         let name = fm.get("name").map(str::to_string).unwrap_or_else(|| {
@@ -25,8 +27,15 @@ pub fn discover(root: &Path) -> Result<Vec<Skill>, String> {
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default()
         });
-        let description = fm.get("description").unwrap_or("(no description)").to_string();
-        skills.push(Skill { name, description, path: p });
+        let description = fm
+            .get("description")
+            .unwrap_or("(no description)")
+            .to_string();
+        skills.push(Skill {
+            name,
+            description,
+            path: p,
+        });
     }
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(skills)
@@ -71,7 +80,9 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(name);
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -82,13 +93,31 @@ mod tests {
         let root = scratch("skills-disc");
         std::fs::create_dir_all(root.join("a")).unwrap();
         std::fs::create_dir_all(root.join("b/c")).unwrap();
-        std::fs::write(root.join("a/SKILL.md"), "---\nname: alpha\ndescription: first\n---\nbody a").unwrap();
-        std::fs::write(root.join("b/c/SKILL.md"), "---\nname: beta\ndescription: second\n---\nbody b").unwrap();
+        std::fs::write(
+            root.join("a/SKILL.md"),
+            "---\nname: alpha\ndescription: first\n---\nbody a",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("b/c/SKILL.md"),
+            "---\nname: beta\ndescription: second\n---\nbody b",
+        )
+        .unwrap();
         // Infra + reference dirs must NEVER surface as our skills — a root of
         // `.` used to leak .refrepos/ reference SKILL.md files into matching.
-        for skip in [".refrepos/mem0", "target/pkg", "node_modules/x", "workspaces/proj", ".hidden"] {
+        for skip in [
+            ".refrepos/mem0",
+            "target/pkg",
+            "node_modules/x",
+            "workspaces/proj",
+            ".hidden",
+        ] {
             std::fs::create_dir_all(root.join(skip)).unwrap();
-            std::fs::write(root.join(skip).join("SKILL.md"), "---\nname: leaked\ndescription: nope\n---\n").unwrap();
+            std::fs::write(
+                root.join(skip).join("SKILL.md"),
+                "---\nname: leaked\ndescription: nope\n---\n",
+            )
+            .unwrap();
         }
         let skills = discover(&root).unwrap();
         assert_eq!(skills.len(), 2);

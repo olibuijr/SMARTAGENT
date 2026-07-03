@@ -7,6 +7,7 @@
 //! embeddings, so indexing needs no network.
 
 use std::path::Path;
+use std::time::SystemTime;
 
 use semdb::storage::Db;
 // Project discovery/resolution is the shared semdb::workspace mechanism; this
@@ -75,19 +76,39 @@ pub fn index_project(project: &Path) -> Result<IndexStats, String> {
     Ok(IndexStats { files: count, bytes })
 }
 
+pub struct Status {
+    pub files: usize,
+    pub age_secs: u64,
+    pub stale: bool,
+}
+
 /// Index status for a project: `Some((file_count, age_secs))` if indexed.
 pub fn status(project: &Path) -> Option<(usize, u64)> {
+    status_detail(project).map(|s| (s.files, s.age_secs))
+}
+
+/// Detailed index status including drift: stale when any indexable repo file is
+/// newer than the index db. This catches single-file edits immediately without
+/// forcing a reindex from the statusline path.
+pub fn status_detail(project: &Path) -> Option<Status> {
     let p = project.join(INDEX_REL);
     let db = Db::open(&p).ok()?;
+    let index_mtime = std::fs::metadata(&p).ok()?.modified().ok()?;
     let files = db.index.len().saturating_sub(1); // minus summary row
-    let age = std::fs::metadata(&p)
-        .ok()?
-        .modified()
-        .ok()
-        .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+    let age_secs = SystemTime::now()
+        .duration_since(index_mtime)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    Some((files, age))
+    let stale = newest_indexable_mtime(project).map(|t| t > index_mtime).unwrap_or(false);
+    Some(Status { files, age_secs, stale })
+}
+
+fn newest_indexable_mtime(project: &Path) -> Option<SystemTime> {
+    let rules = Rules::load(project);
+    walk::walk(project, &rules, None)
+        .into_iter()
+        .filter_map(|p| std::fs::metadata(p).ok()?.modified().ok())
+        .max()
 }
 
 pub fn human_age(secs: u64) -> String {
@@ -128,10 +149,16 @@ mod tests {
         assert_eq!(s.files, 3); // main.rs + README.md + .gitignore; dist/ ignored
         let (files, _age) = status(&proj).unwrap();
         assert_eq!(files, 3);
+        assert!(!status_detail(&proj).unwrap().stale);
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(proj.join("src/main.rs"), "fn main() { println!(\"hi\"); }\n").unwrap();
+        assert!(status_detail(&proj).unwrap().stale, "edited file newer than index must stale status");
 
         // Re-index must not swallow its own .smartagent db as a file.
         let s2 = index_project(&proj).unwrap();
         assert_eq!(s2.files, 3);
+        assert!(!status_detail(&proj).unwrap().stale);
     }
 
     // Discovery/resolution tests live with the shared impl: semdb::workspace.

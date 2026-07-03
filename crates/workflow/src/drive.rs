@@ -7,10 +7,9 @@
 //! `workflow start` (where the model follows the loop voluntarily): here the
 //! harness owns control flow and the model only proposes within one step.
 
-use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::def::Def;
 use crate::run::{now, valid_evidence, Run, Store};
@@ -137,47 +136,8 @@ fn spawn_step(o: &DriveOpts, prompt: &str) -> (i32, bool, String) {
         Ok(c) => c,
         Err(e) => return (-1, false, format!("spawn failed: {e}")),
     };
-    wait_with_timeout(child, o.step_timeout)
-}
-
-/// Poll for completion up to `timeout`; kill and reap on expiry (same pattern
-/// as orchestrate — pi step output stays well under the pipe buffer).
-fn wait_with_timeout(mut child: std::process::Child, timeout: Duration) -> (i32, bool, String) {
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = drain(&mut child);
-                return (status.code().unwrap_or(-1), false, out);
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let out = drain(&mut child);
-                    return (-1, true, out);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return (-1, false, String::new()),
-        }
-    }
-}
-
-fn drain(child: &mut std::process::Child) -> String {
-    let mut s = String::new();
-    if let Some(mut o) = child.stdout.take() {
-        let _ = o.read_to_string(&mut s);
-    }
-    if let Some(mut e) = child.stderr.take() {
-        let mut es = String::new();
-        let _ = e.read_to_string(&mut es);
-        if !es.is_empty() {
-            s.push_str("\n[stderr]\n");
-            s.push_str(&es);
-        }
-    }
-    s
+    let out = procutil::wait_with_timeout(child, o.step_timeout);
+    (out.exit, out.timed_out, out.text)
 }
 
 /// The step agent's LAST `EVIDENCE:` line is its claim; everything else is

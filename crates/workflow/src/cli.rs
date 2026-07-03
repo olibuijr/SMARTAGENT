@@ -46,6 +46,31 @@ fn render_step(d: &Def, r: &Run) -> String {
     out.join("\n")
 }
 
+
+fn task_owner_state(task: &str) -> Option<(String, String)> {
+    if task.is_empty() { return None; }
+    let out = std::process::Command::new("target/release/tasks").args(["show", task]).output().ok()?;
+    if !out.status.success() { return None; }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut col = String::new();
+    let mut owner = String::new();
+    if let Some(first) = text.lines().next() {
+        let parts: Vec<&str> = first.split_whitespace().collect();
+        if parts.len() >= 3 { col = parts[2].to_string(); }
+    }
+    for l in text.lines() {
+        if let Some(rest) = l.strip_prefix("owner: ") { owner = rest.trim().to_string(); }
+    }
+    Some((col, owner))
+}
+
+fn current_owner() -> String {
+    std::env::var("SMARTAGENT_TASK_OWNER")
+        .or_else(|_| std::env::var("SMARTAGENT_GATEWAY_AGENT"))
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "agent".into())
+}
+
 fn resolve_run(store: &Store, args: &[String]) -> Result<Run, String> {
     match flag(args, "--run") {
         Some(id) => store.get(&id),
@@ -92,6 +117,15 @@ pub fn run(args: &[String]) -> Result<String, String> {
                         "task {task} already has running run {} (wf {}) — another agent owns it; pull a different task",
                         existing.id, existing.wf
                     ));
+                }
+                if let Some((col, owner)) = task_owner_state(&task) {
+                    let me = current_owner();
+                    if col != "doing" || (!owner.is_empty() && owner != me) {
+                        return Err(format!(
+                            "task {task} is {col}{}; start its workflow only after you own it in doing",
+                            if owner.is_empty() { String::new() } else { format!(" owned by @{owner}") }
+                        ));
+                    }
                 }
             }
             let r = Run {

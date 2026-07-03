@@ -32,8 +32,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 )
             };
             let mut graph = Graph::new();
-            let mut files = 0;
-            walk_rs(&repo, &repo, &mut graph, &mut files);
+            let files = index_repo(&repo, &mut graph);
             graph.save(&out)?;
             let mut msg = format!("indexed {files} files → {} symbols, {} edges → {}", graph.symbols.len(), graph.edges.len(), out.display());
             if graph.symbols.is_empty() {
@@ -45,6 +44,19 @@ fn run(args: &[String]) -> Result<String, String> {
                 msg.push_str(&format!("\nembedded {n} symbols → {}", idx.display()));
             }
             Ok(msg)
+        }
+        Some("index-file") => {
+            let graph_path = graph_arg(args)?;
+            let repo = flag(args, "--repo").map(PathBuf::from).ok_or("--repo required")?;
+            let file = flag(args, "--file").map(PathBuf::from).ok_or("--file required")?;
+            let src = std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+            let rel = file.strip_prefix(&repo).unwrap_or(&file).to_string_lossy().to_string();
+            let mut graph = if graph_path.exists() { Graph::load(&graph_path)? } else { Graph::new() };
+            let before = graph.symbols.len();
+            graph.remove_file(&rel);
+            index::index_source(&mut graph, &rel, &src);
+            graph.save(&graph_path)?;
+            Ok(format!("indexed file {rel}: symbols {} → {}", before, graph.symbols.len()))
         }
         Some("defs") => query(args, |g, n| g.defs(n), "not defined")?.pipe(Ok),
         Some("refs") => query(args, |g, n| g.refs(n), "no references")?.pipe(Ok),
@@ -162,24 +174,43 @@ fn symbol_index_path(graph: &Path) -> PathBuf {
     graph.with_extension("symbols.semdb")
 }
 
-fn walk_rs(root: &Path, dir: &Path, graph: &mut Graph, files: &mut usize) {
-    let entries = match std::fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
-    for e in entries.flatten() {
-        let p = e.path();
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if p.is_dir() {
-            if matches!(name, "target" | ".git" | ".refrepos" | "node_modules") { continue; }
-            walk_rs(root, &p, graph, files);
-        } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
-            if let Ok(src) = std::fs::read_to_string(&p) {
-                let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().to_string();
-                index::index_source(graph, &rel, &src);
-                *files += 1;
-            }
+fn index_repo(root: &Path, graph: &mut Graph) -> usize {
+    let rules = codeindex::gitignore::Rules::load(root);
+    let mut files = 0;
+    for p in codeindex::walk::walk(root, &rules, Some("rs")) {
+        if let Ok(src) = std::fs::read_to_string(&p) {
+            let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().to_string();
+            index::index_source(graph, &rel, &src);
+            files += 1;
         }
     }
+    files
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn index_repo_respects_gitignore() {
+        let root = scratch("codegraph-gitignore");
+        std::fs::write(root.join("keep.rs"), "fn keep() {}").unwrap();
+        std::fs::write(root.join("skip.rs"), "fn skip() {}").unwrap();
+        std::fs::write(root.join(".gitignore"), "skip.rs\n").unwrap();
+        let mut g = Graph::new();
+        let files = index_repo(&root, &mut g);
+        assert_eq!(files, 1);
+        assert!(g.defs("keep").iter().any(|d| d.contains("keep.rs")));
+        assert!(g.defs("skip").is_empty());
+    }
+}
 
 trait Pipe: Sized { fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R { f(self) } }
 impl<T> Pipe for T {}
@@ -190,14 +221,19 @@ codegraph — Rust code knowledge graph (CodeGraph concept)
 USAGE:
   codegraph index <repo-dir> --out <graph.json> [--embed]
   codegraph index --project <name> [--embed]      graph → workspaces/<name>/.smartagent/codegraph.json
-  codegraph defs    <graph.json> <name>
-  codegraph refs    <graph.json> <name>
-  codegraph callers <graph.json> <fn>
+  codegraph index-file <graph.json> --repo <repo-dir> --file <changed.rs>
+  codegraph defs    <graph.json> <name> [--limit 50]
+  codegraph refs    <graph.json> <name> [--limit 50]
+  codegraph callers <graph.json> <fn>   [--limit 50]
+  codegraph impls   <graph.json> <trait-or-type> [--limit 50]
+  codegraph path    <graph.json> <from-fn> <to-fn>
+  codegraph unused  <graph.json> [--limit 50]
   codegraph search  <graph.json> <query> [--k 5]   (needs --embed at index time)
   codegraph stats   <graph.json>
+  codegraph statusline <graph.json>
 
 Every graph-reading verb also accepts --project <name> in place of the
 graph path (per-repo graphs never clobber each other). Structural queries
-(defs/refs/callers) walk the graph; search is semdb-backed semantic symbol
-lookup over embeddings.
+(defs/refs/callers/impls/path/unused) walk the graph; search is semdb-backed
+semantic symbol lookup over embeddings.
 "#;

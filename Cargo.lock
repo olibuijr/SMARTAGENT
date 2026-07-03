@@ -625,6 +625,7 @@ dependencies = [
 name = "codegraph"
 version = "0.2.0"
 dependencies = [
+ "codeindex",
  "httpc",
  "semdb",
 ]
@@ -1815,6 +1816,7 @@ name = "memory"
 version = "0.2.0"
 dependencies = [
  "httpc",
+ "procutil",
  "semdb",
 ]
 
@@ -2273,6 +2275,7 @@ name = "orchestrate"
 version = "0.2.0"
 dependencies = [
  "httpc",
+ "procutil",
  "semdb",
 ]
 
@@ -2456,6 +2459,10 @@ checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "procutil"
+version = "0.2.0"
 
 [[package]]
 name = "profiling"
@@ -2676,6 +2683,7 @@ name = "schedule"
 version = "0.2.0"
 dependencies = [
  "httpc",
+ "procutil",
  "semdb",
 ]
 
@@ -2977,6 +2985,7 @@ name = "supervise"
 version = "0.2.0"
 dependencies = [
  "httpc",
+ "procutil",
  "semdb",
 ]
 
@@ -3984,6 +3993,7 @@ name = "workflow"
 version = "0.2.0"
 dependencies = [
  "httpc",
+ "procutil",
  "semdb",
  "tasks",
 ]

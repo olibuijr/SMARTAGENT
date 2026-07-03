@@ -6,22 +6,12 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { bin, makeRunner, ROOT } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "semdb");
 const DEFAULT_DB = join(ROOT, "data", "smartagent.semdb");
-
-function run(args: string[]): string {
-	try {
-		return execFileSync(BIN, args, { encoding: "utf8", timeout: 90_000 }).trim();
-	} catch (e: any) {
-		return `error: ${e.stderr?.toString().trim() || e.message}`;
-	}
-}
+const run = makeRunner(bin("semdb"), 90_000);
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({

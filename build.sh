@@ -136,14 +136,14 @@ EOF
 run_tool_registration_smoke() {
     echo "── smoke: extension tool registry (deterministic) ──"
     run_tool_smoke_regression
-    EXPECTED="semdb memory codegraph codeindex vault skills schedule search notify secrets browser sa-browser orchestrate mcp sandbox context evals rag supervise tasks workflow"
+    EXPECTED="semdb memory codegraph codeindex vault skills schedule search notify telegram secrets browser sa-browser orchestrate mcp sandbox context evals rag supervise tasks workflow"
     OUT=$(extension_tool_names extensions/*.ts)
     GOT=$(printf '%s\n' "$OUT" | sed '/^$/d' | wc -l | tr -d ' ')
     for name in $EXPECTED; do
         printf '%s\n' "$OUT" | grep -qx "$name" || { echo "FAIL: extension tool not registered in source: $name"; echo "$OUT"; exit 1; }
     done
-    if [ "$GOT" -ne 21 ]; then echo "FAIL: expected exactly 21 active extension tools, got $GOT"; echo "$OUT"; exit 1; fi
-    echo "ok ($GOT/21 extension tools registered in source)"
+    if [ "$GOT" -ne 22 ]; then echo "FAIL: expected exactly 22 active extension tools, got $GOT"; echo "$OUT"; exit 1; fi
+    echo "ok ($GOT/22 extension tools registered in source)"
 }
 
 run_statusline_smoke() {
@@ -158,7 +158,7 @@ workflow|workflow statusline --root . --db data/workflow.semdb
 memory|memory statusline --dir data/memory
 rag|rag statusline data/rag.semdb
 schedule|schedule statusline
-evals|evals statusline --db data/evals.jsonl
+evals|evals statusline --db data/evals.semdb
 orchestrate|orchestrate statusline
 gateway|gateway statusline
 supervise|supervise statusline
@@ -176,6 +176,52 @@ hooks|hooks statusline --root .'
         printf '%s' "$OUT" | grep -Eq '^(ok|warn|err)\|' || { echo "FAIL: $key statusline malformed: $OUT"; exit 1; }
         echo "ok $key: $OUT"
     done
+}
+
+run_help_smoke() {
+    echo "── smoke: CLI help works without required flags ──"
+    OUT=$(target/release/secrets --help 2>&1) || { rc=$?; echo "FAIL: secrets --help rc=$rc output=$OUT"; exit 1; }
+    printf '%s' "$OUT" | grep -q '^secrets —' || { echo "FAIL: secrets --help missing usage: $OUT"; exit 1; }
+    echo "ok secrets --help"
+}
+
+restart_supervise_watch_if_running() {
+    echo "── deploy: refresh supervise watch ───"
+    # `supervise watch` is the one long-lived process that heals the rest.
+    # After rebuilding target/release/supervise, refresh any live watch loop so
+    # deploys do not leave a stale 16h-old binary supervising new services.
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user --quiet is-active smartagent-supervise.service 2>/dev/null; then
+        systemctl --user restart smartagent-supervise.service
+        echo "ok (systemd user unit restarted)"
+        return 0
+    fi
+    PIDS=$(pgrep -f "(^|/| )target/release/supervise watch$" 2>/dev/null | tr '\n' ' ' || true)
+    if [ -z "$PIDS" ]; then
+        echo "ok (no supervise watch process running)"
+        return 0
+    fi
+    for pid in $PIDS; do
+        kill "$pid" 2>/dev/null || true
+    done
+    mkdir -p workspaces/supervise-logs
+    nohup target/release/supervise watch >> workspaces/supervise-logs/watch.log 2>&1 &
+    echo "ok (restarted supervise watch; old pids: $PIDS new pid: $!)"
+}
+
+
+run_hook_gate_smoke() {
+    echo "── smoke: workspace write hook gate ──"
+    PAYLOAD='{"tool":"write","args":{"path":"workspaces/hook-gate-empty-project/probe.txt"}}'
+    set +e
+    OUT=$(printf '%s' "$PAYLOAD" | hooks.d/require-doing-task.sh 2>&1)
+    RC=$?
+    set -e
+    if [ "$RC" -ne 2 ]; then
+        echo "FAIL: workspace write without project doing should block with exit 2, got $RC: $OUT"
+        exit 1
+    fi
+    printf '%s' "$OUT" | grep -q 'tasks (project=hook-gate-empty-project)' || { echo "FAIL: block did not point at project board: $OUT"; exit 1; }
+    echo "ok workspace write blocked: exit $RC"
 }
 
 gate() {
@@ -212,6 +258,10 @@ gate() {
 
     run_tool_registration_smoke
     run_statusline_smoke
+    run_help_smoke
+    run_hook_gate_smoke
+
+    restart_supervise_watch_if_running
 
     echo "── status: project memory snapshot ────"
     update_status
@@ -255,6 +305,12 @@ case "${1:-}" in
         ;;
     statusline-smoke-test)
         run_statusline_smoke
+        ;;
+    hook-gate-smoke-test)
+        run_hook_gate_smoke
+        ;;
+    help-smoke-test)
+        run_help_smoke
         ;;
     patch|minor|major)
         MSG="${2:?changelog line required: ./build.sh $1 \"message\"}"

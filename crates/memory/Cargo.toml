@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 semdb = { path = "../semdb" }
 httpc = { path = "../httpc" }
+procutil = { path = "../procutil" }

@@ -7,7 +7,7 @@
  *    (⚙ running, then ✓/✗ with duration; auto-clears after a few seconds).
  *  - Workspace line (belowEditor, first — most task-relevant): 🕸 code graph ·
  *    🗃 workspace repo index · 📋 tasks board · ▶ workflow run.
- *  - Data line (belowEditor): 🧠 memory · 📚 rag corpus · ⏰ schedule ·
+ *  - Data line (belowEditor): 🧠 memory · 📚 corpus · ⏰ schedule ·
  *    📊 evals · 🤖 orchestrate — re-probed after related tools run.
  *  - Infra line (belowEditor, last — least volatile): ⛭ services · 🧱 sandbox ·
  *    🔑 secrets auth · 🌐 chrome · 🔎 searx · 🪝 hooks.
@@ -51,7 +51,7 @@ const LABEL: Record<string, string> = {
 	codegraph: "Code",
 	codeindex: "Index",
 	orchestrate: "Agents",
-	rag: "Docs",
+	rag: "Corpus",
 	gateway: "DA",
 };
 const label = (key: string) => LABEL[key] ?? key[0].toUpperCase() + key.slice(1);

@@ -107,8 +107,8 @@ mod tests {
     #[test]
     fn score_run_uses_latest_trace_per_case() {
         let traces = vec![
-            Trace { run: "r".into(), case: "c".into(), input: "old".into(), output: "bad".into(), expected: Some("good".into()), latency_ms: None },
-            Trace { run: "r".into(), case: "c".into(), input: "new".into(), output: "good".into(), expected: Some("good".into()), latency_ms: None },
+            Trace { run: "r".into(), case: "c".into(), input: "old".into(), output: "bad".into(), expected: Some("good".into()), latency_ms: None, provenance: None },
+            Trace { run: "r".into(), case: "c".into(), input: "new".into(), output: "good".into(), expected: Some("good".into()), latency_ms: None, provenance: None },
         ];
         let scores = score_run(&traces, "r", Matcher::Exact);
         assert_eq!(scores.len(), 1);

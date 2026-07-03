@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use httpc::json::{self, Value};
 
+use crate::agents_view::{status_line, tokens_today, write_agents};
 use crate::beat::Beat;
-use crate::agents_view::{write_agents, tokens_today, status_line};
 use crate::child::{Event, PiChild};
 
 type Clients = Arc<Mutex<Vec<UnixStream>>>;
@@ -143,10 +143,28 @@ pub fn serve(args: &[String]) -> Result<(), String> {
     // Worker agents (autonomous) + conversational chat agents (never
     // auto-prompted — they idle waiting for a real message, e.g. Telegram).
     for name in &flags.agents {
-        map.insert(name.clone(), Arc::new(spawn_agent(name, &repo_root, &data_dir, flags.heartbeat_secs, flags.autonomous)?));
+        map.insert(
+            name.clone(),
+            Arc::new(spawn_agent(
+                name,
+                &repo_root,
+                &data_dir,
+                flags.heartbeat_secs,
+                flags.autonomous,
+            )?),
+        );
     }
     for name in &flags.chat_agents {
-        map.insert(name.clone(), Arc::new(spawn_agent(name, &repo_root, &data_dir, flags.heartbeat_secs, false)?));
+        map.insert(
+            name.clone(),
+            Arc::new(spawn_agent(
+                name,
+                &repo_root,
+                &data_dir,
+                flags.heartbeat_secs,
+                false,
+            )?),
+        );
     }
     let agents: Agents = Arc::new(map);
     eprintln!(
@@ -342,13 +360,19 @@ fn start_event_pump(
                     }
                 }
                 Event::Tool(name) => {
-                    append(&tpath, &format!("\n⚙ {name}\n"));
+                    let msg = tool_status_line(&name, None);
+                    append(&tpath, &format!("\n{msg}\n"));
                     broadcast(
                         &clients,
-                        &format!(
-                            "{{\"ev\":\"info\",\"data\":\"⚙ {}\"}}\n",
-                            json::escape(&name)
-                        ),
+                        &format!("{{\"ev\":\"info\",\"data\":\"{}\"}}\n", json::escape(&msg)),
+                    );
+                }
+                Event::ToolEnd(name, ok) => {
+                    let msg = tool_status_line(&name, Some(ok));
+                    append(&tpath, &format!("\n{msg}\n"));
+                    broadcast(
+                        &clients,
+                        &format!("{{\"ev\":\"info\",\"data\":\"{}\"}}\n", json::escape(&msg)),
                     );
                 }
                 Event::Exited(code) => {
@@ -586,7 +610,12 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
             } else {
                 let _ = agent.child.lock().unwrap().command("prompt", Some(msg));
             }
-            agent.beat.lock().unwrap().log(&agent.name, "user", if busy { "queued" } else { "ask" }, msg);
+            agent.beat.lock().unwrap().log(
+                &agent.name,
+                "user",
+                if busy { "queued" } else { "ask" },
+                msg,
+            );
         }
         "send" | "steer" => {
             let mut full = String::new();
@@ -644,14 +673,7 @@ fn handle_agent_op(op: &str, msg: &str, agent: Arc<AgentRuntime>, write_side: &m
             let tokens = tokens_today(Some(&agent.name)).total();
             write_info_done(
                 write_side,
-                &status_line(
-                    &agent.name,
-                    busy,
-                    &last,
-                    queued,
-                    &doing,
-                    tokens,
-                ),
+                &status_line(&agent.name, busy, &last, queued, &doing, tokens),
             );
         }
         "stop" => {
@@ -679,6 +701,24 @@ pub(crate) fn role_of(name: &str) -> &'static str {
 /// Structured last activity from the agent's own transcript: the recent tool
 /// chain ("tasks→memory→codeindex") and its last words (clean word-boundary
 /// tail) as separate fields — raw log tails render as garbage in the panel.
+pub(crate) fn tool_status_line(name: &str, done: Option<bool>) -> String {
+    let clean = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(32)
+        .collect::<String>();
+    let tool = if clean.is_empty() {
+        "tool"
+    } else {
+        clean.as_str()
+    };
+    match done {
+        None => format!("🛠 {tool} running…"),
+        Some(true) => format!("🛠 {tool} ✓"),
+        Some(false) => format!("🛠 {tool} ✗"),
+    }
+}
+
 fn write_info_done(write_side: &mut UnixStream, text: &str) {
     let _ = write_side.write_all(
         format!(
@@ -743,6 +783,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tool_status_line_is_concise_and_sanitized() {
+        assert_eq!(tool_status_line("memory", None), "🛠 memory running…");
+        assert_eq!(tool_status_line("tasks", Some(true)), "🛠 tasks ✓");
+        assert_eq!(tool_status_line("secret=abc", Some(false)), "🛠 secretabc ✗");
+    }
+
+    #[test]
     fn line_kinds_parse() {
         assert!(
             matches!(client_line_kind("{\"ev\":\"text\",\"data\":\"hi\"}"), LineKind::Text(t) if t == "hi")
@@ -784,9 +831,6 @@ mod tests {
             MuteAction::Clear
         );
     }
-
-
-
 
     #[test]
     fn queued_prompts_keep_fifo_order_for_busy_beat_and_send_soak() {

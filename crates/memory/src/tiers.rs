@@ -1,7 +1,7 @@
 //! Three-tier memory (Mem0 concept), each tier a semdb file under a root dir.
 //!
 //!   working  — recent context, capped (oldest evicted past the cap)
-//!   episodic — timestamped events, unbounded
+//!   episodic — timestamped events, text capped at store-time
 //!   semantic — distilled durable facts
 //!
 //! Recall is semantic vector search over the requested tiers, results tagged
@@ -16,6 +16,7 @@ use semdb::storage::Db;
 
 pub const TIERS: [&str; 3] = ["working", "episodic", "semantic"];
 const WORKING_CAP: usize = 50;
+const EPISODIC_TEXT_CAP: usize = 500;
 
 pub struct Memory {
     dir: PathBuf,
@@ -55,8 +56,9 @@ impl Memory {
 
     /// Store text in a tier with an auto-embedded vector.
     pub fn remember(&self, tier: &str, id: &str, text: &str) -> Result<(), String> {
-        let vector = self.embed(text)?;
-        self.remember_vec(tier, id, text, vector)
+        let text = cap_tier_text(tier, text);
+        let vector = self.embed(&text)?;
+        self.remember_vec(tier, id, &text, vector)
     }
 
     /// Store with an explicit vector (used by tests to avoid the network).
@@ -64,9 +66,10 @@ impl Memory {
     /// (cosine ≥ 0.97), UPDATE that row instead of accumulating a duplicate/
     /// contradiction — the Mem0 consolidation behavior, deterministic.
     pub fn remember_vec(&self, tier: &str, id: &str, text: &str, vector: Vec<f32>) -> Result<(), String> {
+        let text = cap_tier_text(tier, text);
         let mut db = self.open_or_create(tier)?;
-        let ts = now_unix();
-        let meta = format!(r#"{{"text":"{}","ts":{ts},"hits":0}}"#, esc(text));
+        let ts = procutil::unix_secs();
+        let meta = format!(r#"{{"text":"{}","ts":{ts},"hits":0}}"#, esc(&text));
         if vector.len() > 1 {
             let top = cli::search(&db, &vector, 1, true);
             if let Some((existing, score, _)) = top.first() {
@@ -219,11 +222,11 @@ fn evict_over_cap(db: &mut Db) -> Result<(), String> {
     Ok(())
 }
 
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+fn cap_tier_text(tier: &str, text: &str) -> String {
+    if tier != "episodic" || text.chars().count() <= EPISODIC_TEXT_CAP {
+        return text.to_string();
+    }
+    text.chars().take(EPISODIC_TEXT_CAP).collect()
 }
 
 fn esc(s: &str) -> String {
@@ -288,6 +291,16 @@ mod tests {
         // oldest (0000) evicted
         let hits = m.recall(&[0.0], WORKING_CAP, &vec!["working".into()]).unwrap();
         assert!(hits.iter().all(|h| h.id != "0000"));
+    }
+
+    #[test]
+    fn episodic_text_is_capped_at_store_time() {
+        let m = Memory::new(&scratch("mem-episodic-cap"));
+        let long = "x".repeat(EPISODIC_TEXT_CAP + 200);
+        m.remember_vec("episodic", "e1", &long, vec![1.0]).unwrap();
+        let db = Db::open(&m.tier_path("episodic")).unwrap();
+        let stored = text_from_meta(&db.get("e1").unwrap().meta);
+        assert_eq!(stored.chars().count(), EPISODIC_TEXT_CAP);
     }
 }
 

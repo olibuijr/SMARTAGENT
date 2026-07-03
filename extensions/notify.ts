@@ -4,20 +4,11 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { bin, makeRunner, ROOT } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "notify");
 
-function run(args: string[]): string {
-	try {
-		return execFileSync(BIN, args, { encoding: "utf8", timeout: 120_000, cwd: ROOT }).trim();
-	} catch (e: any) {
-		return `error: ${e.stderr?.toString().trim() || e.message}`;
-	}
-}
+const run = makeRunner(bin("notify"), 120000);
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({

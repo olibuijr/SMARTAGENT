@@ -12,10 +12,23 @@ and the workspace index.
 ## board
 skill: tasks
 expect: current board summary reported
-Run the tasks tool with action board and summarize the columns in one line.
+Run the tasks tool with action board. Report with this template:
+
+```
+Agent report: status
+- Status: <doing/ready/review counts>
+- Evidence: <one board line proving the counts>
+- Next: <single next action>
+```
 
 ## index
 skill: codeindex
 expect: workspace index coverage reported
-Run the codeindex tool with action projects and report how many repos are
-indexed out of how many.
+Run the codeindex tool with action projects. Report with this template:
+
+```
+Agent report: workspace index
+- Status: <indexed repos>/<total repos> indexed
+- Evidence: <one projects summary line>
+- Next: <single next action, or "none">
+```

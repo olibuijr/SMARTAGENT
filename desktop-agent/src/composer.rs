@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, Stroke, Vec2};
 
 use crate::agent::AgentState;
 use crate::emit::Emit;
+use crate::icons;
 use crate::theme;
 
 const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -47,8 +48,8 @@ pub fn render(
         ui.horizontal(|ui| {
             // Attach: pi resolves @path file mentions in the prompt.
             if ui
-                .add(egui::Button::new(egui::RichText::new("📎").size(15.0).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT).min_size(Vec2::new(28.0, 28.0)))
-                .on_hover_text("Reference a file — type a path after @")
+                .add(egui::Button::new(egui::RichText::new(icons::ATTACH).size(15.0).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT).min_size(Vec2::new(28.0, 28.0)))
+                .on_hover_text("Reference a file — type a path after @, or drag a file in")
                 .clicked()
             {
                 if !input.is_empty() && !input.ends_with(' ') {

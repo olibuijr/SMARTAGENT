@@ -1,6 +1,6 @@
 ---
 name: self-test
-description: How the agent verifies its own tools end-to-end (smoke checklist)
+description: How the agent verifies its own tools end-to-end (smoke checklist), bug-hunt harness diagnostics, tool registration failures, and regression probes
 ---
 
 # Self-test

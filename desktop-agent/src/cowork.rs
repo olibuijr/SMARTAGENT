@@ -99,7 +99,7 @@ fn header(ui: &mut egui::Ui, plan_first: bool, folder_input: &mut String, emits:
     });
     // Work-in-a-folder: point the agent at any directory.
     ui.horizontal(|ui| {
-        ui.colored_label(theme::TEXT_FAINT(), egui::RichText::new("📁").size(13.0));
+        ui.colored_label(theme::TEXT_FAINT(), egui::RichText::new(icons::FOLDER).size(13.0));
         let resp = ui.add(egui::TextEdit::singleline(folder_input).desired_width(280.0).hint_text("work in folder (path)…"));
         let go = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if go && !folder_input.trim().is_empty() {
@@ -150,7 +150,7 @@ fn empty_state(ui: &mut egui::Ui, conn: &mut AgentConn, scheduled: &[String], em
 
 fn scheduled_section(ui: &mut egui::Ui, scheduled: &[String], emits: &mut Vec<Emit>) {
     ui.horizontal(|ui| {
-        ui.colored_label(theme::TEXT_FAINT(), egui::RichText::new("⏱ Scheduled").size(13.0).strong());
+        ui.colored_label(theme::TEXT_FAINT(), egui::RichText::new(format!("{} Scheduled", icons::CLOCK)).size(13.0).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add(egui::Button::new(egui::RichText::new("/schedule").size(12.0).color(theme::ACCENT())).fill(Color32::TRANSPARENT))

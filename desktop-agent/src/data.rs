@@ -145,6 +145,49 @@ impl App {
         };
     }
 
+    fn selected_workspace_name(&self) -> Option<String> {
+        let idx = self.selected_project?;
+        let path = self.projects.get(idx)?;
+        let rel = path.strip_prefix(&self.paths.workspaces_dir).ok()?;
+        if rel.components().count() == 1 {
+            rel.file_name().and_then(|n| n.to_str()).map(|s| s.to_string())
+        } else {
+            None
+        }
+    }
+
+    fn selected_workspace_rel(&self, leaf: &str) -> Option<String> {
+        let name = self.selected_workspace_name()?;
+        Some(format!("workspaces/{name}/.smartagent/{leaf}"))
+    }
+
+    fn scoped_panel_args(&self, bin: &str, args: &[&str]) -> Vec<String> {
+        let mut out: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        match bin {
+            "workflow" => {
+                if let Some(project) = self.selected_workspace_name() {
+                    out.extend(["--project".to_string(), project]);
+                }
+            }
+            "memory" => {
+                if let Some(dir) = self.selected_workspace_rel("memory") {
+                    out = out.into_iter().map(|s| if s == "data/memory" { dir.clone() } else { s }).collect();
+                }
+            }
+            "vault" => {
+                if let Some(dir) = self.selected_workspace_rel("vault") {
+                    if out.get(0).map(String::as_str) == Some("list") || out.get(0).map(String::as_str) == Some("search") {
+                        if out.get(1).map(String::as_str) == Some("notes") {
+                            out[1] = dir;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
     /// Run a tool binary at repo root and store its output for a Tools panel.
     pub fn panel_exec(&mut self, bin: &str, args: &[&str]) {
         let path = self.paths.root.join("target").join("release").join(bin);
@@ -152,7 +195,8 @@ impl App {
             self.panel_out = vec![format!("{bin} binary not built — run ./build.sh")];
             return;
         }
-        let out = Command::new(&path).args(args).current_dir(&self.paths.root).output();
+        let scoped = self.scoped_panel_args(bin, args);
+        let out = Command::new(&path).args(&scoped).current_dir(&self.paths.root).output();
         self.panel_out = match out {
             Ok(o) => {
                 let mut text = String::from_utf8_lossy(&o.stdout).to_string();
@@ -170,11 +214,20 @@ impl App {
         };
     }
 
+    fn scoped_task_args(&self, args: &[&str]) -> Vec<String> {
+        let mut out: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        if let Some(project) = self.selected_workspace_name() {
+            out.extend(["--project".to_string(), project]);
+        }
+        out
+    }
+
     /// Run a `tasks` subcommand at repo root, then refresh the board (ISC-156).
     pub fn run_tasks(&mut self, args: &[&str]) {
         if self.paths.tasks_bin.exists() {
+            let scoped = self.scoped_task_args(args);
             let _ = Command::new(&self.paths.tasks_bin)
-                .args(args)
+                .args(&scoped)
                 .current_dir(&self.paths.root)
                 .output();
         }
@@ -187,8 +240,9 @@ impl App {
             self.tasks_board = vec!["tasks binary not built — run ./build.sh".to_string()];
             return;
         }
+        let scoped = self.scoped_task_args(&["board"]);
         let out = Command::new(&self.paths.tasks_bin)
-            .arg("board")
+            .args(&scoped)
             .current_dir(&self.paths.root)
             .output();
         self.tasks_board = match out {

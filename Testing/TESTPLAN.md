@@ -6,11 +6,11 @@ Roles:
 - Test Manager = orchestrator, composes prompts and audits
 - QA Agent = ./pi, authors and executes
 
-Plan version: 1.3
+Plan version: 1.5
 Date: 2026-07-02
 
 Amendment rule: step IDs T01–T50 are stable forever — the plan is amended with a version bump (1.1, 1.2, …), never regenerated; run sheets ARE regenerated each iteration.
-Amendments: 1.1 (2026-07-02) — T19/T39 Tool fields corrected from bash to httpc/hooks (QA defect, Test Manager audit); 1.2 (2026-07-02) — T19 extended with blackhole fail-fast regression (httpc connect-timeout fix); 1.3 (2026-07-02) — run-marker parameterized qa-run-<N> (cross-vendor audit: run-collision defect).
+Amendments: 1.1 (2026-07-02) — T19/T39 Tool fields corrected from bash to httpc/hooks (QA defect, Test Manager audit); 1.2 (2026-07-02) — T19 extended with blackhole fail-fast regression (httpc connect-timeout fix); 1.3 (2026-07-02) — run-marker parameterized qa-run-<N> (cross-vendor audit: run-collision defect); 1.4 (2026-07-02) — T08 uses the existing `AkurAI-Tests` workspace project instead of treating `qa-run-<N>` as a project name; 1.5 (2026-07-02) — T26 secrets set/get explicitly includes the approved admin fixture setup: create the temporary secret, grant `pi` read access with `policy-allow`, issue a caller token, then read via `secrets get`.
 
 ## Phase A — Environment & headless basics (T01–T05): headless reply smoke test; tools list matches AGENT_TOOLS.md; workspace listing (folders under workspaces/, never repo root); config resolution from config/smartagent.conf (no hardcoded endpoints); session state/statusline present.
 ### T01 — Headless reply smoke
@@ -52,9 +52,9 @@ Amendments: 1.1 (2026-07-02) — T19/T39 Tool fields corrected from bash to http
 - **Evidence:** stdout contains the remembered fact and recall result
 ### T08 — Project-scoped memory
 - **Tool:** memory
-- **Action:** ./pi -p 'qa-run-<N> store qa-run-<N>-project-memory in project scope and recall it from that project only.' < /dev/null
-- **Expected:** project-scoped memory is isolated to the project store
-- **Evidence:** stdout shows the project-scoped recall only
+- **Action:** ./pi -p 'qa-run-<N> use existing workspace project AkurAI-Tests: remember qa-run-<N>-project-memory with project="AkurAI-Tests", then recall it from AkurAI-Tests and confirm the global/root memory recall does not return that project-only marker.' < /dev/null
+- **Expected:** project-scoped memory is isolated to the existing AkurAI-Tests project store; qa-run-<N> is only a marker, never a workspace project name
+- **Evidence:** stdout shows the AkurAI-Tests scoped recall and the negative global/root check
 ### T09 — RAG ingest and retrieve
 - **Tool:** rag
 - **Action:** ./pi -p 'qa-run-<N> ingest a small qa-run-<N> rag note and retrieve it by query.' < /dev/null
@@ -148,9 +148,9 @@ Amendments: 1.1 (2026-07-02) — T19/T39 Tool fields corrected from bash to http
 - **Evidence:** stdout matches the inserted note
 ### T26 — secrets set/get
 - **Tool:** secrets
-- **Action:** ./pi -p 'qa-run-<N> set a temporary secret and read it back through the approved path.' < /dev/null
-- **Expected:** secret roundtrip succeeds through the secrets tool
-- **Evidence:** stdout confirms the secret value roundtrip
+- **Action:** ./pi -p 'qa-run-<N> set a temporary secret, grant `pi` read access with the approved admin fixture (`policy-allow` + `issue-token`), then read it back through `secrets get` using the issued caller token.' < /dev/null
+- **Expected:** secret roundtrip succeeds through the secrets tool after explicit policy grant; an ungranted read is still denied
+- **Evidence:** stdout confirms the policy grant/token setup and the secret value roundtrip through `secrets get`
 ### T27 — sandbox secret masking
 - **Tool:** sandbox
 - **Action:** ./pi -p 'qa-run-<N> run a sandbox command that tries to print secret material and confirm masking.' < /dev/null
@@ -286,4 +286,51 @@ Substitution rule: <N> is the current run number; the executor substitutes it li
 
 ## Defect protocol — a failed step is a PLATFORM defect: file a kanban task titled 'QA defect T<NN>: <symptom>' with the evidence; the cause is fixed in the platform (skill, hook, crate, extension, doc), never by softening the step; the step re-runs next iteration.
 
-## Teardown & data hygiene — how run-created artifacts (tasks, memory entries, vault/secret keys, schedules, rag docs — all prefixed qa-run-<N>-) are removed after each run so iterations stay independent.
+## Teardown & data hygiene — after each completed run, remove or close every run-created artifact so iterations stay independent. Preserve the run sheet under Testing/runs/ and durable platform defect tasks filed by the Defect protocol.
+
+Runnable cleanup checklist (executor substitutes the completed run number):
+
+```sh
+RUN_N=<N>
+QA_MARK="qa-run-${RUN_N}"
+
+# Board: close/remove run-scoped execution cards, including Phase/Scenario cards
+# whose titles may not carry the qa-run prefix. Preserve durable QA defect tasks.
+target/release/tasks list | grep -E "${QA_MARK}|Phase [A-I]|Scenario" || true
+# For each non-defect run-created task id found above:
+#   target/release/tasks done T-<id>    # if criteria are satisfied
+#   target/release/tasks rm T-<id>      # if it is only disposable run scaffolding
+
+# Vault notes created by the run.
+target/release/vault search --query "${QA_MARK}" || true
+# For each disposable note title returned above:
+#   target/release/vault rm '<note title>'
+
+# Schedules/reminders created by the run.
+target/release/schedule list | grep "${QA_MARK}" || true
+# For each matching job id:
+#   target/release/schedule rm <job-id>
+
+# RAG documents/chunks created by the run.
+target/release/rag retrieve --query "${QA_MARK}" --ids-only || true
+# For each matching run-created doc id:
+#   target/release/rag delete-doc --doc-id <doc-id>
+
+# Eval cases created by the run: list them; keep durable platform regression
+# traces only when a defect task intentionally depends on them.
+target/release/evals runs | grep "${QA_MARK}" || true
+
+# Semantic/memory rows created by the run: list markers and forget only the
+# disposable qa-run facts; preserve cross-run learnings and defect memories.
+target/release/memory recall "${QA_MARK}" --k 20 || true
+# For each disposable memory id:
+#   target/release/memory forget --id <memory-id>
+
+target/release/semdb search --db data/smartagent.semdb --text "${QA_MARK}" --k 20 || true
+# For each disposable semdb row id:
+#   target/release/semdb del --db data/smartagent.semdb --id <row-id>
+
+# Secrets created by the run (requires admin cleanup if policy-gated).
+target/release/secrets list | grep "${QA_MARK}" || true
+# Admin removes matching temporary secrets/policies out-of-band.
+```

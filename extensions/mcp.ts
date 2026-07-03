@@ -1,16 +1,9 @@
 /** mcp — pi extension over the pure-Rust MCP client binary. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { bin, makeRunner } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "mcp");
 
-function run(args: string[]): string {
-	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 60_000, cwd: ROOT }).trim(); }
-	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
-}
+const run = makeRunner(bin("mcp"), 120000);
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({

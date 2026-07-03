@@ -1,15 +1,11 @@
 /** codeindex — pi extension over the pure-Rust fast code-search binary. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { bin, runFile } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "codeindex");
+const BIN = bin("codeindex");
 
 function run(args: string[], timeout = 60_000): string {
-	try { return execFileSync(BIN, args, { encoding: "utf8", timeout, cwd: ROOT }).trim(); }
-	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
+	return runFile(BIN, args, timeout);
 }
 
 export default function (pi: ExtensionAPI) {

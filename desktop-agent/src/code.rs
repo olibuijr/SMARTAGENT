@@ -7,6 +7,7 @@ use crate::composer;
 use crate::conn::AgentConn;
 use crate::emit::Emit;
 use crate::theme;
+use crate::icons;
 use crate::transcript;
 use crate::App;
 
@@ -66,7 +67,7 @@ fn picker(ui: &mut egui::Ui, app: &App, emits: &mut Vec<Emit>) {
                     .unwrap_or("(root)")
                     .to_string();
                 let is_root = p == &app.paths.root;
-                let label = if is_root { format!("⌂ {name} (repo root)") } else { format!("▸ {name}") };
+                let label = if is_root { format!("{} {name} (repo root)", icons::HOME) } else { format!("{} {name}", icons::FOLDER) };
                 let btn = egui::Button::new(egui::RichText::new(label).size(15.0).color(theme::TEXT()))
                     .fill(theme::CARD())
                     .corner_radius(8)
@@ -92,7 +93,7 @@ fn header(ui: &mut egui::Ui, app: &App, emits: &mut Vec<Emit>) {
         ui.colored_label(theme::TEXT(), egui::RichText::new(name).size(15.0).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .add(egui::Button::new(egui::RichText::new("⇄").size(13.0).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT))
+                .add(egui::Button::new(egui::RichText::new(icons::REFRESH).size(13.0).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT))
                 .on_hover_text("Change project")
                 .clicked()
             {
@@ -111,7 +112,7 @@ fn tree(ui: &mut egui::Ui, app: &App, emits: &mut Vec<Emit>) {
             ui.horizontal(|ui| {
                 ui.add_space(6.0 + row.depth as f32 * 14.0);
                 let icon = if row.is_dir {
-                    if app.expanded_dirs.contains(&row.path) { "▾" } else { "▸" }
+                    if app.expanded_dirs.contains(&row.path) { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT }
                 } else {
                     " "
                 };
@@ -163,7 +164,7 @@ fn viewer(ui: &mut egui::Ui, title: String, body: &str, emits: &mut Vec<Emit>) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
             if ui
-                .add(egui::Button::new(egui::RichText::new("✕ close").size(12.5).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT))
+                .add(egui::Button::new(egui::RichText::new(format!("{} close", icons::CLOSE)).size(12.5).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT))
                 .clicked()
             {
                 emits.push(Emit::CloseFile);

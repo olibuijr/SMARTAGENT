@@ -113,12 +113,13 @@ Hook dispatch failures fail OPEN with a loud warning — hooks never wedge the a
 ## Statusline
 
 Three colored rows under the input — live state, not decoration:
-`⌂` workspace (code graph, repos indexed, tasks, workflow run), `▦` data
-(memory, rag, schedule, evals, orchestrate), `⛭` infra (services, sandbox,
-secrets, chrome, searx, hooks). Healthy segments collapse to `Name ✓`; detail
-appears on warn/err. Red = act now (service DOWN, token failing); yellow =
-attention (stale index, WIP full, blockers). Severity is decided in Rust
-(`<crate> statusline` → `level|icon text`); the TS extension only colors and aligns.
+`⌂` workspace (code graph, repos indexed, tasks, workflow run, gateway), `▦`
+data (memory, Corpus/rag, schedule, evals, orchestrate), `⛭` infra
+(supervised scheduler/gateway/chromium, sandbox, secrets, chrome, searx,
+hooks). Healthy segments collapse to `Name ✓`; detail appears on warn/err.
+Red = act now (service DOWN, token failing); yellow = attention (stale index,
+WIP full, blockers). Severity is decided in Rust (`<crate> statusline` →
+`level|icon text`); the TS extension only colors and aligns.
 
 ## Key conventions (the hard rules)
 

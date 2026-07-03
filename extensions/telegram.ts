@@ -4,32 +4,23 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { bin, makeRunner, ROOT } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "telegram");
 
-function run(args: string[]): string {
-	try {
-		return execFileSync(BIN, args, { encoding: "utf8", timeout: 120_000, cwd: ROOT }).trim();
-	} catch (e: any) {
-		return `error: ${e.stderr?.toString().trim() || e.message}`;
-	}
-}
+const run = makeRunner(bin("telegram"), 120000);
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "telegram",
 		label: "Telegram",
 		description:
-			"Telegram Bot API bridge: send messages, poll inbound updates, or run listen. " +
+			"Telegram Bot API bridge: send messages, poll inbound updates, run listen, or register the slash-command menu. " +
 			"Token comes only from secrets get telegram_bot_token; chat allow-list from config.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["send", "poll", "listen"], description: "Operation to perform" },
+				action: { type: "string", enum: ["send", "poll", "listen", "commands"], description: "Operation to perform" },
 				chat: { type: "string", description: "Telegram chat id for send" },
 				text: { type: "string", description: "Message text for send" },
 			},

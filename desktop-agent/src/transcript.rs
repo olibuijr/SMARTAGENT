@@ -5,15 +5,16 @@
 use eframe::egui::{self, Align, Color32, CornerRadius, Frame, Layout, Margin, Stroke};
 
 use crate::agent::{AgentState, Assistant, Item, ToolCard};
+use crate::icons;
 use crate::theme;
 
 /// Transient banners (error / retry / compaction notice) above the transcript.
 pub fn banners(ui: &mut egui::Ui, state: &AgentState) {
     if let Some(err) = &state.error_banner {
-        card(ui, theme::RED(), "⚠", err);
+        card(ui, theme::RED(), icons::WARN, err);
     }
     if let Some(notice) = &state.notice {
-        card(ui, theme::YELLOW(), "●", notice);
+        card(ui, theme::YELLOW(), crate::icons::DOT, notice);
     }
     if !state.connected && state.error_banner.is_none() && state.pending_prompt.is_some() {
         card(ui, theme::TEXT_MUTED(), "…", "starting agent…");
@@ -45,7 +46,7 @@ pub fn items(ui: &mut egui::Ui, state: &mut AgentState, width: f32) {
             Item::User(text) => user_bubble(ui, text),
             Item::Assistant(a) => assistant(ui, a),
             Item::System(text) => system(ui, text),
-            Item::Error(text) => card(ui, theme::RED(), "⚠", text),
+            Item::Error(text) => card(ui, theme::RED(), icons::WARN, text),
         }
         ui.add_space(14.0);
     }
@@ -87,7 +88,11 @@ fn assistant(ui: &mut egui::Ui, a: &mut Assistant) {
 }
 
 fn thinking(ui: &mut egui::Ui, a: &mut Assistant) {
-    let label = if a.thinking_open { "▾ thinking" } else { "▸ thinking" };
+    let label = if a.thinking_open {
+        format!("{} thinking", icons::CHEVRON_DOWN)
+    } else {
+        format!("{} thinking", icons::CHEVRON_RIGHT)
+    };
     if ui
         .add(egui::Button::new(egui::RichText::new(label).size(13.0).color(theme::TEXT_MUTED())).fill(Color32::TRANSPARENT))
         .clicked()
@@ -245,14 +250,14 @@ fn status(ui: &mut egui::Ui, c: &ToolCard) {
     if c.running {
         ui.add(egui::Spinner::new().size(14.0));
     } else if let Some(ms) = c.ms {
-        let (icon, color) = if c.is_error { ("✗", theme::RED()) } else { ("✓", theme::GREEN()) };
+        let (icon, color) = if c.is_error { (icons::CROSS, theme::RED()) } else { (icons::CHECK, theme::GREEN()) };
         ui.colored_label(theme::TEXT_FAINT(), egui::RichText::new(format!("{ms}ms")).size(12.5));
         ui.add_space(4.0);
         ui.colored_label(color, egui::RichText::new(icon).size(14.0));
     } else if c.is_error {
-        ui.colored_label(theme::RED(), egui::RichText::new("✗").size(14.0));
+        ui.colored_label(theme::RED(), egui::RichText::new(icons::CROSS).size(14.0));
     } else {
-        ui.colored_label(theme::GREEN(), egui::RichText::new("✓").size(14.0));
+        ui.colored_label(theme::GREEN(), egui::RichText::new(icons::CHECK).size(14.0));
     }
 }
 

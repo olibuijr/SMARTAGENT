@@ -6,22 +6,16 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { bin, runFile, ROOT } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "tasks");
+const BIN = bin("tasks");
 const DB = join(ROOT, "data", "tasks.semdb");
 
 function run(args: string[], project?: string): string {
 	// --project = that workspace repo's own board; otherwise the root board.
 	const scope = project ? ["--project", project] : ["--db", DB];
-	try {
-		return execFileSync(BIN, [...args, ...scope], { encoding: "utf8", timeout: 30_000, cwd: ROOT }).trim();
-	} catch (e: any) {
-		return `error: ${e.stderr?.toString().trim() || e.message}`;
-	}
+	return runFile(BIN, [...args, ...scope], 30_000);
 }
 
 export default function (pi: ExtensionAPI) {

@@ -6,23 +6,17 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { bin, runFile, ROOT } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "workflow");
+const BIN = bin("workflow");
 const DB = join(ROOT, "data", "workflow.semdb");
 
 function run(args: string[], project?: string, timeout = 30_000): string {
 	// --project = run state lives with that workspace repo (pairs with the
 	// repo's own tasks board); otherwise the root db. Defs always from ROOT.
 	const scope = project ? ["--project", project] : ["--db", DB];
-	try {
-		return execFileSync(BIN, [...args, "--root", ROOT, ...scope], { encoding: "utf8", timeout, cwd: ROOT }).trim();
-	} catch (e: any) {
-		return `error: ${e.stderr?.toString().trim() || e.message}`;
-	}
+	return runFile(BIN, [...args, "--root", ROOT, ...scope], timeout);
 }
 
 export default function (pi: ExtensionAPI) {

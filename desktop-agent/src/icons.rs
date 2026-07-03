@@ -1,6 +1,9 @@
 //! Icon font. Embeds JetBrains Mono Nerd Font (Font Awesome glyphs in the PUA)
 //! and installs it as a fallback family so the UI's icons render instead of
 //! tofu boxes. Named constants map each UI affordance to a Font Awesome glyph.
+//!
+//! Some constants are a reserved palette for upcoming affordances.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 

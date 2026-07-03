@@ -22,7 +22,8 @@ small and single-purpose; keep it that way — split before a file grows past
 |--------|-------|-----|
 | `src/main.rs` | ~250 | App shell: module tree, tab state, per-frame pump, panel layout, emit execution |
 | `src/emit.rs` | ~100 | `Emit` intent enum + executor — views stay borrow-free |
-| `src/theme.rs` | ~40 | Claude Desktop dark palette + egui style |
+| `src/theme.rs` | ~130 | System-following palette (dark/light via XDG portal watcher) + egui style |
+| `src/icons.rs` | ~60 | Embeds JetBrains Mono Nerd Font (`assets/NerdFont.ttf`) as an egui fallback family; named Font Awesome icon constants |
 | `src/sidebar.rs` | ~180 | Logo, tab pills, new session, real session list, connection dot, model footer |
 | `src/transcript.rs` | ~200 | Shared renderer: bubbles, assistant text with code fences, thinking, live tool cards, banners |
 | `src/composer.rs` | ~100 | Shared input bar: Enter-send / Shift+Enter newline, Stop while streaming, model footer |

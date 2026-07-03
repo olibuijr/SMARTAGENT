@@ -38,6 +38,24 @@ impl Graph {
         self.edges.push(e);
     }
 
+    /// Drop all graph data owned by one source file before re-indexing it.
+    /// This is the cheap single-file update path used by filesystem watchers:
+    /// definitions from `file`, `defines` edges from `file`, and call edges
+    /// whose caller function was defined in `file` are replaced without walking
+    /// the rest of the repository.
+    pub fn remove_file(&mut self, file: &str) {
+        let local: std::collections::HashSet<String> = self.symbols
+            .iter()
+            .filter(|s| s.file == file)
+            .map(|s| s.name.clone())
+            .collect();
+        self.symbols.retain(|s| s.file != file);
+        self.edges.retain(|e| {
+            !(e.kind == "defines" && e.from == file)
+                && !(e.kind == "calls" && local.contains(&e.from))
+        });
+    }
+
     /// Where a symbol is defined (name → list of file:line kind).
     pub fn defs(&self, name: &str) -> Vec<String> {
         self.symbols
@@ -252,5 +270,20 @@ mod tests {
         let g2 = Graph::load(&p).unwrap();
         assert_eq!(g2.defs("foo"), vec!["a.rs:3\tfn"]);
         assert_eq!(g2.callers("foo"), vec!["main"]);
+    }
+
+    #[test]
+    fn remove_file_drops_defs_and_local_calls_only() {
+        let mut g = Graph::new();
+        g.add_symbol(Symbol { name: "local".into(), kind: "fn".into(), file: "a.rs".into(), line: 1 });
+        g.add_symbol(Symbol { name: "other".into(), kind: "fn".into(), file: "b.rs".into(), line: 1 });
+        g.add_edge(Edge { kind: "defines".into(), from: "a.rs".into(), to: "local".into() });
+        g.add_edge(Edge { kind: "calls".into(), from: "local".into(), to: "other".into() });
+        g.add_edge(Edge { kind: "calls".into(), from: "other".into(), to: "local".into() });
+        g.remove_file("a.rs");
+        assert!(g.defs("local").is_empty());
+        assert_eq!(g.defs("other"), vec!["b.rs:1\tfn"]);
+        assert!(g.edges.iter().any(|e| e.from == "other" && e.to == "local"));
+        assert!(!g.edges.iter().any(|e| e.from == "local"));
     }
 }

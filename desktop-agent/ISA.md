@@ -3,10 +3,10 @@ project: desktop-agent
 task: Claude Desktop clone GUI at feature parity with ./pi via pi RPC mode
 effort: E4
 phase: complete
-progress: 179/179
+progress: 183/183
 mode: build
 started: 2026-07-02T16:10:00Z
-updated: 2026-07-02T17:40:00Z
+updated: 2026-07-02T18:00:00Z
 ---
 
 # ISA — desktop-agent
@@ -252,6 +252,12 @@ Parity v3 — gap-review fixes + full tool surface (2026-07-02, two-agent codeba
 - [x] ISC-177: Anti: no new crates.io dep (still eframe + httpc only); all panels shell to target/release/*
 - [x] ISC-178: 22 unit tests green; clippy clean (desktop-agent); no src file >1000 lines (agent.rs 913, due for split)
 - [x] ISC-179: Live verification: Tools launcher, Workflow + Services panels, session action bar, statusline Status rows, 📎 attach, Fork action all render from real state
+
+Icon library (2026-07-02, "I see black boxes"):
+- [x] ISC-180: Embed JetBrains Mono Nerd Font (assets/NerdFont.ttf) and install as an egui fallback family in both font families
+- [x] ISC-181: Named Font Awesome icon constants (icons.rs); action buttons / board / tree / composer / panels use them instead of ad-hoc Unicode
+- [x] ISC-182: Live verification: inspector action bar (pencil/compress/copy/download/fork), board advance+done, plan-first checkbox, attach, refresh, close all render as crisp glyphs (no tofu)
+- [x] ISC-183: Anti: no new crates.io dep — font is a bundled asset via include_bytes!, not a crate
 
 ## Test Strategy
 

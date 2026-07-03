@@ -9,7 +9,7 @@ use semdb::storage::Db;
 use semdb::vector;
 
 fn tmp(name: &str) -> PathBuf {
-    // In-repo scratch (rule 6: never /tmp). CARGO_MANIFEST_DIR is the crate dir.
+    // In-repo scratch only. CARGO_MANIFEST_DIR is the crate dir.
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
     let _ = std::fs::create_dir_all(&dir);
     let p = dir.join(format!("semdb-it-{name}-{}", std::process::id()));

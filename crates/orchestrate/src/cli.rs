@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use crate::spawn::{AgentSpec, Runner};
 
-fn run_id() -> String {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string()
-}
+fn run_id() -> String { procutil::unix_secs().to_string() }
 
 /// Fan-out nesting depth from the environment. Each spawned subagent runs with
 /// SMARTAGENT_DEPTH one higher; beyond MAX_DEPTH we refuse — a subagent that
@@ -157,11 +155,17 @@ orchestrate — subagent fan-out (LangGraph send/supervisor concept)
 
 USAGE:
   orchestrate run  --agents N --prompt 'template with {i}' [--timeout 300] [--agent-bin ./pi]
+                   [--max-parallel 4] [--retries 0]
   orchestrate fan  --prompts-file FILE [--timeout 300] [--agent-bin ./pi]
+                   [--max-parallel 4] [--retries 0]
   orchestrate list
+  orchestrate out <run-id> [--tail 2000]
+  orchestrate statusline
 
 Each agent is a headless `./pi --thinking low -p '<prompt>' < /dev/null` run in
-its own workspaces/<run-id>/agent-<n>/ dir (stdout+stderr → out.log).
+its own workspaces/<run-id>/agent-<n>/ dir (stdout+stderr → out.log). Runs are
+persisted in data/orchestrate.semdb; use `out` to collect subagent logs.
+Fan-out depth is guarded by SMARTAGENT_DEPTH; subagents may not fan out again.
 "#;
 
 #[cfg(test)]

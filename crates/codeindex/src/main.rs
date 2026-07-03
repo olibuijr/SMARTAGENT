@@ -79,8 +79,11 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             let rows: Vec<String> = ps.iter().map(|p| {
                 let kind = if p.is_repo { "repo" } else { "dir" };
-                let st = match project::status(&p.path) {
-                    Some((files, age)) => format!("indexed {} files ({} ago)", files, project::human_age(age)),
+                let st = match project::status_detail(&p.path) {
+                    Some(s) => {
+                        let stale = if s.stale { ", stale" } else { "" };
+                        format!("indexed {} files ({} ago{stale})", s.files, project::human_age(s.age_secs))
+                    }
                     None => "not indexed".into(),
                 };
                 format!("{}\t[{}]\t{}", p.name, kind, st)
@@ -135,10 +138,10 @@ fn run(args: &[String]) -> Result<String, String> {
             }
             let (mut indexed, mut files, mut stale) = (0usize, 0usize, 0usize);
             for r in &repos {
-                if let Some((n, age)) = project::status(&r.path) {
+                if let Some(s) = project::status_detail(&r.path) {
                     indexed += 1;
-                    files += n;
-                    if age >= 7 * 86_400 { stale += 1; }
+                    files += s.files;
+                    if s.stale || s.age_secs >= 7 * 86_400 { stale += 1; }
                 }
             }
             let fh = if files >= 10_000 { format!("{:.1}k", files as f64 / 1000.0) } else { files.to_string() };

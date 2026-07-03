@@ -319,8 +319,10 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let mut p = std::env::temp_dir();
-        p.push(format!("semdb-storage-{name}-{}", std::process::id()));
+        let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(format!("semdb-storage-{name}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(p.parent().unwrap());
         let _ = std::fs::remove_file(&p);
         p
     }

@@ -219,7 +219,7 @@ fn activity(ui: &mut egui::Ui, s: &AgentState) {
     for a in s.activity.iter().rev().take(12) {
         ui.horizontal(|ui| {
             ui.add_space(14.0);
-            let (icon, color) = if a.is_error { ("✗", theme::RED()) } else { ("✓", theme::GREEN()) };
+            let (icon, color) = if a.is_error { (icons::CROSS, theme::RED()) } else { (icons::CHECK, theme::GREEN()) };
             ui.colored_label(color, egui::RichText::new(icon).size(12.5));
             ui.colored_label(theme::TEXT_MUTED(), egui::RichText::new(&a.name).size(12.5));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

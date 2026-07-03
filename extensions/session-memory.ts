@@ -11,12 +11,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { bin, runFile, ROOT } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "memory");
+const BIN = bin("memory");
 const MEM_DIR = join(ROOT, "data", "memory");
 
 function textOf(msg: any): string {
@@ -45,14 +43,7 @@ export default function (pi: ExtensionAPI) {
 	// never throw out of a shutdown handler).
 	pi.on("session_shutdown", () => {
 		if (!firstUserIntent) return;
-		try {
-			execFileSync(BIN, ["remember", "--dir", MEM_DIR, "--tier", "episodic", "--text", `Session intent: ${firstUserIntent.slice(0, 280)}`], {
-				encoding: "utf8",
-				timeout: 15_000,
-				cwd: ROOT,
-			});
-		} catch {
-			// A failed embed/store must not block shutdown.
-		}
+		const out = runFile(BIN, ["remember", "--dir", MEM_DIR, "--tier", "episodic", "--text", `Session intent: ${firstUserIntent.slice(0, 280)}`], 15_000);
+		void out; // A failed embed/store must not block shutdown.
 	});
 }

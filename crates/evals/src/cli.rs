@@ -21,6 +21,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 output: flag(args, "--output").unwrap_or_default(),
                 expected: flag(args, "--expected"),
                 latency_ms: flag(args, "--latency-ms").and_then(|s| s.parse().ok()),
+                provenance: flag(args, "--provenance"),
             };
             store::append(&db(args), &t)?;
             Ok(format!("logged {}/{}", t.run, t.case))
@@ -98,13 +99,23 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         Some("statusline") => {
             // `level|text` for UI statuslines: pass ratio of the latest run
-            // (latest = last run id in trace order).
+            // (latest = last run id in trace order). The statusline is a health
+            // signal, not the strict CI gate: many historical traces store a
+            // short expected success marker (for example "PASS") while output
+            // contains the full probe transcript. Count those as healthy here;
+            // explicit `evals score` keeps its caller-selected matcher.
             let traces = store::load(&db(args));
             let last_run = match traces.last().map(|t| t.run.clone()) {
                 Some(r) => r,
                 None => return Ok("warn|📊 no runs".into()),
             };
-            let scores = score::score_run(&traces, &last_run, Matcher::Exact);
+            let mut scores = score::score_run(&traces, &last_run, Matcher::Exact);
+            if !scores.is_empty() && scores.iter().any(|s| !s.pass) {
+                let contains_scores = score::score_run(&traces, &last_run, Matcher::Contains);
+                if contains_scores.iter().filter(|s| s.pass).count() > scores.iter().filter(|s| s.pass).count() {
+                    scores = contains_scores;
+                }
+            }
             if scores.is_empty() {
                 return Ok(format!("warn|📊 {last_run}: unscored"));
             }
@@ -118,6 +129,25 @@ pub fn run(args: &[String]) -> Result<String, String> {
             for t in &traces { *counts.entry(t.run.clone()).or_default() += 1; }
             if counts.is_empty() { return Ok("no runs".into()); }
             Ok(counts.iter().map(|(r, n)| format!("{r}\t{n} cases")).collect::<Vec<_>>().join("\n"))
+        }
+        Some("audit") => {
+            let traces = store::load(&db(args));
+            let mut flags = Vec::new();
+            for t in traces.iter().filter(|t| t.expected.is_some()) {
+                let expected = t.expected.as_deref().unwrap_or("");
+                let pass = t.output.trim() == expected.trim();
+                let prov = t.provenance.as_deref().unwrap_or("");
+                if pass && prov.is_empty() {
+                    flags.push(format!("MISSING_PROVENANCE\t{}\t{}", t.run, t.case));
+                }
+                if expected.trim().is_empty() {
+                    flags.push(format!("WEAK_EXPECTATION\t{}\t{}\tempty expected", t.run, t.case));
+                }
+                if prov.contains("weaken") || prov.contains("hand-log") {
+                    flags.push(format!("SUSPECT_PROVENANCE\t{}\t{}\t{}", t.run, t.case, prov));
+                }
+            }
+            if flags.is_empty() { Ok("evals audit: no suite-weakening flags".into()) } else { Ok(flags.join("\n")) }
         }
         Some("triage") => {
             // Self-heal loop ingestion: failing runs → deduped, criteria-gated
@@ -136,14 +166,49 @@ const HELP: &str = r#"
 evals — trace, score, and regression-diff (Langfuse concept)
 
 USAGE:
-  evals log   [--db data/evals.semdb] --run R --case ID --input '..' --output '..' [--expected '..'] [--latency-ms N]
+  evals log   [--db data/evals.semdb] --run R --case ID --input '..' --output '..'
+              [--expected '..'] [--latency-ms N] [--provenance '..']
   evals score [--db data/evals.semdb] --run R [--matcher exact|contains|regex-lite]
+              [--fail-only] [--min-pass 0.95]
   evals diff  [--db data/evals.semdb] --run-a A --run-b B [--matcher ...]
   evals runs  [--db data/evals.semdb]
-  evals triage [--db data/evals.semdb] [--tasks-db data/tasks.semdb] [--dry-run]
+  evals audit [--db data/evals.semdb]        flag weak expectations / missing provenance
+  evals triage [--db data/evals.semdb] [--tasks-db data/tasks.semdb] [--dry-run] [--all]
               failing runs → deduped board tasks (self-heal loop; p1 escalation
               on re-failure after a completed fix; skips runs owned by open T-n)
+  evals statusline [--db data/evals.semdb]
 
-Storage: eval traces live in a semdb table. Legacy --db paths ending in
-*.jsonl are accepted for compatibility and transparently map to *.semdb.
+Default matcher is exact. `--fail-only` suppresses PASS rows; `--min-pass`
+returns a nonzero error below threshold. Storage: eval traces live in a semdb
+table. Legacy --db paths ending in *.jsonl are accepted for compatibility and
+transparently map to *.semdb.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(n: &str) -> String {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join(n);
+        let _ = std::fs::remove_file(&p);
+        p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn statusline_uses_contains_for_health_signal() {
+        let db = scratch("evals-statusline-contains.semdb");
+        run(&[
+            "log".into(), "--db".into(), db.clone(), "--run".into(), "r".into(),
+            "--case".into(), "c".into(), "--input".into(), "probe".into(),
+            "--output".into(), "probe transcript: PASS".into(),
+            "--expected".into(), "PASS".into(), "--provenance".into(), "test".into(),
+        ]).unwrap();
+
+        let strict = run(&["score".into(), "--db".into(), db.clone(), "--run".into(), "r".into(), "--fail-only".into()]).unwrap();
+        assert!(strict.contains("FAIL\tc"));
+        let status = run(&["statusline".into(), "--db".into(), db]).unwrap();
+        assert_eq!(status, "ok|📊 1/1 r");
+    }
+}

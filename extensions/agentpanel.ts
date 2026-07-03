@@ -169,6 +169,21 @@ function refresh(): void {
 
 const vlen = (s: string) => vwidth(s); // cell-accurate (kitty wcwidth)
 const clip = (s: string, w: number) => (s.length > w ? s.slice(0, Math.max(0, w - 1)) + "…" : s);
+function marquee(s: string, width: number, tick: number): string {
+	const clean = s.trim();
+	if (width <= 0) return "";
+	if (!clean) return "";
+	if (vlen(clean) <= width) return clean + " ".repeat(Math.max(0, width - vlen(clean)));
+	const loop = `${clean}   •   `;
+	let out = "";
+	let i = tick % loop.length;
+	while (vlen(out) < width + 1) {
+		out += loop[i % loop.length];
+		i++;
+	}
+	return clip(out, width);
+}
+
 const humanBusy = (secs: number) => {
 	if (!secs) return "";
 	if (secs < 60) return `${secs}s`;
@@ -262,8 +277,8 @@ function render(width: number): string[] {
 				body.push(fg("239", "└" + "─".repeat(boxw) + "┘"));
 			}
 			if (a.tools) {
-				const tick = fg(accent, ["·  ", "·· ", "···"][frame % 3]);
-				body.push(dim("⚙ ") + fg("253", clip(a.tools, textw - 8)) + " " + tick);
+				const mw = Math.max(8, textw - 4);
+				body.push(dim("⚙ ") + fg("253", marquee(a.tools, mw, frame)));
 			}
 			if (a.words) {
 				// Two readable lines, bright — this is "what is it doing" for the

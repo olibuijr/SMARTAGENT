@@ -69,6 +69,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             Ok(rows.iter().map(|(_, t)| format!("- {t}")).collect::<Vec<_>>().join("\n"))
         }
+        Some("medvitund") => medvitund(args),
         Some("stats") => {
             let m = Memory::new(&dir(args)?);
             Ok(m.stats()?.iter().map(|(t, n)| format!("{t}\t{n}")).collect::<Vec<_>>().join("\n"))
@@ -88,7 +89,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
 
 fn default_id(text: &str) -> String {
     // Timestamp-prefixed so working-tier eviction drops oldest first.
-    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let ts = procutil::unix_secs();
     let slug: String = text.chars().take(16).map(|c| if c.is_alphanumeric() { c } else { '-' }).collect();
     format!("{ts}-{slug}")
 }
@@ -98,9 +99,68 @@ const HELP: &str = r#"
 memory — 3-tier persistent agent memory (Mem0 role)
 
 USAGE:
-  memory remember --dir D --tier working|episodic|semantic --text '..' [--id X]
-  memory recall   --dir D --text '..' [--k 5] [--tier all|working|episodic|semantic]
-  memory forget   --dir D --tier T --id X
-  memory promote  --dir D --id X --from T1 --to T2
-  memory stats    --dir D
+  memory remember (--dir D|--project P) --tier working|episodic|semantic --text '..' [--id X]
+  memory recall   (--dir D|--project P) --text '..' [--k 5] [--tier all|working|episodic|semantic] [--chars N]
+  memory recent   (--dir D|--project P) [--tier working|episodic|semantic] [--n 5]
+  memory forget   (--dir D|--project P) --tier T --id X
+  memory promote  (--dir D|--project P) --id X --from T1 --to T2
+  memory medvitund [--since YYYY-MM-DD|unix] [--agent A] [--query TEXT] [--n 10]
+  memory stats    (--dir D|--project P)
+  memory statusline (--dir D|--project P)
+
+--project P stores memory under workspaces/<P>/.smartagent/memory; use it for repo facts.
 "#;
+
+fn medvitund(args: &[String]) -> Result<String, String> {
+    let path = semdb::config::Config::load().data_dir().join("medvitund.semdb");
+    if !path.exists() {
+        return Ok("no medvitund rows".into());
+    }
+    let db = semdb::storage::Db::open(&path)?;
+    let since = flag(args, "--since");
+    let since_num = since.as_deref().and_then(parse_since);
+    let agent = flag(args, "--agent");
+    let query = flag(args, "--query").map(|s| s.to_lowercase());
+    let n = flag(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(10);
+    let mut rows = Vec::new();
+    for (id, entry) in db.index.iter() {
+        let Ok(v) = semdb::json::parse(&entry.meta) else { continue; };
+        let ts = v.get("ts").and_then(|x| x.as_f64()).unwrap_or(0.0) as u128;
+        if let Some(min) = since_num {
+            if ts < min { continue; }
+        } else if let Some(day) = since.as_deref() {
+            if v.get("day").and_then(|x| x.as_str()) != Some(day) { continue; }
+        }
+        let a = v.get("agent").and_then(|x| x.as_str()).unwrap_or("");
+        if agent.as_deref().is_some_and(|want| want != a) { continue; }
+        let kind = v.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+        let state = v.get("state").and_then(|x| x.as_str()).unwrap_or("");
+        let text = v.get("text").and_then(|x| x.as_str()).unwrap_or("");
+        if let Some(q) = &query {
+            let hay = format!("{a} {kind} {state} {text}").to_lowercase();
+            if !hay.contains(q) { continue; }
+        }
+        rows.push((ts, id.clone(), a.to_string(), kind.to_string(), state.to_string(), text.to_string()));
+    }
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    if rows.is_empty() { return Ok("no medvitund rows".into()); }
+    Ok(rows.into_iter().take(n).map(|(ts, _, a, k, s, t)| {
+        format!("{ts}\t{a}\t{k}\t{s}\t{}", one_line(&t, 500))
+    }).collect::<Vec<_>>().join("\n"))
+}
+
+fn parse_since(s: &str) -> Option<u128> {
+    if let Ok(n) = s.parse::<u128>() {
+        return Some(if n < 10_000_000_000 { n * 1_000_000_000 } else { n });
+    }
+    None
+}
+
+fn one_line(s: &str, cap: usize) -> String {
+    let flat = s.replace('\n', " ");
+    if flat.chars().count() > cap {
+        format!("{}…", flat.chars().take(cap).collect::<String>())
+    } else {
+        flat
+    }
+}

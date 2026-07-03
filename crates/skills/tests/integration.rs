@@ -1,17 +1,25 @@
-use std::path::PathBuf;
 use skills::cli;
+use std::path::PathBuf;
 
 fn scratch(name: &str) -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("golf")).unwrap();
     std::fs::create_dir_all(d.join("cook")).unwrap();
     std::fs::write(d.join("golf/SKILL.md"), "---\nname: golf-coach\ndescription: help improve golf swing and handicap\n---\n# Golf\nSwing tips.").unwrap();
-    std::fs::write(d.join("cook/SKILL.md"), "---\nname: chef\ndescription: cooking recipes\n---\n# Chef\nRecipes.").unwrap();
+    std::fs::write(
+        d.join("cook/SKILL.md"),
+        "---\nname: chef\ndescription: cooking recipes\n---\n# Chef\nRecipes.",
+    )
+    .unwrap();
     d
 }
 
-fn s(v: &[&str]) -> Vec<String> { v.iter().map(|x| x.to_string()).collect() }
+fn s(v: &[&str]) -> Vec<String> {
+    v.iter().map(|x| x.to_string()).collect()
+}
 
 #[test]
 fn list_show_search() {
@@ -33,7 +41,12 @@ fn match_scores_whole_prompts() {
     let root = d.to_string_lossy().to_string();
     // A full sentence: substring `search` would find nothing useful here,
     // token overlap must rank golf-coach first (name hit weighted).
-    let m = cli::run(&s(&["match", &root, "I want to improve my golf handicap this season"])).unwrap();
+    let m = cli::run(&s(&[
+        "match",
+        &root,
+        "I want to improve my golf handicap this season",
+    ]))
+    .unwrap();
     let first = m.lines().next().unwrap();
     assert!(first.contains("golf-coach"), "{m}");
     assert!(!first.contains("chef"), "{m}");

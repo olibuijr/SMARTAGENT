@@ -138,7 +138,7 @@ fn actions(ui: &mut egui::Ui, panel: Panel, input: &mut String, emits: &mut Vec<
                 if btn(ui, "Remove").clicked() && !input.trim().is_empty() { run(emits, "schedule", vec!["rm", input.trim()]); }
             }
             Panel::Services => {
-                for svc in ["scheduler", "chromium"] {
+                for svc in ["scheduler", "gateway", "chromium"] {
                     ui.colored_label(theme::TEXT_MUTED(), svc);
                     if btn(ui, "up").clicked() { run(emits, "supervise", vec!["up", svc]); }
                     if btn(ui, "down").clicked() { run(emits, "supervise", vec!["down", svc]); }

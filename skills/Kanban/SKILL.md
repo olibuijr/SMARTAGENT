@@ -34,21 +34,35 @@ kanban practitioner thinks. Workflows in `Workflows/` are runnable via the
 | Column | Means | Entry rule |
 |---|---|---|
 | backlog | captured, unrefined | anything (`tasks todo` is frictionless) |
-| ready | refined: has prio + criteria, unblocked | refined during triage, never rots >2 weeks |
+| ready | refined: has prio + criteria, unblocked, fleet-eligible | refined during triage, never rots >2 weeks |
 | doing | actively worked NOW | pulled via `tasks next`, WIP-limited |
-| review | awaiting verification | criteria being checked one by one |
+| review | awaiting verification | named assignee/role verifies or re-hands off with a note |
 | done | all criteria verified | gate enforced by the tool |
+
+## Reviewer flow
+
+Review is active handoff, not a parking lot. On each beat, an agent checks
+review rows assigned to its exact owner marker (for example `@grace`) or role
+marker (for example `@QA`) before pulling new ready/backlog work. The reviewer
+either verifies criteria and moves the task forward, or leaves an explicit note
+and reassigns/hands it off. Review rows owned by another agent or role are
+protected WIP and must not be pulled opportunistically.
 
 ## Blockers
 
 A block always has a reason (`tasks block T-3 'waiting on titan reboot'`).
-Blocked tasks are reviewed at every triage — a blocker older than a week is
-either escalated (notify) or the task is rescoped so it isn't blocked.
+Blocked tasks are reviewed at every triage/beat and must not linger. The dev
+team owns resolution: unblock obsolete reasons, split/rescope the task so work
+can proceed, move off-lane/project-specific work to its owning project board, or
+create and pull an actionable dev-team task to remove the blocker. Do not leave
+a blocked task waiting for the principal unless the task states the concrete
+agent-owned next step and owner. Root-board blockers should trend to zero.
 
 ## Priorities
 
 p1 = blocks other work or the principal is waiting. p2 = normal. p3 = someday.
-`tasks next` pulls by priority then age. Don't inflate: if everything is p1,
+`tasks next` pulls by priority then age, excluding `desktop-agent` work from
+this gateway fleet lane. Don't inflate: if everything is p1,
 nothing is.
 
 ## Anti-patterns (never do these)
@@ -57,4 +71,10 @@ nothing is.
 - `--force` past a WIP limit to feel productive — that's pushing, not pulling.
 - Marking done with `--force` because the criteria "probably pass".
 - Letting backlog items age without triage until the board lies.
+- Letting blocked tasks linger as a parking lot or as implicit human homework.
 - Inventing ad-hoc pull order; use the `triage` skill when `ready` is empty or priorities are disputed.
+- Gateway agents restarting their own host service in two steps. A T-79-style
+  verification that needs `gateway` restarted must either use one atomic
+  `supervise restart gateway` as its last action, or move the task to review /
+  hand off to a peer-orchestrated verifier that can complete restart+probe
+  outside the service being restarted.

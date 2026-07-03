@@ -20,7 +20,7 @@ pub struct Task {
     pub prio: String, // p1 (highest) | p2 | p3
     pub tags: Vec<String>,
     pub blocked: String, // reason, empty = not blocked
-    pub owner: String, // agent/user that pulled it to doing; empty = unowned
+    pub owner: String,   // agent/user that pulled it to doing; empty = unowned
     pub criteria: Vec<(String, bool)>,
     pub created: i64,
     pub done_ts: i64,
@@ -31,7 +31,10 @@ pub struct Task {
 impl Task {
     /// First time the task entered `doing` (cycle-time start).
     pub fn first_doing(&self) -> Option<i64> {
-        self.trans.iter().find(|(c, _)| c == "doing").map(|(_, t)| *t)
+        self.trans
+            .iter()
+            .find(|(c, _)| c == "doing")
+            .map(|(_, t)| *t)
     }
 
     pub fn criteria_done(&self) -> usize {
@@ -48,7 +51,10 @@ pub struct Wip {
 impl Default for Wip {
     // Doing=1 is deliberate: one thing at a time is the whole methodology.
     fn default() -> Wip {
-        Wip { doing: 1, review: 3 }
+        Wip {
+            doing: 1,
+            review: 3,
+        }
     }
 }
 
@@ -68,11 +74,17 @@ impl Store {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        Ok(Store { path: db_path.to_path_buf() })
+        Ok(Store {
+            path: db_path.to_path_buf(),
+        })
     }
 
     fn db(&self) -> Result<Db, String> {
-        if self.path.exists() { Db::open(&self.path) } else { Db::create(&self.path) }
+        if self.path.exists() {
+            Db::open(&self.path)
+        } else {
+            Db::create(&self.path)
+        }
     }
 
     pub fn next_id(&self) -> Result<String, String> {
@@ -111,7 +123,11 @@ impl Store {
             .map(|(k, e)| decode(k, &e.meta))
             .collect();
         ts.sort_by(|a, b| {
-            let n = |t: &Task| t.id.strip_prefix("T-").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let n = |t: &Task| {
+                t.id.strip_prefix("T-")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0)
+            };
             n(a).cmp(&n(b))
         });
         Ok(ts)
@@ -127,17 +143,32 @@ impl Store {
             Err(_) => return 0,
         };
         let stored = db.get("_trend").and_then(|e| json::parse(&e.meta).ok());
-        let prev_open = stored.as_ref().and_then(|v| v.get("open").and_then(Value::as_f64)).map(|f| f as i64);
-        let prev_dir = stored.as_ref().and_then(|v| v.get("dir").and_then(Value::as_f64)).map(|f| f as i64).unwrap_or(0);
+        let prev_open = stored
+            .as_ref()
+            .and_then(|v| v.get("open").and_then(Value::as_f64))
+            .map(|f| f as i64);
+        let prev_dir = stored
+            .as_ref()
+            .and_then(|v| v.get("dir").and_then(Value::as_f64))
+            .map(|f| f as i64)
+            .unwrap_or(0);
         match prev_open {
             Some(p) if p == open_now as i64 => prev_dir,
             None => {
-                let _ = db.put("_trend", &format!(r#"{{"open":{open_now},"dir":0}}"#), PLACEHOLDER_VEC.to_vec());
+                let _ = db.put(
+                    "_trend",
+                    &format!(r#"{{"open":{open_now},"dir":0}}"#),
+                    PLACEHOLDER_VEC.to_vec(),
+                );
                 0
             }
             Some(p) => {
                 let dir = if (open_now as i64) > p { 1 } else { -1 };
-                let _ = db.put("_trend", &format!(r#"{{"open":{open_now},"dir":{dir}}}"#), PLACEHOLDER_VEC.to_vec());
+                let _ = db.put(
+                    "_trend",
+                    &format!(r#"{{"open":{open_now},"dir":{dir}}}"#),
+                    PLACEHOLDER_VEC.to_vec(),
+                );
                 dir
             }
         }
@@ -148,23 +179,42 @@ impl Store {
             Ok(d) => d,
             Err(_) => return Wip::default(),
         };
-        let Some(e) = db.get("_board") else { return Wip::default() };
+        let Some(e) = db.get("_board") else {
+            return Wip::default();
+        };
         let v = match json::parse(&e.meta) {
             Ok(v) => v,
             Err(_) => return Wip::default(),
         };
-        let get = |k: &str, d: usize| v.get(k).and_then(|x| x.as_f64()).map(|f| f as usize).unwrap_or(d);
-        Wip { doing: get("doing", 1), review: get("review", 3) }
+        let get = |k: &str, d: usize| {
+            v.get(k)
+                .and_then(|x| x.as_f64())
+                .map(|f| f as usize)
+                .unwrap_or(d)
+        };
+        Wip {
+            doing: get("doing", 1),
+            review: get("review", 3),
+        }
     }
 
     pub fn set_wip(&self, w: Wip) -> Result<(), String> {
         let mut db = self.db()?;
-        db.put("_board", &format!(r#"{{"doing":{},"review":{}}}"#, w.doing, w.review), PLACEHOLDER_VEC.to_vec())
+        db.put(
+            "_board",
+            &format!(r#"{{"doing":{},"review":{}}}"#, w.doing, w.review),
+            PLACEHOLDER_VEC.to_vec(),
+        )
     }
 }
 
 fn encode(t: &Task) -> String {
-    let tags = t.tags.iter().map(|s| format!("\"{}\"", json::escape(s))).collect::<Vec<_>>().join(",");
+    let tags = t
+        .tags
+        .iter()
+        .map(|s| format!("\"{}\"", json::escape(s)))
+        .collect::<Vec<_>>()
+        .join(",");
     let crit = t
         .criteria
         .iter()
@@ -195,11 +245,21 @@ fn encode(t: &Task) -> String {
 fn decode(id: &str, meta: &str) -> Task {
     let v = match json::parse(meta) {
         Ok(v) => v,
-        Err(_) => return Task { id: id.to_string(), ..Task::default() },
+        Err(_) => {
+            return Task {
+                id: id.to_string(),
+                ..Task::default()
+            }
+        }
     };
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let n = |k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0) as i64;
-    let arr = |k: &str| -> Vec<Value> { v.get(k).and_then(|x| x.as_arr()).map(|a| a.to_vec()).unwrap_or_default() };
+    let arr = |k: &str| -> Vec<Value> {
+        v.get(k)
+            .and_then(|x| x.as_arr())
+            .map(|a| a.to_vec())
+            .unwrap_or_default()
+    };
     Task {
         id: id.to_string(),
         title: s("title"),
@@ -209,12 +269,18 @@ fn decode(id: &str, meta: &str) -> Task {
         owner: s("owner"),
         created: n("created"),
         done_ts: n("done_ts"),
-        tags: arr("tags").iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
+        tags: arr("tags")
+            .iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect(),
         criteria: arr("criteria")
             .iter()
             .map(|c| {
                 (
-                    c.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    c.get("text")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     matches!(c.get("done"), Some(Value::Bool(true))),
                 )
             })
@@ -246,12 +312,14 @@ mod tests {
         assert_eq!(s.trend_dir(12), 1); // flat: keeps last direction
         assert_eq!(s.trend_dir(9), -1); // fell
         assert_eq!(s.trend_dir(9), -1); // flat: keeps falling marker
-        // the reserved row is invisible to task listings
+                                        // the reserved row is invisible to task listings
         assert!(s.all().unwrap().is_empty());
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(name);
         let _ = std::fs::remove_dir_all(&d);
         d.join("tasks.semdb")
     }
@@ -288,7 +356,11 @@ mod tests {
     fn wip_defaults_and_set() {
         let s = Store::open(&scratch("tasks-wip")).unwrap();
         assert_eq!(s.wip().doing, 1);
-        s.set_wip(Wip { doing: 2, review: 4 }).unwrap();
+        s.set_wip(Wip {
+            doing: 2,
+            review: 4,
+        })
+        .unwrap();
         assert_eq!(s.wip().doing, 2);
         assert_eq!(s.wip().review, 4);
     }

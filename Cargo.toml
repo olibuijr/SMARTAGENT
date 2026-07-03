@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/semdb",
     "crates/httpc",
+    "crates/procutil",
     "crates/skills",
     "crates/schedule",
     "crates/vault",

@@ -63,7 +63,7 @@ fn utc_offset() -> i64 {
 fn journal_path(args: &[String]) -> PathBuf {
     flag(args, "--journal")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("data/schedule.jsonl"))
+        .unwrap_or_else(|| PathBuf::from("data/schedule.semdb"))
 }
 
 pub fn run(args: &[String]) -> Result<String, String> {
@@ -253,6 +253,6 @@ USAGE:
   schedule statusline [--journal FILE]
 
 One-shot --at is local time = UTC + utc_offset_minutes (config, default 0).
-Journal default: data/schedule.jsonl, transparently stored as a semdb table
-(data/schedule.semdb); the jsonl path is accepted for legacy callers.
+Journal default: data/schedule.semdb (semdb table). Legacy --journal paths
+ending in .jsonl are accepted and normalized to the matching .semdb table.
 "#;

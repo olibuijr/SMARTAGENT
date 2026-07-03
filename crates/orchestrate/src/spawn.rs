@@ -3,7 +3,6 @@
 //! workspaces/<run-id>/agent-<n>/, with stdout+stderr captured to out.log.
 //! Fan-out is std::thread; each agent has a wall-clock timeout (kill on expiry).
 
-use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -94,49 +93,10 @@ impl Runner {
                 return AgentResult { n: spec.n, exit: -1, secs: 0.0, workspace: spec.workspace, timed_out: false, attempts: 1 };
             }
         };
-        let (exit, timed_out, output) = wait_with_timeout(child, self.timeout);
-        let _ = std::fs::write(&log_path, output);
-        AgentResult { n: spec.n, exit, secs: start.elapsed().as_secs_f64(), workspace: spec.workspace, timed_out, attempts: 1 }
+        let output = procutil::wait_with_timeout(child, self.timeout);
+        let _ = std::fs::write(&log_path, output.text);
+        AgentResult { n: spec.n, exit: output.exit, secs: start.elapsed().as_secs_f64(), workspace: spec.workspace, timed_out: output.timed_out, attempts: 1 }
     }
-}
-
-/// Poll for completion up to `timeout`; kill and reap if it expires.
-fn wait_with_timeout(mut child: std::process::Child, timeout: Duration) -> (i32, bool, String) {
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = drain(&mut child);
-                return (status.code().unwrap_or(-1), false, out);
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let out = drain(&mut child);
-                    return (-1, true, out);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return (-1, false, String::new()),
-        }
-    }
-}
-
-fn drain(child: &mut std::process::Child) -> String {
-    let mut s = String::new();
-    if let Some(mut o) = child.stdout.take() {
-        let _ = o.read_to_string(&mut s);
-    }
-    if let Some(mut e) = child.stderr.take() {
-        let mut es = String::new();
-        let _ = e.read_to_string(&mut es);
-        if !es.is_empty() {
-            s.push_str("\n[stderr]\n");
-            s.push_str(&es);
-        }
-    }
-    s
 }
 
 #[cfg(test)]

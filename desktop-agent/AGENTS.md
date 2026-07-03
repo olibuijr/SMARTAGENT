@@ -98,3 +98,9 @@ binaries (`data.rs`).
   while the real path is dead — always test against a shape quoted from rpc.md.
 - **pi statusline `widgetLines` contain ANSI SGR codes** — strip `\x1b[…m`
   (`agent::strip_ansi`) before rendering or egui shows escape garbage.
+- **egui's default font lacks most symbol/icon glyphs → tofu boxes.** Icons come
+  from `assets/NerdFont.ttf` (JetBrains Mono Nerd Font, Font Awesome in the PUA),
+  installed as a fallback family by `icons::install(ctx)` at startup. Use the
+  named `icons::*` constants (Font Awesome codepoints in the font's f000-f381
+  range), not ad-hoc Unicode glyphs — exotic Unicode (✎ ⇲ ⧉ ⑂ ✦) isn't in the
+  base face either and renders as boxes.

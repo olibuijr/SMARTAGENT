@@ -7,7 +7,7 @@ use std::os::unix::net::UnixStream;
 
 use httpc::json::{self, Value};
 
-use crate::server::{Agents, role_of};
+use crate::server::{role_of, Agents};
 
 pub(crate) fn last_activity(name: &str) -> (String, String) {
     let path = semdb::config::Config::load()
@@ -168,13 +168,19 @@ pub(crate) fn write_agents(write_side: &mut UnixStream, agents: &Agents) {
     let _ = write_side.write_all(b"{\"ev\":\"done\"}\n");
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn status_line_reports_selected_agent_tokens() {
-        let line = status_line("builder", false, "2026-07-02 23:00:00Z", true, "T-9 build", 123);
+        let line = status_line(
+            "builder",
+            false,
+            "2026-07-02 23:00:00Z",
+            true,
+            "T-9 build",
+            123,
+        );
         assert!(line.contains("agent builder: idle"));
         assert!(line.contains("queued beat: true"));
         assert!(line.contains("doing: T-9 build"));
@@ -183,8 +189,18 @@ mod tests {
     }
     #[test]
     fn token_totals_sum_per_agent_to_fleet_total() {
-        let ada = TokenTotals { input: 1, output: 2, cache_read: 3, cache_write: 4 };
-        let builder = TokenTotals { input: 10, output: 20, cache_read: 30, cache_write: 40 };
+        let ada = TokenTotals {
+            input: 1,
+            output: 2,
+            cache_read: 3,
+            cache_write: 4,
+        };
+        let builder = TokenTotals {
+            input: 10,
+            output: 20,
+            cache_read: 30,
+            cache_write: 40,
+        };
         let fleet = TokenTotals {
             input: ada.input + builder.input,
             output: ada.output + builder.output,

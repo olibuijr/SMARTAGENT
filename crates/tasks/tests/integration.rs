@@ -2,7 +2,10 @@ use std::path::PathBuf;
 use tasks::cli;
 
 fn db(name: &str) -> String {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+    std::env::set_var("SMARTAGENT_WORKTREE_DISABLE", "1");
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     d.join("tasks.semdb").display().to_string()
 }
@@ -18,7 +21,20 @@ fn s(v: &[&str], db: &str) -> Vec<String> {
 fn kanban_flow_wip_and_done_gates() {
     let db = db("tasks-flow");
     // capture + promote
-    cli::run(&s(&["add", "ship feature", "--prio", "p1", "--col", "ready", "--criteria", "compiles;tested"], &db)).unwrap();
+    cli::run(&s(
+        &[
+            "add",
+            "ship feature",
+            "--prio",
+            "p1",
+            "--col",
+            "ready",
+            "--criteria",
+            "compiles;tested",
+        ],
+        &db,
+    ))
+    .unwrap();
     cli::run(&s(&["todo", "someday thing"], &db)).unwrap();
     // pull respects capacity (doing WIP default 1)
     let pull = cli::run(&s(&["next"], &db)).unwrap();
@@ -40,9 +56,62 @@ fn kanban_flow_wip_and_done_gates() {
     assert!(done.contains("→ done"), "{done}");
     // board + metrics render
     let board = cli::run(&s(&["board"], &db)).unwrap();
-    assert!(board.contains("DONE (1)") && board.contains("BACKLOG"), "{board}");
+    assert!(
+        board.contains("DONE (1)") && board.contains("BACKLOG"),
+        "{board}"
+    );
     let m = cli::run(&s(&["metrics"], &db)).unwrap();
     assert!(m.contains("throughput: 1 done"), "{m}");
+}
+
+#[test]
+fn desktop_agent_tasks_are_not_pullable_by_fleet() {
+    let db = db("tasks-desktop-agent-skip");
+    cli::run(&s(
+        &[
+            "add",
+            "desktop-agent: separate session work",
+            "--prio",
+            "p1",
+            "--col",
+            "ready",
+            "--tags",
+            "desktop-agent",
+        ],
+        &db,
+    ))
+    .unwrap();
+    cli::run(&s(
+        &["add", "normal fleet work", "--prio", "p2", "--col", "ready"],
+        &db,
+    ))
+    .unwrap();
+    let pull = cli::run(&s(&["next"], &db)).unwrap();
+    assert!(pull.contains("pull T-2"), "{pull}");
+    assert!(!pull.contains("T-1"), "{pull}");
+}
+
+#[test]
+fn unblock_makes_ready_task_pullable_again() {
+    let db = db("tasks-unblock-pullable");
+    cli::run(&s(
+        &[
+            "add",
+            "blocked then clear",
+            "--prio",
+            "p1",
+            "--col",
+            "ready",
+        ],
+        &db,
+    ))
+    .unwrap();
+    cli::run(&s(&["block", "T-1", "waiting on external"], &db)).unwrap();
+    let blocked = cli::run(&s(&["next"], &db)).unwrap();
+    assert!(blocked.contains("no ready tasks"), "{blocked}");
+    cli::run(&s(&["unblock", "T-1"], &db)).unwrap();
+    let pull = cli::run(&s(&["next"], &db)).unwrap();
+    assert!(pull.contains("pull T-1"), "{pull}");
 }
 
 #[test]
@@ -53,7 +122,10 @@ fn block_and_statusline_levels() {
     cli::run(&s(&["add", "x", "--col", "ready"], &db)).unwrap();
     cli::run(&s(&["block", "T-1", "waiting on titan"], &db)).unwrap();
     let warn = cli::run(&s(&["statusline"], &db)).unwrap();
-    assert!(warn.starts_with("warn|") && warn.contains("1 blocked"), "{warn}");
+    assert!(
+        warn.starts_with("warn|") && warn.contains("1 blocked"),
+        "{warn}"
+    );
     // forced over-WIP shows err
     cli::run(&s(&["unblock", "T-1"], &db)).unwrap();
     cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();

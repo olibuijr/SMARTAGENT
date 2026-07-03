@@ -16,6 +16,8 @@
 
 When the user asks for workspace contents, report the folders/projects and files under `workspaces/`, not the repository root.
 
+**Blocker hygiene (2026-07-03):** blocked tasks are dev-team work, not human homework. Every triage/beat must resolve blockers agent-side: unblock stale reasons, split/rescope, route off-lane/project-specific work to its project board, or create/pull the task that removes the blocker. Root-board blockers should trend to zero; any remaining blocker must name the next owner/action.
+
 **Extensions catalog:** the full list of `./pi` tools/extensions and what each does lives in [CATALOG.md](./CATALOG.md) (human/CLI reference; the agent-facing brief is AGENT_TOOLS.md). Keep both current — update them in the same commit whenever you add, rename, or remove an extension.
 
 Hard rules (repeated here because they bite):

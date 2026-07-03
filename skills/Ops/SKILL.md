@@ -13,6 +13,12 @@ service, not your call. `supervise status` before any debugging.
 - Services: `scheduler` (fires cron jobs), `gateway` (persistent agent fleet), `chromium` (headless CDP :9222).
 - `up [service]`, `down [service]`, `restart <service>`,
   `logs <service>` (`tail`, default 40) for the why.
+- **Gateway self-host rule:** an agent running inside the gateway must not
+  restart its own host service in split steps. If verification needs a gateway
+  restart, either use the single atomic `supervise restart gateway` operation
+  as the final action, or hand the restart+verify to a peer/orchestrator agent
+  that is not hosted by the gateway being restarted. Never do `down gateway`
+  from inside a gateway agent and hope to run the `up` half afterward.
 - State lives in data/supervise.semdb; the statusline ⛭ row mirrors it —
   red segment = act now.
 

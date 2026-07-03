@@ -10,13 +10,22 @@ pub struct Frontmatter {
 
 impl Frontmatter {
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.fields.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+        self.fields
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 }
 
 pub fn parse(content: &str) -> Frontmatter {
-    let Some(rest) = content.strip_prefix("---\n").or_else(|| content.strip_prefix("---\r\n")) else {
-        return Frontmatter { fields: Vec::new(), body: content.to_string() };
+    let Some(rest) = content
+        .strip_prefix("---\n")
+        .or_else(|| content.strip_prefix("---\r\n"))
+    else {
+        return Frontmatter {
+            fields: Vec::new(),
+            body: content.to_string(),
+        };
     };
     // Find the closing delimiter line.
     let mut fm_lines = Vec::new();
@@ -33,9 +42,17 @@ pub fn parse(content: &str) -> Frontmatter {
     }
     let body = match body_start {
         Some(b) => rest[b..].trim_start_matches(['\n', '\r']).to_string(),
-        None => return Frontmatter { fields: Vec::new(), body: content.to_string() },
+        None => {
+            return Frontmatter {
+                fields: Vec::new(),
+                body: content.to_string(),
+            }
+        }
     };
-    Frontmatter { fields: parse_fields(&fm_lines), body }
+    Frontmatter {
+        fields: parse_fields(&fm_lines),
+        body,
+    }
 }
 
 fn parse_fields(lines: &[String]) -> Vec<(String, String)> {
@@ -77,7 +94,9 @@ fn split_kv(line: &str) -> Option<(String, String)> {
 
 fn unquote(v: &str) -> String {
     let v = v.trim();
-    if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) {
+    if v.len() >= 2
+        && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')))
+    {
         v[1..v.len() - 1].to_string()
     } else {
         v.to_string()

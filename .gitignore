@@ -3,6 +3,10 @@
 .refrepos/
 # .pi = vendored pi runtime, sessions, agent config + router key/auth
 .pi/
+# agent CLI state/history (local only)
+.agents/
+.claude/
+.codex/
 # data = durable stores: semdb tables, secrets, schedule journal
 data/
 # workspaces = subagent runs + sandbox scratch

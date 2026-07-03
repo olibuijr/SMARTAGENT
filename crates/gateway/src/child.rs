@@ -24,6 +24,8 @@ pub enum Event {
     TurnEnd(String, Usage),
     /// A tool call started (payload: tool name) — visibility while "quiet".
     Tool(String),
+    /// A tool call ended (tool name + success flag).
+    ToolEnd(String, bool),
     /// Child exited.
     Exited(i32),
 }
@@ -194,12 +196,13 @@ fn reader_loop(stdout: std::process::ChildStdout, tx: Sender<Event>, busy: Arc<M
                 }
             }
             "tool_execution_start" => {
-                let name = v
-                    .get("toolName")
-                    .or_else(|| v.get("tool"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool");
-                let _ = tx.send(Event::Tool(name.to_string()));
+                let _ = tx.send(Event::Tool(tool_name_from_event(&v)));
+            }
+            "tool_execution_end" => {
+                let _ = tx.send(Event::ToolEnd(
+                    tool_name_from_event(&v),
+                    tool_success_from_event(&v),
+                ));
             }
             "message_update" => {
                 if let Some(ev) = v.get("assistantMessageEvent") {
@@ -215,6 +218,25 @@ fn reader_loop(stdout: std::process::ChildStdout, tx: Sender<Event>, busy: Arc<M
         }
     }
     let _ = tx.send(Event::Exited(-1));
+}
+
+fn tool_name_from_event(v: &Value) -> String {
+    v.get("toolName")
+        .or_else(|| v.get("tool"))
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string()
+}
+
+fn tool_success_from_event(v: &Value) -> bool {
+    if let Some(Value::Bool(b)) = v.get("success") {
+        return *b;
+    }
+    if let Some(Value::Bool(ok)) = v.get("ok") {
+        return *ok;
+    }
+    let status = v.get("status").and_then(Value::as_str).unwrap_or("");
+    !matches!(status, "error" | "failed" | "failure")
 }
 
 fn usage_from_event(v: &Value) -> Option<Usage> {
@@ -254,6 +276,22 @@ mod tests {
             spawn_args("gw-main", None),
             vec!["--mode", "rpc", "--session-id", "gw-main"]
         );
+    }
+
+    #[test]
+    fn tool_events_extract_name_and_status() {
+        let start = json::parse(
+            r#"{"type":"tool_execution_start","toolName":"memory","input":{"text":"secret"}}"#,
+        )
+        .unwrap();
+        assert_eq!(tool_name_from_event(&start), "memory");
+        let ok = json::parse(r#"{"type":"tool_execution_end","toolName":"memory","success":true}"#)
+            .unwrap();
+        assert!(tool_success_from_event(&ok));
+        let err =
+            json::parse(r#"{"type":"tool_execution_end","toolName":"memory","status":"error"}"#)
+                .unwrap();
+        assert!(!tool_success_from_event(&err));
     }
 
     #[test]

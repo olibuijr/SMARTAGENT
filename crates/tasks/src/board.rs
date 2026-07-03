@@ -35,7 +35,11 @@ pub fn render(tasks: &[Task], wip: Wip) -> String {
         };
         let hidden = in_col.len().saturating_sub(shown.len());
         for &t in shown {
-            let blocked = if t.blocked.is_empty() { String::new() } else { format!(" ⛔{}", t.blocked) };
+            let blocked = if t.blocked.is_empty() {
+                String::new()
+            } else {
+                format!(" ⛔{}", t.blocked)
+            };
             let crit = if t.criteria.is_empty() {
                 String::new()
             } else {
@@ -45,8 +49,15 @@ pub fn render(tasks: &[Task], wip: Wip) -> String {
             if title.chars().count() > 60 {
                 title = title.chars().take(59).collect::<String>() + "…";
             }
-            let owner = if t.owner.is_empty() { String::new() } else { format!(" @{}", t.owner) };
-            out.push(format!("  {} {} {}{}{}{}", t.id, t.prio, title, owner, crit, blocked));
+            let owner = if t.owner.is_empty() {
+                String::new()
+            } else {
+                format!(" @{}", t.owner)
+            };
+            out.push(format!(
+                "  {} {} {}{}{}{}",
+                t.id, t.prio, title, owner, crit, blocked
+            ));
         }
         if hidden > 0 {
             out.push(format!("  … +{hidden} more (tasks list --col {col})"));
@@ -57,22 +68,44 @@ pub fn render(tasks: &[Task], wip: Wip) -> String {
 
 /// Flow metrics over done tasks + current board state.
 pub fn metrics(tasks: &[Task], now: i64) -> String {
-    let done: Vec<&Task> = tasks.iter().filter(|t| t.col == "done" && t.done_ts > 0).collect();
+    let done: Vec<&Task> = tasks
+        .iter()
+        .filter(|t| t.col == "done" && t.done_ts > 0)
+        .collect();
     let week = 7 * 86_400;
     let throughput = done.iter().filter(|t| now - t.done_ts <= week).count();
     let cycles: Vec<i64> = done
         .iter()
         .filter_map(|t| t.first_doing().map(|d| (t.done_ts - d).max(0)))
         .collect();
-    let leads: Vec<i64> = done.iter().map(|t| (t.done_ts - t.created).max(0)).collect();
-    let avg = |v: &[i64]| if v.is_empty() { 0 } else { v.iter().sum::<i64>() / v.len() as i64 };
-    let fmt = |secs: i64| {
-        if secs >= 86_400 { format!("{:.1}d", secs as f64 / 86_400.0) }
-        else if secs >= 3_600 { format!("{:.1}h", secs as f64 / 3_600.0) }
-        else { format!("{}m", secs / 60) }
+    let leads: Vec<i64> = done
+        .iter()
+        .map(|t| (t.done_ts - t.created).max(0))
+        .collect();
+    let avg = |v: &[i64]| {
+        if v.is_empty() {
+            0
+        } else {
+            v.iter().sum::<i64>() / v.len() as i64
+        }
     };
-    let wip_now = tasks.iter().filter(|t| t.col == "doing" || t.col == "review").count();
-    let blocked = tasks.iter().filter(|t| !t.blocked.is_empty() && t.col != "done").count();
+    let fmt = |secs: i64| {
+        if secs >= 86_400 {
+            format!("{:.1}d", secs as f64 / 86_400.0)
+        } else if secs >= 3_600 {
+            format!("{:.1}h", secs as f64 / 3_600.0)
+        } else {
+            format!("{}m", secs / 60)
+        }
+    };
+    let wip_now = tasks
+        .iter()
+        .filter(|t| t.col == "doing" || t.col == "review")
+        .count();
+    let blocked = tasks
+        .iter()
+        .filter(|t| !t.blocked.is_empty() && t.col != "done")
+        .count();
     format!(
         "throughput: {throughput} done in last 7d\ncycle time (doing→done): avg {} over {} tasks\nlead time (created→done): avg {} over {} tasks\nwip now (doing+review): {wip_now}\nblocked: {blocked}",
         fmt(avg(&cycles)),
@@ -89,7 +122,10 @@ pub fn statusline(store: &Store) -> Result<String, String> {
     let doing = tasks.iter().filter(|t| t.col == "doing").count();
     let ready = tasks.iter().filter(|t| t.col == "ready").count();
     let review = tasks.iter().filter(|t| t.col == "review").count();
-    let blocked = tasks.iter().filter(|t| !t.blocked.is_empty() && t.col != "done").count();
+    let blocked = tasks
+        .iter()
+        .filter(|t| !t.blocked.is_empty() && t.col != "done")
+        .count();
     // System-level overview: total open tasks + direction of the last change
     // (▲ growing backlog, ▼ shrinking — persisted across probes).
     let open = tasks.iter().filter(|t| t.col != "done").count();
@@ -98,9 +134,16 @@ pub fn statusline(store: &Store) -> Result<String, String> {
         -1 => " ▼",
         _ => "",
     };
-    let mut text = format!("▣ {open} open{arrow} · {doing}/{} doing · {ready} ready", wip.doing);
-    if review > 0 { text.push_str(&format!(" · {review} review")); }
-    if blocked > 0 { text.push_str(&format!(" · {blocked} blocked")); }
+    let mut text = format!(
+        "▣ {open} open{arrow} · {doing}/{} doing · {ready} ready",
+        wip.doing
+    );
+    if review > 0 {
+        text.push_str(&format!(" · {review} review"));
+    }
+    if blocked > 0 {
+        text.push_str(&format!(" · {blocked} blocked"));
+    }
     let level = if doing > wip.doing || review > wip.review {
         "err" // WIP breached — the board is being pushed, not pulled
     } else if blocked > 0 || doing == wip.doing {

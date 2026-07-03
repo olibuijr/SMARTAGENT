@@ -207,6 +207,7 @@ mod tests {
             output: "actual".into(),
             expected: Some("wanted".into()),
             latency_ms: None,
+            provenance: None,
         }
     }
 
@@ -218,6 +219,7 @@ mod tests {
             output: "same".into(),
             expected: Some("same".into()),
             latency_ms: None,
+            provenance: None,
         }
     }
 

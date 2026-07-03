@@ -5,13 +5,13 @@
 //! each agent aware of time, its board, and the plan ahead, and every beat and
 //! turn lands in the `medvitund` semdb table. Design: Plans/MEDVITUND.md.
 
+mod agents_view;
 mod beat;
 mod child;
-mod agents_view;
 mod server;
 
-use std::io::{BufRead, BufReader, Write};
 use std::io::ErrorKind;
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
 fn usage() -> ! {
@@ -49,7 +49,9 @@ fn main() {
         }
         "ask" => {
             let (agent, msg) = parse_client_args(&rest);
-            let secs = httpc::args::flag(&rest, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(90);
+            let secs = httpc::args::flag(&rest, "--timeout")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(90);
             let stream = rest.iter().any(|a| a == "--stream");
             client_ask(&agent, &msg, secs, stream)
         }
@@ -121,15 +123,30 @@ fn connect() -> Result<UnixStream, String> {
 /// Request→reply: send a message and print the agent's reply turn (the Text
 /// broadcast), giving up after `timeout_secs` of silence. Used by the Telegram
 /// bridge — a chat needs an answer, not a delivery receipt.
-fn client_ask(agent: &str, message: &str, timeout_secs: u64, stream_mode: bool) -> Result<(), String> {
+const STREAM_INFO_PREFIX: &str = "__SMARTAGENT_INFO__";
+
+fn stream_info_line(text: &str) -> String {
+    format!("{STREAM_INFO_PREFIX}{}", text.replace('\n', " "))
+}
+
+fn client_ask(
+    agent: &str,
+    message: &str,
+    timeout_secs: u64,
+    stream_mode: bool,
+) -> Result<(), String> {
     let mut stream = connect()?;
     let line = format!(
         "{{\"op\":\"ask\",\"agent\":\"{}\",\"message\":\"{}\"}}\n",
         httpc::json::escape(agent),
         httpc::json::escape(message)
     );
-    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs))).ok();
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs)))
+        .ok();
     let reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     let mut reply = String::new();
     for l in reader.lines() {
@@ -147,8 +164,18 @@ fn client_ask(agent: &str, message: &str, timeout_secs: u64, stream_mode: bool) 
                 }
             }
             // "done" fires at each turn end; return once we have some reply.
-            server::LineKind::Done => { if !reply.trim().is_empty() { break; } }
-            server::LineKind::Info(_) => {}
+            server::LineKind::Done => {
+                if !reply.trim().is_empty() {
+                    break;
+                }
+            }
+            server::LineKind::Info(t) => {
+                if stream_mode && t.starts_with('🛠') {
+                    println!("{}", stream_info_line(&t));
+                    use std::io::Write as _;
+                    let _ = std::io::stdout().flush();
+                }
+            }
         }
     }
     if !stream_mode {
@@ -173,10 +200,14 @@ fn client_send(op: &str, agent: &str, message: &str) -> Result<(), String> {
         let l = l.map_err(|e| e.to_string())?;
         match server::client_line_kind(&l) {
             server::LineKind::Text(t) => {
-                if !write_stdout(&t)? { return Ok(()); }
+                if !write_stdout(&t)? {
+                    return Ok(());
+                }
             }
             server::LineKind::Info(t) => {
-                if !write_stdout_line(&t)? { return Ok(()); }
+                if !write_stdout_line(&t)? {
+                    return Ok(());
+                }
             }
             server::LineKind::Done => {
                 let _ = write_stdout_line("")?;
@@ -257,7 +288,9 @@ fn client_attach(agent: &str) -> Result<(), String> {
             let Ok(l) = l else { break };
             match server::client_line_kind(&l) {
                 server::LineKind::Text(t) => {
-                    if !write_stdout(&t).unwrap_or(false) { break; }
+                    if !write_stdout(&t).unwrap_or(false) {
+                        break;
+                    }
                 }
                 server::LineKind::Info(t) => eprintln!("\n[gateway] {t}"),
                 server::LineKind::Done => {}
@@ -314,7 +347,15 @@ fn write_stdout_line(text: &str) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::human_tokens;
+    use super::{human_tokens, stream_info_line};
+
+    #[test]
+    fn stream_info_line_has_marker_and_no_newlines() {
+        assert_eq!(
+            stream_info_line("🛠 memory running…\nraw"),
+            "__SMARTAGENT_INFO__🛠 memory running… raw"
+        );
+    }
 
     #[test]
     fn statusline_humanizes_token_counts() {

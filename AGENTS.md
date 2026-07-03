@@ -22,6 +22,7 @@ When asked for workspace contents, list the folders/projects and files under `wo
 6. **NEVER use /tmp or any path outside the repo.** Scratch, probes, test databases, config — all inside the repo; throwaways go in `.scratch/` (gitignored).
 7. **All data lives in database tables.** `semdb` is the storage engine: every persistent collection is a table of rows (a `.semdb` file, or a named table within one). Any table whose rows need semantic recall gets a **vector column** (the row's embedding); tables that don't (journals, config, structural graphs) store rows with a zero/absent vector. Do NOT invent bespoke JSONL/JSON file formats for new data — put it in a semdb table. Vectors are added where meaning-based lookup is needed, not everywhere. (The former JSONL journals in `schedule`/`evals` have been migrated to semdb tables — no bespoke JSONL remains. The CLIs still accept a legacy `*.jsonl` path and transparently use the `*.semdb` table.)
 8. **The agent operating loop is enforced, not advisory.** The order of work lives ONCE in `AGENT_TOOLS.md` → "Operating loop" (skills match → tasks pull → workflow → investigate → execute → verify → close). Deterministic hooks back it: edit/write are blocked while nothing is in `doing` (root or the target repo's own board), agent start injects live board/workflow/index state, agent end audits the board snapshot (including RELAX bypass use). Enforcement strength, honestly: the doing-gate and WIP limits are code-enforced; criteria-gated `done` is advisory-strength (the agent writes and self-attests criteria — `triage`/audit catch gaming after the fact). Gate failure policy (tested): missing/unreadable board → the gate blocks with the unlock commands (fail-closed to correction, self-healing since `tasks add` creates the db); dispatcher-level failures (unspawnable script, timeout) fail OPEN with a loud warning per the hooks crate contract — hooks must never wedge the agent. Change the loop text and `config/hooks.conf` together.
+9. **No lingering blocked tasks.** A blocked task is a short-lived exception with an owned resolution path, never a parking lot and never a request for the principal to intervene. Every triage/beat must sweep blockers: unblock if the reason is obsolete, split/rescope if the work can proceed, move off-lane/project-specific work to that project board, or create/pull an actionable dev-team task to remove the blocker. Root-board blockers should trend to zero; if one remains, it must name the next agent-owned action and owner.
 
 ## Architecture
 
@@ -129,6 +130,16 @@ Moved to [CATALOG.md](./CATALOG.md) (token efficiency: this file is injected int
 ## Cockpit (`./tui`)
 
 `./tui` opens the 2x2 tmux cockpit on a private socket (`tmux -L smartagent`): **top-left** the interactive `./pi` TUI · **top-right** `gateway attach` (live DA stream — type to interview mid-work, Ctrl-D detaches the client only) · **bottom-left** the board (`watch -n5 tasks board`) · **bottom-right** the meðvitund transcript (`tail -F data/gateway/main.log`). Keys (root table, no prefix): `Ctrl+Alt+q/w/e/r` select panes by position, `Alt+Enter` toggles fullscreen zoom on the active pane. Re-running `./tui` re-attaches to the live cockpit; the private socket keeps these bindings out of normal tmux sessions.
+
+## Worktree lifecycle for fleet agents
+
+Task worktrees are mandatory isolation, not optional scratch space:
+
+1. Pull exactly one task to `doing`; the `tasks move T-n doing` output names `worktrees/T-n` when isolation is active.
+2. Do all file edits/build probes for that task inside `worktrees/T-n`. If a hook says the task has an isolated worktree, stop and switch there; do not bypass by editing the shared root checkout.
+3. Before closing, commit task changes in the worktree, re-run the task's real verification from that worktree, then let `tasks done T-n` merge and remove the worktree.
+4. If merge fails or the shared root is dirty, preserve the worktree and branch; do not delete either. Requeue/block with the exact recovery action instead of pretending the task is done.
+5. Cleanup is explicit: `tasks worktrees reap` is only for abandoned worktrees after verifying their task is not open and their branch contains no needed work. Never reap another agent's active `doing`/`review` task.
 
 ## Conventions
 

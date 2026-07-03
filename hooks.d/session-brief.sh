@@ -13,5 +13,7 @@ if [ -n "$doing" ] && [ "$doing" != "no tasks" ]; then
 fi
 echo "  workflow: $(seg "$B/workflow" statusline --root . --db data/workflow.semdb)"
 echo "  index:    $(seg "$B/codeindex" statusline)"
+owner="${SMARTAGENT_TASK_OWNER:-${SMARTAGENT_GATEWAY_AGENT:-${USER:-agent}}}"
+echo "Owner: $owner. Rule6 is data-backed: continue doing tasks marked @$owner; do not take doing/review tasks owned by someone else."
 echo "Operating loop: see AGENT_TOOLS.md. File edits are hook-blocked while 'doing' is empty — capture and pull before touching files."
 exit 0

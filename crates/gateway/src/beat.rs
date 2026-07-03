@@ -215,22 +215,64 @@ fn first_active_line(runs: &str) -> String {
 fn board_has_autonomous_work_for(board: &str, agent: &str, role: &str) -> bool {
     let mine = format!("@{agent}");
     let role_marker = format!("@{role}");
-    let mut in_review = false;
+    let mut section = "";
     for l in board.lines() {
+        if l.starts_with("DOING") {
+            section = "doing";
+            continue;
+        }
+        if l.starts_with("READY") {
+            section = "ready";
+            continue;
+        }
         if l.starts_with("REVIEW") {
-            in_review = true;
+            section = "review";
+            continue;
+        }
+        if l.starts_with("BACKLOG") {
+            section = "backlog";
             continue;
         }
         if !l.starts_with(' ') {
-            in_review = false;
+            section = "";
+            continue;
         }
-        if in_review && (l.contains(&mine) || (!role.is_empty() && l.contains(&role_marker))) {
-            return true;
+        let row = l.trim();
+        if row.is_empty() {
+            continue;
         }
-        if (l.starts_with("DOING") || l.starts_with("READY") || l.starts_with("BACKLOG"))
-            && !(l.contains("(0)") || l.contains("(0/"))
-        {
-            return true;
+        match section {
+            // A doing task owned by ANOTHER agent is not work I can pull
+            // (one-per-agent WIP) — treating it as "work available" woke every
+            // idle agent each cycle to burn a no-op turn concluding "owned by
+            // others". Count only my own in-progress task (continue it) or an
+            // unowned/orphaned doing row (adoptable).
+            "doing" => {
+                let owned_by_other = row
+                    .split_whitespace()
+                    .filter_map(|t| t.strip_prefix('@'))
+                    .any(|o| o != agent);
+                if !owned_by_other {
+                    return true;
+                }
+            }
+            "backlog" => return true,
+            "ready" => {
+                // Auto-queue after unblock: heartbeat/work-chaser should only
+                // spend a turn for READY rows that `tasks next` can actually
+                // pull. Blocked rows remain visible on the board but are not
+                // pullable until `tasks unblock` clears the ⛔ reason; the next
+                // gateway poll then sees this row and prompts an idle agent.
+                if !row.contains('⛔') && !row.contains("desktop-agent") {
+                    return true;
+                }
+            }
+            "review" => {
+                if row.contains(&mine) || (!role.is_empty() && row.contains(&role_marker)) {
+                    return true;
+                }
+            }
+            _ => {}
         }
     }
     false
@@ -332,6 +374,17 @@ mod tests {
     }
 
     #[test]
+    fn others_doing_task_does_not_wake_idle_agent() {
+        // The no-op-turn bug: a task in doing owned by ANOTHER agent must NOT
+        // count as work for an idle agent (it can't be pulled — one per agent).
+        let others = "BACKLOG (0)\nREADY (0)\nDOING (2/8)\n  T-1 x @ada\n  T-2 y @dennis\nREVIEW (0/4)\n";
+        assert!(!board_has_autonomous_work_for(others, "grace", "QA"));
+        // ...but MY own doing task still counts (continue it).
+        let mine = "BACKLOG (0)\nREADY (0)\nDOING (1/8)\n  T-3 z @grace\n";
+        assert!(board_has_autonomous_work_for(mine, "grace", "QA"));
+    }
+
+    #[test]
     fn autonomous_work_sees_backlog_ready_or_doing() {
         assert!(board_has_autonomous_work_for(
             "BACKLOG (1)\n  T-1 x\nREADY (0)\nDOING (0/4)\n",
@@ -348,5 +401,21 @@ mod tests {
             "grace",
             "QA"
         ));
+    }
+
+    #[test]
+    fn autonomous_work_ignores_blocked_ready_until_unblocked() {
+        let blocked =
+            "BACKLOG (0)\nREADY (1)\n  T-1 p2 Waiting ⛔external\nDOING (0/4)\nREVIEW (0/3)\n";
+        assert!(!board_has_autonomous_work_for(blocked, "grace", "QA"));
+        let unblocked = "BACKLOG (0)\nREADY (1)\n  T-1 p2 Waiting\nDOING (0/4)\nREVIEW (0/3)\n";
+        assert!(board_has_autonomous_work_for(unblocked, "grace", "QA"));
+    }
+
+    #[test]
+    fn autonomous_work_ignores_desktop_ready_rows() {
+        let board =
+            "BACKLOG (0)\nREADY (1)\n  T-40 p3 desktop-agent task\nDOING (0/4)\nREVIEW (0/3)\n";
+        assert!(!board_has_autonomous_work_for(board, "grace", "QA"));
     }
 }

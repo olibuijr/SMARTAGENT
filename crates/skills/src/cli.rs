@@ -15,13 +15,20 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if skills.is_empty() {
                 return Ok("no skills found".into());
             }
-            Ok(skills.iter().map(|s| format!("{}\t{}", s.name, s.description)).collect::<Vec<_>>().join("\n"))
+            Ok(skills
+                .iter()
+                .map(|s| format!("{}\t{}", s.name, s.description))
+                .collect::<Vec<_>>()
+                .join("\n"))
         }
         "show" => {
             let root = root.ok_or("usage: skills show <root> <name>")?;
             let name = args.get(2).ok_or("name required")?;
             let skills = registry::discover(root)?;
-            let s = skills.iter().find(|s| &s.name == name).ok_or_else(|| format!("no skill '{name}'"))?;
+            let s = skills
+                .iter()
+                .find(|s| &s.name == name)
+                .ok_or_else(|| format!("no skill '{name}'"))?;
             let body = registry::load_body(&s.path)?;
             // --head N: first N lines (progressive disclosure of a long SKILL.md).
             match flag(args, "--head").and_then(|s| s.parse::<usize>().ok()) {
@@ -45,27 +52,45 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 .filter_map(|s| {
                     let hay = format!("{} {}", s.name, s.description).to_lowercase();
                     let hits = hay.matches(&query).count();
-                    if hits > 0 { Some((hits, s)) } else { None }
+                    if hits > 0 {
+                        Some((hits, s))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.cmp(&b.1.name)));
             if ranked.is_empty() {
                 return Ok("no matches".into());
             }
-            Ok(ranked.iter().map(|(_, s)| format!("{}\t{}", s.name, s.description)).collect::<Vec<_>>().join("\n"))
+            Ok(ranked
+                .iter()
+                .map(|(_, s)| format!("{}\t{}", s.name, s.description))
+                .collect::<Vec<_>>()
+                .join("\n"))
         }
         "validate" => {
             // Spec compliance: every SKILL.md needs non-empty name + description.
             let root = root.ok_or("usage: skills validate <root>")?;
             let skills = registry::discover(root)?;
-            if skills.is_empty() { return Ok("no skills found".into()); }
+            if skills.is_empty() {
+                return Ok("no skills found".into());
+            }
             let mut problems = Vec::new();
             let mut names = std::collections::BTreeSet::new();
             for s in &skills {
-                if s.name.is_empty() { problems.push(format!("{}: missing name", s.path.display())); }
-                if s.description.trim().is_empty() { problems.push(format!("{}: missing/empty description", s.path.display())); }
-                if s.description.chars().count() > 4096 { problems.push(format!("{}: description over 4096 chars", s.name)); }
-                if !names.insert(s.name.clone()) { problems.push(format!("duplicate skill name '{}'", s.name)); }
+                if s.name.is_empty() {
+                    problems.push(format!("{}: missing name", s.path.display()));
+                }
+                if s.description.trim().is_empty() {
+                    problems.push(format!("{}: missing/empty description", s.path.display()));
+                }
+                if s.description.chars().count() > 4096 {
+                    problems.push(format!("{}: description over 4096 chars", s.name));
+                }
+                if !names.insert(s.name.clone()) {
+                    problems.push(format!("duplicate skill name '{}'", s.name));
+                }
             }
             if problems.is_empty() {
                 Ok(format!("ok: {} skills valid", skills.len()))
@@ -88,17 +113,27 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let mut ranked: Vec<(usize, &registry::Skill)> = skills
                 .iter()
                 .filter_map(|s| {
+                    if is_ponytail_skill(&s.name) && !has_ponytail_trigger(&qtokens) {
+                        return None;
+                    }
                     let name_t = tokens(&s.name);
                     let desc_t = tokens(&s.description);
-                    let score: usize = qtokens
+                    let negative_t = do_not_use_tokens(&s.description);
+                    let raw: isize = qtokens
                         .iter()
                         .map(|q| {
                             let n = if name_t.contains(q) { 3 } else { 0 };
                             let d = if desc_t.contains(q) { 1 } else { 0 };
-                            n + d
+                            let no = if negative_t.contains(q) { 3 } else { 0 };
+                            n + d - no
                         })
                         .sum();
-                    if score > 0 { Some((score, s)) } else { None }
+                    let score = raw.max(0) as usize;
+                    if score > 0 {
+                        Some((score, s))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.cmp(&b.1.name)));
@@ -117,13 +152,51 @@ pub fn run(args: &[String]) -> Result<String, String> {
 }
 
 /// Lowercased word tokens, stopwords dropped — shared by `match` scoring.
+fn is_ponytail_skill(name: &str) -> bool {
+    name == "ponytail"
+}
+
+fn has_ponytail_trigger(tokens: &[String]) -> bool {
+    tokens.iter().any(|t| {
+        matches!(
+            t.as_str(),
+            "ponytail" | "lazy" | "yagni" | "simplest" | "minimal" | "shortest"
+        )
+    })
+}
+
 fn tokens(text: &str) -> Vec<String> {
-    const STOP: [&str; 12] = ["the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "with", "use"];
+    const STOP: [&str; 12] = [
+        "the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "with", "use",
+    ];
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() > 1 && !STOP.contains(w))
         .map(str::to_string)
         .collect()
+}
+
+fn do_not_use_tokens(description: &str) -> Vec<String> {
+    let lower = description.to_lowercase();
+    let Some((_, tail)) = lower.split_once("do not use") else {
+        return Vec::new();
+    };
+    tokens(tail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_ponytail_requires_explicit_trigger() {
+        let q = tokens("bug-hunt harness diagnostics for tool registration");
+        assert!(!has_ponytail_trigger(&q));
+        let q = tokens("ponytail audit this codebase for bloat");
+        assert!(has_ponytail_trigger(&q));
+        assert!(is_ponytail_skill("ponytail"));
+        assert!(!is_ponytail_skill("ponytail-audit"));
+    }
 }
 
 const HELP: &str = r#"

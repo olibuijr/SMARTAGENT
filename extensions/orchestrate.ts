@@ -1,16 +1,9 @@
 /** orchestrate — pi extension over the pure-Rust subagent fan-out binary. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { bin, makeRunner } from "./lib/common.ts";
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const BIN = join(ROOT, "target", "release", "orchestrate");
 
-function run(args: string[]): string {
-	try { return execFileSync(BIN, args, { encoding: "utf8", timeout: 600_000, cwd: ROOT }).trim(); }
-	catch (e: any) { return `error: ${e.stderr?.toString().trim() || e.message}`; }
-}
+const run = makeRunner(bin("orchestrate"), 30000);
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
