@@ -41,6 +41,23 @@ fn run(args: &[String]) -> Result<String, String> {
             let mut cdp = Cdp::connect(&base)?;
             cdp.snapshot_capped(mt, ml)
         }
+        Some("click") => {
+            let selector = args.get(1).ok_or("usage: sa-browser click <selector>")?;
+            let mut cdp = Cdp::connect(&base)?;
+            let r = cdp.click(selector)?;
+            Ok(format!("{r}\n{}", cdp.page_status()?))
+        }
+        Some("type") => {
+            let selector = args.get(1).ok_or("usage: sa-browser type <selector> <text> [--enter]")?;
+            let text = args.get(2).ok_or("usage: sa-browser type <selector> <text> [--enter]")?;
+            let mut cdp = Cdp::connect(&base)?;
+            let mut r = cdp.type_text(selector, text)?;
+            if args.iter().any(|a| a == "--enter") {
+                r.push_str("; ");
+                r.push_str(&cdp.press_enter(selector)?);
+            }
+            Ok(format!("{r}\n{}", cdp.page_status()?))
+        }
         Some("status") => {
             let mut cdp = Cdp::connect(&base)?;
             cdp.page_status()
@@ -51,7 +68,7 @@ fn run(args: &[String]) -> Result<String, String> {
             let cols = flag(args, "--cols").and_then(|s| s.parse().ok()).unwrap_or(80usize).max(10);
             let rows = flag(args, "--rows").and_then(|s| s.parse().ok()).unwrap_or(24usize).max(4);
             let device = flag(args, "--device").unwrap_or_else(|| "tablet".into());
-            let mode = art::Mode::parse(&flag(args, "--pixels").unwrap_or_else(|| "sextant".into()));
+            let mode = art::Mode::parse(&flag(args, "--pixels").unwrap_or_else(|| "braille".into()));
             let mut cdp = Cdp::connect(&base)?;
             // Default: tablet emulation (768 CSS px wide → responsive tablet
             // layout, dsf 2 for crisp minification) with the emulated height
@@ -82,7 +99,7 @@ fn run(args: &[String]) -> Result<String, String> {
             let path = args.get(1).ok_or("usage: sa-browser art <file.png> [--cols N --rows N] [--pixels half|quad|sextant]")?;
             let cols = flag(args, "--cols").and_then(|s| s.parse().ok()).unwrap_or(80usize);
             let rows = flag(args, "--rows").and_then(|s| s.parse().ok()).unwrap_or(24usize);
-            let mode = art::Mode::parse(&flag(args, "--pixels").unwrap_or_else(|| "sextant".into()));
+            let mode = art::Mode::parse(&flag(args, "--pixels").unwrap_or_else(|| "braille".into()));
             let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
             let img = png::decode(&bytes)?;
             let (lines, w, h) = art::render(&img, cols, rows, mode);
@@ -120,12 +137,14 @@ USAGE:
   sa-browser open <url>       navigate, return compact DOM snapshot
                               (bare hosts OK: visir.is → https://visir.is)
   sa-browser snapshot         DOM snapshot of the current page (no navigation)
+  sa-browser click <selector> click a CSS selector/link in the current page
+  sa-browser type <sel> <txt> fill an input/textarea; --enter submits
   sa-browser status           url \t title \t readyState (address-bar line)
   sa-browser pane [--url u] [--cols N --rows N] [--device tablet|none]
-                  [--pixels sextant|quad|half]
+                  [--pixels braille|sextant|quad|half]
                               status line + truecolor page render; default
                               emulates a tablet (768px, dsf 2) sized to fill
-                              the pane grid, sextant pixels (2x3 px/cell)
+                              the pane grid, braille pixels (2x4 px/cell)
   sa-browser art <file.png>   render a PNG file (debug, no Chrome)
   sa-browser probe            check the DevTools connection
 

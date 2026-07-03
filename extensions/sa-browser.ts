@@ -7,9 +7,8 @@
  * top-right, nonCapturing so chat keeps focus and the left half of the
  * viewport): address bar + loading status on top, page art below.
  *
- * Successor-in-waiting to the `browser` tool: both compose browser::cdp, so
- * its verbs (click/type/wait/scroll) port here later; then `browser` retires
- * and sa-browser takes the name.
+ * Also exposes browser-style click/type actions; when the pane is active they
+ * repaint it after the interaction so the visual surface stays current.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -49,7 +48,7 @@ let loadState = "idle"; // idle | loading | complete | interactive | error:<msg>
 let inFlight = false;
 let paneCols = 78;
 let deviceMode = "tablet"; // tablet (default) | none — passed to the binary
-let pixelMode = "sextant"; // sextant (2x3 px/cell, default) | quad | half
+let pixelMode = "braille"; // braille (2x4 px/cell, default) | sextant | quad | half
 
 function headerLines(width: number): string[] {
 	const inner = Math.max(10, width - 2);
@@ -158,14 +157,17 @@ export default function (pi: ExtensionAPI) {
 		name: "sa-browser",
 		label: "SA Browser",
 		description:
-			"Visual browser: drives real Chrome over CDP and renders the page as high-DPI half-block art in a right-side TUI pane (chat stays left). Actions: 'activate' opens the pane (optional url), 'deactivate' closes it, 'open' navigates and returns the DOM snapshot, 'snapshot' returns the current page's DOM snapshot, 'status' returns url/title/readyState, 'probe' checks DevTools. The pane shows an address bar and loading status and refreshes itself.",
+			"Visual browser: drives real Chrome over CDP and renders the page as high-DPI terminal art in a right-side TUI pane (chat stays left). Actions: 'activate' opens the pane (optional url), 'deactivate' closes it, 'open' navigates and returns the DOM snapshot, 'click' clicks a CSS selector/link, 'type' fills an input/textarea (optionally enter), 'snapshot' returns the current page's DOM snapshot, 'status' returns url/title/readyState, 'probe' checks DevTools. The pane shows an address bar and loading status and refreshes itself.",
 		parameters: {
 			type: "object",
 			properties: {
-				action: { type: "string", enum: ["activate", "deactivate", "open", "snapshot", "status", "probe"] },
+				action: { type: "string", enum: ["activate", "deactivate", "open", "click", "type", "snapshot", "status", "probe"] },
 				url: { type: "string", description: "URL to load (activate/open)" },
+				selector: { type: "string", description: "CSS selector for click/type" },
+				text: { type: "string", description: "Text to fill for type" },
+				enter: { type: "boolean", description: "Submit/press Enter after type" },
 				device: { type: "string", enum: ["tablet", "none"], description: "pane viewport emulation (default tablet: 768px responsive layout)" },
-				pixels: { type: "string", enum: ["sextant", "quad", "half"], description: "pane pixel density (default sextant: 2x3 px/cell; half = color-true 1x2)" },
+				pixels: { type: "string", enum: ["braille", "sextant", "quad", "half"], description: "pane pixel density (default braille: 2x4 px/cell; sextant = 2x3; half = color-true 1x2)" },
 				maxText: { type: "number", description: "snapshot body char cap (default 4000)" },
 				maxLinks: { type: "number", description: "snapshot link cap (default 40)" },
 			},
@@ -176,7 +178,7 @@ export default function (pi: ExtensionAPI) {
 			if (p.maxText != null) tail.push("--max-text", String(p.maxText));
 			if (p.maxLinks != null) tail.push("--max-links", String(p.maxLinks));
 			if (p.device === "tablet" || p.device === "none") deviceMode = p.device;
-			if (p.pixels === "sextant" || p.pixels === "quad" || p.pixels === "half") pixelMode = p.pixels;
+			if (p.pixels === "braille" || p.pixels === "sextant" || p.pixels === "quad" || p.pixels === "half") pixelMode = p.pixels;
 			switch (p.action) {
 				case "activate":
 					return { content: [{ type: "text", text: activate(ctx, p.url) }] };
@@ -194,6 +196,18 @@ export default function (pi: ExtensionAPI) {
 					const snap = runSync(["snapshot", ...tail]);
 					return { content: [{ type: "text", text: untrusted("WEB PAGE", plain(snap)) }] };
 				}
+				case "click": {
+					const r = plain(runSync(["click", p.selector ?? ""]));
+					if (handle) void repaint();
+					return { content: [{ type: "text", text: r }] };
+				}
+				case "type": {
+					const args = ["type", p.selector ?? "", p.text ?? ""];
+					if (p.enter) args.push("--enter");
+					const r = plain(runSync(args));
+					if (handle) void repaint();
+					return { content: [{ type: "text", text: r }] };
+				}
 				case "snapshot":
 					return { content: [{ type: "text", text: untrusted("WEB PAGE", plain(runSync(["snapshot", ...tail]))) }] };
 				case "status": {
@@ -209,9 +223,20 @@ export default function (pi: ExtensionAPI) {
 
 	// User-side toggle without a model round-trip.
 	pi.registerCommand("sab", {
-		description: "Toggle the sa-browser pane (usage: /sab [url])",
+		description: "Toggle/control the sa-browser pane (usage: /sab [url] | /sab click <selector> | /sab type <selector> <text>)",
 		handler: async (args: string, ctx: any) => {
-			const url = args.trim() || undefined;
+			const raw = args.trim();
+			if (raw.startsWith("click ")) {
+				void runAsync(["click", raw.slice(6).trim()]).then(() => repaint());
+				return;
+			}
+			if (raw.startsWith("type ")) {
+				const rest = raw.slice(5).trim();
+				const [selector = "", ...textParts] = rest.split(/\s+/);
+				void runAsync(["type", selector, textParts.join(" ")]).then(() => repaint());
+				return;
+			}
+			const url = raw || undefined;
 			if (handle && !url) deactivate();
 			else activate(ctx, url);
 		},
