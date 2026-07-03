@@ -29,13 +29,20 @@ back to device pixels before tapping.
 ## Build → install → launch the OS app
 
 ```sh
-# Build the APK (sccache MUST be disabled or dx's rustc probe fails):
+# Build the APK. TWO gotchas, both mandatory:
+#  1. sccache MUST be disabled or dx's rustc probe fails.
+#  2. dx defaults to x86_64 (emulator) → INSTALL_FAILED_NO_MATCHING_ABIS on the
+#     arm64 phone. MUST pass --target aarch64-linux-android.
 RUSTC_WRAPPER="" ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.0.12077973 \
-  dx build --platform android            # from os/
-padb install <path-to.apk>
-padb launch com.olibuijr.smartagent      # package from os Dioxus config
-padb log SMARTAGENT                       # watch app logs (android_logger tag)
+  dx build --platform android --target aarch64-linux-android   # from os/
+padb install os/target/dx/smartagent-os/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
+padb launch com.example.SmartagentOs     # dx's default id; set real one via Dioxus.toml [TODO]
+padb log SmartagentOs                     # watch app logs
 ```
+
+Verified 2026-07-03: phase-(a) shell installed, launched, and tap input
+registered (reactive counter incremented) on the CPH2645 — the full
+Rust→webview→touch→reactive-state loop works on real hardware.
 
 ## Live mirror for Óli
 
