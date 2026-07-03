@@ -16,10 +16,10 @@
 // Auto-activates in the TUI; `/team` toggles.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { BIN, ROOT, layout, vwidth } from "./lib/statusline-common.ts";
-const REFRESH_MS = 5000;
+const REFRESH_MS = 10000;
 const PANE_WIDTH = 58; // wide: pixel avatars + full card content
 
 const RESET = "\x1b[0m";
@@ -127,8 +127,13 @@ function humanTokens(raw: string): string {
 }
 
 function refresh(): void {
-	try {
-		const out = execFileSync(BIN("gateway"), ["agents"], { timeout: 3000, encoding: "utf8" });
+	execFile(BIN("gateway"), ["agents"], { timeout: 3000, encoding: "utf8" }, (err, out) => {
+		if (err) {
+			agents = [];
+			gatewayUp = false;
+			tuiRef?.requestRender();
+			return;
+		}
 		agents = out
 			.split("\n")
 			.filter((l) => l.includes("\t"))
@@ -148,12 +153,14 @@ function refresh(): void {
 			// working first, then by name — the active agents get the eye
 			.sort((a, b) => Number(b.state === "working") - Number(a.state === "working") || a.name.localeCompare(b.name));
 		gatewayUp = true;
-	} catch {
-		agents = [];
-		gatewayUp = false;
-	}
-	try {
-		const out = execFileSync(BIN("workflow"), ["runs", "--live", "--db", join(ROOT, "data", "workflow.semdb"), "--tasks-db", join(ROOT, "data", "tasks.semdb")], { timeout: 3000, encoding: "utf8" });
+		tuiRef?.requestRender();
+	});
+	execFile(BIN("workflow"), ["runs", "--live", "--db", join(ROOT, "data", "workflow.semdb"), "--tasks-db", join(ROOT, "data", "tasks.semdb")], { timeout: 3000, encoding: "utf8" }, (err, out) => {
+		if (err) {
+			runs = [];
+			tuiRef?.requestRender();
+			return;
+		}
 		runs = out
 			.split("\n")
 			.filter((l) => l.includes("\t") && !/\t(done|aborted)\t/.test(l))
@@ -162,9 +169,8 @@ function refresh(): void {
 				return { id: id ?? "?", def: def ?? "", step: (step ?? "").replace("step ", ""), task: (task ?? "").trim() };
 			})
 			.slice(0, 4);
-	} catch {
-		runs = [];
-	}
+		tuiRef?.requestRender();
+	});
 }
 
 const vlen = (s: string) => vwidth(s); // cell-accurate (kitty wcwidth)
@@ -382,7 +388,6 @@ export default function (pi: ExtensionAPI) {
 		refresh();
 		if (!timer) timer = setInterval(() => {
 			refresh();
-			tuiRef?.requestRender();
 		}, REFRESH_MS);
 		// animation frames: cheap (cache-only render + pi-tui diffing), no
 		// process spawns. Unconditional — the idle breathing pulse and the
