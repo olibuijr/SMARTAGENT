@@ -13,8 +13,15 @@ pub fn vec_to_json(v: &[f32]) -> String {
         if i > 0 {
             out.push(',');
         }
-        // {} on f32 emits the shortest decimal that round-trips through f32.
-        out.push_str(&x.to_string());
+        // {} on f32 emits the shortest decimal that round-trips through f32 —
+        // but NaN/±inf stringify as bare tokens that are NOT valid JSON and
+        // would make the whole request unparseable. Real embeddings are always
+        // finite; coerce any non-finite value to 0 to keep the line valid JSON.
+        if x.is_finite() {
+            out.push_str(&x.to_string());
+        } else {
+            out.push('0');
+        }
     }
     out.push(']');
     out
@@ -79,4 +86,28 @@ pub fn ok_count(n: usize) -> String {
 /// Error response.
 pub fn err_line(msg: &str) -> String {
     format!("{{\"ok\":false,\"error\":\"{}\"}}", json::escape(msg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vectors_always_serialize_to_valid_json() {
+        // Non-finite floats must not produce bare NaN/inf tokens that break the
+        // JSON line protocol; they coerce to 0 and stay parseable + round-trip.
+        let v = vec![0.5f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.25];
+        let line = format!("{{\"vector\":{}}}", vec_to_json(&v));
+        let parsed = json::parse(&line).expect("must be valid JSON");
+        let back = json_to_vec(parsed.get("vector"));
+        assert_eq!(back, vec![0.5, 0.0, 0.0, 0.0, -1.25]);
+    }
+
+    #[test]
+    fn finite_vectors_round_trip_exactly() {
+        let v = vec![0.1f32, 0.2, 0.30000001, -0.99999994];
+        let line = format!("{{\"vector\":{}}}", vec_to_json(&v));
+        let parsed = json::parse(&line).unwrap();
+        assert_eq!(json_to_vec(parsed.get("vector")), v);
+    }
 }

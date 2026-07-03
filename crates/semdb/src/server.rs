@@ -236,8 +236,14 @@ fn parse_rows(req: &Value) -> Result<Vec<(String, String, Vec<f32>)>, String> {
 /// Get an open handle for `db`, opening the file once if it is not cached.
 fn handle(reg: &Registry, db: &str) -> Result<DbHandle, String> {
     let key = normalize(db);
-    if let Some(h) = rlock_reg(reg).get(&key) {
-        return Ok(h.clone());
+    {
+        // Scoped so the read guard is released BEFORE we request the write
+        // lock below — std RwLock is not upgradeable, and holding a read guard
+        // while acquiring the write guard on the same lock self-deadlocks.
+        let map = rlock_reg(reg);
+        if let Some(h) = map.get(&key) {
+            return Ok(h.clone());
+        }
     }
     let mut map = wlock_reg(reg);
     if let Some(h) = map.get(&key) {
@@ -261,17 +267,26 @@ fn create_db(reg: &Registry, key: &Path) -> Result<(), String> {
 
 /// Canonical registry key so `data/x.semdb` and its absolute form collapse to
 /// one handle (two handles for one file would be two writers → corruption).
+/// Must be STABLE across the file's creation: `create` runs before the file
+/// exists, `put` after — so we canonicalize the PARENT dir (which exists in
+/// both cases) and append the file name, rather than the whole path (which
+/// canonicalizes differently pre/post creation). For a regular file this
+/// equals `canonicalize(full)`; only a symlinked db path (never used) differs.
 fn normalize(path: &str) -> PathBuf {
     let p = Path::new(path);
-    if let Ok(c) = std::fs::canonicalize(p) {
-        return c;
-    }
-    if p.is_absolute() {
+    let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
         std::env::current_dir()
             .map(|d| d.join(p))
             .unwrap_or_else(|_| p.to_path_buf())
+    };
+    match (abs.parent(), abs.file_name()) {
+        (Some(parent), Some(name)) => match std::fs::canonicalize(parent) {
+            Ok(cp) => cp.join(name),
+            Err(_) => abs.clone(),
+        },
+        _ => abs,
     }
 }
 

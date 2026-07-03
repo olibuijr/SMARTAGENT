@@ -54,7 +54,9 @@ fn cli_roundtrip() {
         .spawn()
         .unwrap();
     for _ in 0..300 {
-        if sock.exists() {
+        // Poll an actual connect, not just sock.exists(): the file appears at
+        // bind but this proves the daemon is accepting — no load-sensitive race.
+        if std::os::unix::net::UnixStream::connect(&sock).is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -156,7 +158,9 @@ fn kill9_recovery() {
         .spawn()
         .unwrap();
     for _ in 0..300 {
-        if sock.exists() {
+        // Poll an actual connect, not just sock.exists(): the file appears at
+        // bind but this proves the daemon is accepting — no load-sensitive race.
+        if std::os::unix::net::UnixStream::connect(&sock).is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
