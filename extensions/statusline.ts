@@ -98,7 +98,8 @@ const REFRESH_AFTER: Record<string, string[]> = {
 };
 
 const CLEAR_AFTER_MS = 5000;
-const REFRESH_MS = 30_000;
+const PROBE_DEBOUNCE_MS = 1500;
+const REFRESH_MS = 60_000;
 
 export default function (pi: ExtensionAPI) {
 	const started = new Map<string, number>(); // toolCallId → start ms
@@ -106,6 +107,8 @@ export default function (pi: ExtensionAPI) {
 	const painted = new Map<string, string>(); // segment key → colored text
 	let ui: any; // latest ctx.ui, captured from events (only used when hasUI)
 	let timer: ReturnType<typeof setInterval> | undefined;
+	let probeTimer: ReturnType<typeof setTimeout> | undefined;
+	const pendingProbeKeys = new Set<string>();
 
 	// Visible width of a cell: ANSI codes count 0, wide glyphs 2. Wide follows
 	// wcwidth/kitty: East-Asian-Wide + DEFAULT-EMOJI-PRESENTATION ranges only.
@@ -189,6 +192,17 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	function scheduleProbe(keys: string[]) {
+		for (const key of keys) pendingProbeKeys.add(key);
+		if (probeTimer) return;
+		probeTimer = setTimeout(() => {
+			probeTimer = undefined;
+			const keys = Array.from(pendingProbeKeys);
+			pendingProbeKeys.clear();
+			probe(keys);
+		}, PROBE_DEBOUNCE_MS);
+	}
+
 	const probeAll = () => probe(SEGMENTS.map((s) => s.key));
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -202,6 +216,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async () => {
 		if (timer) clearInterval(timer);
+		if (probeTimer) clearTimeout(probeTimer);
+		pendingProbeKeys.clear();
 		process.stdout.off("resize", render);
 		process.off("SIGWINCH", render);
 		timer = undefined;
@@ -232,6 +248,6 @@ export default function (pi: ExtensionAPI) {
 			setTimeout(() => ctx.ui.setStatus(event.toolName, undefined), CLEAR_AFTER_MS),
 		);
 		const refresh = REFRESH_AFTER[event.toolName];
-		if (refresh) probe(refresh);
+		if (refresh) scheduleProbe(refresh);
 	});
 }
