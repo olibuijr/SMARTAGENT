@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Mutex;
 use tasks::cli;
 
@@ -18,6 +19,41 @@ fn s(v: &[&str], db: &str) -> Vec<String> {
     a.push("--db".into());
     a.push(db.into());
     a
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {:?}: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn git_repo(name: &str) -> PathBuf {
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    Command::new("git")
+        .args(["init", "-b", "main"])
+        .arg(&d)
+        .output()
+        .unwrap();
+    git(&d, &["config", "user.email", "test@example.invalid"]);
+    git(&d, &["config", "user.name", "Test"]);
+    std::fs::write(d.join("README.md"), "base\n").unwrap();
+    std::fs::write(d.join(".gitignore"), "worktrees/\n").unwrap();
+    git(&d, &["add", "."]);
+    git(&d, &["commit", "-m", "base"]);
+    d
 }
 
 #[test]
@@ -65,6 +101,60 @@ fn kanban_flow_wip_and_done_gates() {
     );
     let m = cli::run(&s(&["metrics"], &db)).unwrap();
     assert!(m.contains("throughput: 1 done"), "{m}");
+}
+
+#[test]
+fn done_cargo_verification_runs_from_main_checkout_before_marking_done() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var("SMARTAGENT_WORKTREE_DISABLE");
+    std::env::set_var("SMARTAGENT_WORKTREE_STRICT", "1");
+    let root = git_repo("tasks-done-main-verification");
+    std::env::set_var("SMARTAGENT_WORKTREE_ROOT", &root);
+    let db = root.join("tasks.semdb").display().to_string();
+
+    let bin = root.join("fake-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let stamp = root.join("cargo-cwd.txt");
+    let cargo = bin.join("cargo");
+    std::fs::write(
+        &cargo,
+        format!("#!/bin/sh\npwd > '{}'\nexit 0\n", stamp.display()),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    std::env::set_var("PATH", format!("{}:{}", bin.display(), old_path));
+
+    cli::run(&s(
+        &[
+            "add",
+            "verify from main",
+            "--col",
+            "ready",
+            "--criteria",
+            "cargo test",
+        ],
+        &db,
+    ))
+    .unwrap();
+    let doing = cli::run(&s(&["move", "T-1", "doing"], &db)).unwrap();
+    assert!(doing.contains("worktrees/T-1"), "{doing}");
+    std::fs::write(root.join("worktrees/T-1/fix.txt"), "fix\n").unwrap();
+    cli::run(&s(&["crit", "check", "T-1", "1"], &db)).unwrap();
+    let done = cli::run(&s(&["done", "T-1"], &db)).unwrap();
+    assert!(done.contains("→ done"), "{done}");
+    assert_eq!(
+        std::fs::canonicalize(std::fs::read_to_string(&stamp).unwrap().trim()).unwrap(),
+        std::fs::canonicalize(&root).unwrap()
+    );
+
+    std::env::set_var("PATH", old_path);
+    std::env::set_var("SMARTAGENT_WORKTREE_DISABLE", "1");
+    std::env::remove_var("SMARTAGENT_WORKTREE_STRICT");
 }
 
 #[test]
@@ -142,7 +232,7 @@ fn block_and_statusline_levels() {
 
 #[test]
 fn done_runs_checked_cargo_criteria() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var("SMARTAGENT_TASKS_DONE_TIMEOUT_SECS");
     let db = db("tasks-done-cargo-check");
     cli::run(&s(
@@ -166,7 +256,7 @@ fn done_runs_checked_cargo_criteria() {
 
 #[test]
 fn done_cargo_criteria_are_timeout_guarded() {
-    let _guard = ENV_LOCK.lock().unwrap();
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let scratch = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/test-scratch")
         .join("tasks-done-cargo-timeout");

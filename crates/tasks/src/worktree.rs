@@ -18,33 +18,73 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-fn strict() -> bool { std::env::var("SMARTAGENT_WORKTREE_STRICT").is_ok() }
-fn disabled() -> bool { std::env::var("SMARTAGENT_WORKTREE_DISABLE").is_ok() }
+fn strict() -> bool {
+    std::env::var("SMARTAGENT_WORKTREE_STRICT").is_ok()
+}
+fn disabled() -> bool {
+    std::env::var("SMARTAGENT_WORKTREE_DISABLE").is_ok()
+}
 
 fn repo_root() -> Result<PathBuf, String> {
-    if let Ok(p) = std::env::var("SMARTAGENT_WORKTREE_ROOT") { return Ok(PathBuf::from(p)); }
-    let out = Command::new("git").args(["rev-parse", "--show-toplevel"]).output().map_err(|e| e.to_string())?;
-    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    if let Ok(p) = std::env::var("SMARTAGENT_WORKTREE_ROOT") {
+        return Ok(PathBuf::from(p));
+    }
+    let out = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
     Ok(PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
 }
 
 fn run(root: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git").arg("-C").arg(root).args(args).output().map_err(|e| e.to_string())?;
-    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn task_branch(id: &str) -> String { format!("task/{id}") }
-fn task_dir(root: &Path, id: &str) -> PathBuf { root.join("worktrees").join(id) }
+fn task_branch(id: &str) -> String {
+    format!("task/{id}")
+}
+fn task_dir(root: &Path, id: &str) -> PathBuf {
+    root.join("worktrees").join(id)
+}
 
 pub fn ensure_for_doing(id: &str) -> Result<String, String> {
-    if disabled() { return Ok(String::new()); }
-    let root = match repo_root() { Ok(r) => r, Err(e) if strict() => return Err(e), Err(_) => return Ok(String::new()) };
+    if disabled() {
+        return Ok(String::new());
+    }
+    let root = match repo_root() {
+        Ok(r) => r,
+        Err(e) if strict() => return Err(e),
+        Err(_) => return Ok(String::new()),
+    };
     let dir = task_dir(&root, id);
-    if dir.exists() { return Ok(format!("\nworktree: {}", dir.display())); }
+    if dir.exists() {
+        return Ok(format!("\nworktree: {}", dir.display()));
+    }
     fs::create_dir_all(root.join("worktrees")).map_err(|e| e.to_string())?;
     let branch = task_branch(id);
-    match run(&root, &["worktree", "add", "-B", &branch, dir.to_str().unwrap_or(""), "HEAD"]) {
+    match run(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-B",
+            &branch,
+            dir.to_str().unwrap_or(""),
+            "HEAD",
+        ],
+    ) {
         Ok(_) => Ok(format!("\nworktree: {} on {branch}", dir.display())),
         Err(e) if strict() => Err(format!("worktree create failed: {e}")),
         Err(e) => Ok(format!("\nworktree warning: {e}")),
@@ -54,7 +94,9 @@ pub fn ensure_for_doing(id: &str) -> Result<String, String> {
 /// True if a live worktree exists for this task (isolation on + dir present).
 /// The done-gate uses this so non-isolated setups skip the change check.
 pub fn has_worktree(id: &str) -> bool {
-    if disabled() { return false; }
+    if disabled() {
+        return false;
+    }
     match repo_root() {
         Ok(root) => task_dir(&root, id).exists(),
         Err(_) => false,
@@ -68,25 +110,46 @@ pub fn has_worktree(id: &str) -> bool {
 pub fn changed(id: &str) -> Result<bool, String> {
     let root = repo_root()?;
     let dir = task_dir(&root, id);
-    if !dir.exists() { return Ok(false); }
+    if !dir.exists() {
+        return Ok(false);
+    }
     // Uncommitted edits in the worktree working directory.
-    if run(&dir, &["status", "--porcelain"]).map(|s| !s.trim().is_empty()).unwrap_or(false) {
+    if run(&dir, &["status", "--porcelain"])
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+    {
         return Ok(true);
     }
     // Commits on the task branch beyond the base (checked-out) branch.
     let base = run(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|_| "main".into());
     let branch = task_branch(id);
-    let ahead = run(&root, &["rev-list", "--count", &format!("{base}..{branch}")]).ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
-        .unwrap_or(0);
+    let ahead = run(
+        &root,
+        &["rev-list", "--count", &format!("{base}..{branch}")],
+    )
+    .ok()
+    .and_then(|s| s.trim().parse::<u32>().ok())
+    .unwrap_or(0);
     Ok(ahead > 0)
 }
 
 pub fn finish_done(id: &str) -> Result<String, String> {
-    if disabled() { return Ok(String::new()); }
-    let root = match repo_root() { Ok(r) => r, Err(e) if strict() => return Err(e), Err(_) => return Ok(String::new()) };
+    if disabled() {
+        return Ok(String::new());
+    }
+    let root = match repo_root() {
+        Ok(r) => r,
+        Err(e) if strict() => return Err(e),
+        Err(_) => return Ok(String::new()),
+    };
+    finish_done_at_root(id, &root)
+}
+
+fn finish_done_at_root(id: &str, root: &Path) -> Result<String, String> {
     let dir = task_dir(&root, id);
-    if !dir.exists() { return Ok(String::new()); }
+    if !dir.exists() {
+        return Ok(String::new());
+    }
     let branch = task_branch(id);
     let base = run(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|_| "main".into());
     let _ = run(&dir, &["add", "-A"]);
@@ -114,25 +177,27 @@ pub fn finish_done(id: &str) -> Result<String, String> {
             // from {base} under the lock, so nothing else could have moved
             // {base} meanwhile), so this can only ever fast-forward — it
             // cannot conflict and cannot leave residue.
-            if let Err(e) = run(&root, &["merge", "--ff-only", &sha]) {
-                let msg = format!(
+            if let Err(e) = run(root, &["merge", "--ff-only", &sha]) {
+                return Err(format!(
                     "\nworktree: fast-forward of {base} to merged {branch} ({sha}) failed — base left untouched, worktree/branch preserved for manual merge ({e})"
-                );
-                return if strict() { Err(msg) } else { Ok(msg) };
+                ));
             }
-            let _ = run(&root, &["worktree", "remove", "--force", dir.to_str().unwrap_or("")]);
-            let _ = run(&root, &["branch", "-D", &branch]);
+            if let Err(e) = assert_branch_merged(root, &base, &branch) {
+                return Err(format!(
+                    "\nworktree: done refused for {branch} — branch commits are not contained in {base}; worktree/branch preserved for manual merge ({e})"
+                ));
+            }
+            let _ = run(root, &["worktree", "remove", "--force", dir.to_str().unwrap_or("")]);
+            let _ = run(root, &["branch", "-D", &branch]);
             Ok(format!("\nworktree: merged {branch} and removed {}", dir.display()))
         }
         Ok(MergeOutcome::Conflict(e)) => {
-            let msg = format!(
+            Err(format!(
                 "\nworktree: MERGE CONFLICT for {branch} — aborted to protect {base}; worktree/branch preserved for manual merge ({e})"
-            );
-            if strict() { Err(msg) } else { Ok(msg) }
+            ))
         }
         Err(e) => {
-            let msg = format!("\nworktree: merge of {branch} failed — worktree/branch preserved for manual merge ({e})");
-            if strict() { Err(msg) } else { Ok(msg) }
+            Err(format!("\nworktree: merge of {branch} failed — worktree/branch preserved for manual merge ({e})"))
         }
     }
 }
@@ -175,8 +240,15 @@ fn merge_isolated(root: &Path, base: &str, branch: &str) -> Result<MergeOutcome,
     outcome
 }
 
+fn assert_branch_merged(root: &Path, base: &str, branch: &str) -> Result<(), String> {
+    run(root, &["merge-base", "--is-ancestor", branch, base]).map(|_| ())
+}
+
 fn merge_tmp_dir(root: &Path, branch: &str) -> PathBuf {
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let safe = branch.replace('/', "_");
     root.join("worktrees").join(format!(".merge-{safe}-{ts}"))
 }
@@ -207,7 +279,9 @@ impl MergeLock {
                         continue;
                     }
                     if Instant::now() >= deadline {
-                        return Err(format!("held by another process after {MERGE_LOCK_WAIT_SECS}s wait"));
+                        return Err(format!(
+                            "held by another process after {MERGE_LOCK_WAIT_SECS}s wait"
+                        ));
                     }
                     std::thread::sleep(Duration::from_millis(MERGE_LOCK_POLL_MS));
                 }
@@ -218,7 +292,9 @@ impl MergeLock {
 }
 
 impl Drop for MergeLock {
-    fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 fn lock_is_stale(path: &Path) -> bool {
@@ -234,27 +310,45 @@ pub fn current_task_path(id: &str) -> Result<PathBuf, String> {
     Ok(task_dir(&repo_root()?, id))
 }
 
+pub fn main_checkout_path() -> Result<PathBuf, String> {
+    repo_root()
+}
+
 pub fn path_allowed_for_task(id: &str, path: &Path) -> Result<bool, String> {
     let dir = current_task_path(id)?;
-    if path.starts_with(&dir) { return Ok(true); }
+    if path.starts_with(&dir) {
+        return Ok(true);
+    }
     let canon_dir = dir.canonicalize().unwrap_or(dir);
-    Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).starts_with(canon_dir))
+    Ok(path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .starts_with(canon_dir))
 }
 
 pub fn reap_abandoned(max_age_secs: u64) -> Result<String, String> {
     let root = repo_root()?;
     let dir = root.join("worktrees");
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
     let mut reaped = 0usize;
     if let Ok(entries) = fs::read_dir(&dir) {
         for e in entries.flatten() {
             let p = e.path();
-            let stale = e.metadata().and_then(|m| m.modified()).ok()
+            let stale = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| now.saturating_sub(d.as_secs()) >= max_age_secs)
                 .unwrap_or(false);
             if stale {
-                let _ = run(&root, &["worktree", "remove", "--force", p.to_str().unwrap_or("")]);
+                let _ = run(
+                    &root,
+                    &["worktree", "remove", "--force", p.to_str().unwrap_or("")],
+                );
                 reaped += 1;
             }
         }
