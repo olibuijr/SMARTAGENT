@@ -45,17 +45,24 @@ let artLines: string[] = [];
 let addressUrl = "";
 let addressTitle = "";
 let loadState = "idle"; // idle | loading | complete | interactive | error:<msg>
+let addressEditing = false;
+let addressDraft = "";
 let inFlight = false;
 let paneCols = 78;
 let deviceMode = "tablet"; // tablet (default) | none — passed to the binary
 let pixelMode = "braille"; // braille (2x4 px/cell, default) | sextant | quad | half
+let ctxRef: any;
+let unlistenF2: (() => void) | undefined;
+const F2_KEYS = new Set(["\x1bOQ", "\x1b[12~", "\x1b[[B"]);
+const isF2 = (data: string): boolean => F2_KEYS.has(data);
 
 function headerLines(width: number): string[] {
 	const inner = Math.max(10, width - 2);
-	const spin = loadState === "loading" ? "⏳" : loadState.startsWith("error") ? "✖" : "●";
-	const state = loadState === "loading" ? "loading…" : loadState.startsWith("error") ? loadState : `${loadState}`;
-	const url = addressUrl || "(no page)";
-	const bar = ` ${spin} ${url}`.slice(0, inner);
+	const spin = loadState === "loading" ? "⏳" : loadState.startsWith("error") ? "✖" : addressEditing ? "⌨" : "●";
+	const state = addressEditing ? "enter: go • esc: cancel" : loadState === "loading" ? "loading…" : loadState.startsWith("error") ? loadState : `${loadState} • F2: address`;
+	const url = addressEditing ? addressDraft : addressUrl || "(no page)";
+	const cursor = addressEditing ? "▌" : "";
+	const bar = ` ${spin} ${url}${cursor}`.slice(0, inner);
 	const sub = `   ${addressTitle}`.slice(0, inner);
 	return [
 		bold(`┌${"─".repeat(inner)}┐`.slice(0, width)),
@@ -94,6 +101,47 @@ async function repaint(navigateUrl?: string) {
 	tuiRef?.requestRender();
 }
 
+function beginAddressEdit(ctx: any): void {
+	if (!handle) activate(ctx);
+	addressEditing = true;
+	addressDraft = addressUrl || "";
+	if (handle?.focus) handle.focus();
+	tuiRef?.requestRender();
+}
+
+function finishAddressEdit(commit: boolean): void {
+	const url = addressDraft.trim();
+	addressEditing = false;
+	addressDraft = "";
+	if (handle?.unfocus) handle.unfocus();
+	if (commit && url) void repaint(url);
+	else tuiRef?.requestRender();
+}
+
+function handleAddressInput(data: string): void {
+	if (isF2(data)) {
+		finishAddressEdit(true);
+		return;
+	}
+	if (data === "\r" || data === "\n" || data === "\r\n") {
+		finishAddressEdit(true);
+		return;
+	}
+	if (data === "\x1b") {
+		finishAddressEdit(false);
+		return;
+	}
+	if (data === "\x7f" || data === "\b") {
+		addressDraft = addressDraft.slice(0, -1);
+		tuiRef?.requestRender();
+		return;
+	}
+	if (data.length === 1 && data >= " " && data !== "\x7f") {
+		addressDraft += data;
+		tuiRef?.requestRender();
+	}
+}
+
 function deactivate() {
 	if (timer) clearInterval(timer);
 	timer = undefined;
@@ -103,9 +151,12 @@ function deactivate() {
 	finish = undefined;
 	artLines = [];
 	loadState = "idle";
+	addressEditing = false;
+	addressDraft = "";
 }
 
 function activate(ctx: any, url?: string): string {
+	ctxRef = ctx;
 	if (ctx.mode !== "tui") {
 		return "sa-browser pane needs the interactive TUI; use action 'open' or 'snapshot' for text output here.";
 	}
@@ -128,6 +179,9 @@ function activate(ctx: any, url?: string): string {
 						}
 						return [...headerLines(width), ...artLines];
 					},
+					handleInput(data: string) {
+						if (addressEditing) handleAddressInput(data);
+					},
 					invalidate() {},
 				};
 			},
@@ -141,7 +195,8 @@ function activate(ctx: any, url?: string): string {
 				}),
 				onHandle: (h: any) => {
 					handle = h;
-					if (h.isFocused?.()) h.unfocus?.(); // chat keeps the keyboard
+					if (addressEditing) h.focus?.();
+					else if (h.isFocused?.()) h.unfocus?.(); // chat keeps the keyboard
 				},
 			},
 		)
@@ -152,12 +207,22 @@ function activate(ctx: any, url?: string): string {
 	return "sa-browser pane activated (right 50%, chat keeps the left)" + (url ? `; loading ${url}` : "");
 }
 
+function toggleFromF2(ctx: any): void {
+	if (!handle) {
+		activate(ctx);
+		beginAddressEdit(ctx);
+		return;
+	}
+	if (addressEditing) finishAddressEdit(true);
+	else beginAddressEdit(ctx);
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "sa-browser",
 		label: "SA Browser",
 		description:
-			"Visual browser: drives real Chrome over CDP and renders the page as high-DPI terminal art in a right-side TUI pane (chat stays left). Actions: 'activate' opens the pane (optional url), 'deactivate' closes it, 'open' navigates and returns the DOM snapshot, 'click' clicks a CSS selector/link, 'type' fills an input/textarea (optionally enter), 'snapshot' returns the current page's DOM snapshot, 'status' returns url/title/readyState, 'probe' checks DevTools. The pane shows an address bar and loading status and refreshes itself.",
+			"Visual browser: drives real Chrome over CDP and renders the page as high-DPI terminal art in a right-side TUI pane (chat stays left). Actions: 'activate' opens the pane (optional url), 'deactivate' closes it, 'open' navigates and returns the DOM snapshot, 'click' clicks a CSS selector/link, 'type' fills an input/textarea (optionally enter), 'snapshot' returns the current page's DOM snapshot, 'status' returns url/title/readyState, 'probe' checks DevTools. F2 opens/focuses the pane address bar; Enter navigates and Esc cancels. The pane shows an address bar and loading status and refreshes itself.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -223,9 +288,13 @@ export default function (pi: ExtensionAPI) {
 
 	// User-side toggle without a model round-trip.
 	pi.registerCommand("sab", {
-		description: "Toggle/control the sa-browser pane (usage: /sab [url] | /sab click <selector> | /sab type <selector> <text>)",
+		description: "Toggle/control the sa-browser pane (usage: /sab [url] | /sab address | /sab click <selector> | /sab type <selector> <text>)",
 		handler: async (args: string, ctx: any) => {
 			const raw = args.trim();
+			if (raw === "address") {
+				beginAddressEdit(ctx);
+				return;
+			}
 			if (raw.startsWith("click ")) {
 				void runAsync(["click", raw.slice(6).trim()]).then(() => repaint());
 				return;
@@ -242,5 +311,21 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("session_shutdown", async () => deactivate());
+	pi.on("session_start", async (_e: unknown, ctx: any) => {
+		ctxRef = ctx;
+		if (ctx.mode !== "tui") return;
+		if (!unlistenF2) {
+			unlistenF2 = ctx.ui.onTerminalInput((data: string) => {
+				if (!isF2(data)) return undefined;
+				toggleFromF2(ctx);
+				return { consume: true };
+			});
+		}
+	});
+
+	pi.on("session_shutdown", async () => {
+		unlistenF2?.();
+		unlistenF2 = undefined;
+		deactivate();
+	});
 }
