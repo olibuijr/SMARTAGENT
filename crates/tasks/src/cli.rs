@@ -67,7 +67,7 @@ fn notify_task_created(t: &Task) -> String {
     }
     let text = task_created_notification_text(t);
     match Command::new("target/release/telegram")
-        .args(["broadcast", "--text", &text])
+        .args(["broadcast", "--kind", "task", "--text", &text])
         .output()
     {
         Ok(out) if out.status.success() => {

@@ -333,15 +333,15 @@ pub(crate) fn progress_scope_key(chat: &str, thread: &str) -> String {
 }
 
 pub(crate) fn should_emit_progress(last_ms: Option<u128>, now_ms: u128) -> bool {
-    should_emit_progress_for_verbosity(TelegramVerbosity::Verbose, last_ms, now_ms)
+    should_emit_progress_for_verbosity(VerbosityLevel::Verbose, last_ms, now_ms)
 }
 
 pub(crate) fn should_emit_progress_for_verbosity(
-    level: TelegramVerbosity,
+    level: VerbosityLevel,
     last_ms: Option<u128>,
     now_ms: u128,
 ) -> bool {
-    if level == TelegramVerbosity::Quiet || level == TelegramVerbosity::Normal {
+    if level == VerbosityLevel::Quiet || level == VerbosityLevel::Normal {
         return false;
     }
     const MIN_PROGRESS_EDIT_MS: u128 = 1_500;
@@ -368,11 +368,11 @@ pub(crate) fn progress_event_for_stream_line(line: &str) -> ProgressEvent {
 }
 
 pub(crate) fn progress_frame(event: ProgressEvent, body: &str) -> String {
-    progress_frame_for_verbosity(TelegramVerbosity::Debug, event, body)
+    progress_frame_for_verbosity(VerbosityLevel::Debug, event, body)
 }
 
 pub(crate) fn progress_frame_for_verbosity(
-    level: TelegramVerbosity,
+    level: VerbosityLevel,
     event: ProgressEvent,
     body: &str,
 ) -> String {
@@ -380,9 +380,9 @@ pub(crate) fn progress_frame_for_verbosity(
         return clip_tg(body);
     }
     match level {
-        TelegramVerbosity::Quiet | TelegramVerbosity::Normal => String::new(),
-        TelegramVerbosity::Verbose => clip_tg(event.telegram_message()),
-        TelegramVerbosity::Debug => {
+        VerbosityLevel::Quiet | VerbosityLevel::Normal => String::new(),
+        VerbosityLevel::Verbose => clip_tg(event.telegram_message()),
+        VerbosityLevel::Debug => {
             let safe = sanitize_progress_body(body);
             if safe.is_empty() {
                 clip_tg(event.telegram_message())
@@ -417,14 +417,19 @@ pub(crate) fn stream_reply(
 ) -> Result<(), String> {
     let token = bot_token()?;
     let prompt = build_gateway_prompt(from, user, text, chat, thread);
+    let verbosity = verbosity(chat, thread, user);
+    let show_progress = verbosity >= VerbosityLevel::Normal;
     let mid = send_message_retry(
         &token,
         chat,
-        ProgressEvent::Planning.telegram_message(),
+        if show_progress {
+            ProgressEvent::Planning.telegram_message()
+        } else {
+            "Working…"
+        },
         false,
     )?;
     let stream_started = std::time::Instant::now();
-    let verbosity = verbosity_preference(chat, thread);
     let mut tool_markers = 0usize;
     let progress_scope = progress_scope_key(chat, thread);
     eprintln!("[tg] progress scope {progress_scope}: planning");
@@ -486,7 +491,7 @@ pub(crate) fn stream_reply(
                     "",
                 );
                 eprintln!("[tg] tool marker scope={chat}/{thread} marker={status}");
-                if verbosity >= TelegramVerbosity::Verbose {
+                if verbosity >= VerbosityLevel::Verbose {
                     let preview = stream_preview(&latest, &status);
                     let _ = edit_message_retry(&token, chat, mid, &clip_tg(&preview), false);
                     shown = preview;

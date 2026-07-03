@@ -2,8 +2,7 @@ use super::{
     build_gateway_prompt, chunks, command_help, command_menu_body, progress_event_for_stream_line,
     progress_frame, progress_frame_for_verbosity, progress_scope_key, sanitize_progress_body,
     should_emit_progress, should_emit_progress_for_verbosity, simulate_stream_frames,
-    slash_command, slash_name, streaming_preview, ProgressEvent, TelegramVerbosity,
-    TELEGRAM_COMMANDS,
+    slash_command, slash_name, streaming_preview, ProgressEvent, VerbosityLevel, TELEGRAM_COMMANDS,
 };
 
 #[test]
@@ -227,53 +226,52 @@ fn verbosity_command_is_listed_and_scope_local() {
     let path = dir.join("telegram-verbosity-test.semdb");
     let _ = std::fs::remove_file(&path);
     let mut db = semdb::storage::Db::create(&path).unwrap();
-    super::set_verbosity_preference_in_db(&mut db, "chat-a", "main", TelegramVerbosity::Debug)
-        .unwrap();
+    super::set_verbosity_in_db(&mut db, "chat-a", "main", "u1", VerbosityLevel::Debug).unwrap();
     assert_eq!(
-        super::verbosity_from_db(&db, "chat-a", "main"),
-        TelegramVerbosity::Debug
+        super::verbosity_from_db(&db, "chat-a", "main", "u1"),
+        VerbosityLevel::Debug
     );
     assert_eq!(
-        super::verbosity_from_db(&db, "chat-a", "topic-2"),
-        TelegramVerbosity::Normal
+        super::verbosity_from_db(&db, "chat-a", "topic-2", "u1"),
+        VerbosityLevel::Normal
     );
 }
 
 #[test]
 fn verbosity_controls_progress_and_sanitizes_debug_body() {
     assert!(!should_emit_progress_for_verbosity(
-        TelegramVerbosity::Quiet,
+        VerbosityLevel::Quiet,
         None,
         10_000
     ));
     assert!(!should_emit_progress_for_verbosity(
-        TelegramVerbosity::Normal,
+        VerbosityLevel::Normal,
         None,
         10_000
     ));
     assert!(should_emit_progress_for_verbosity(
-        TelegramVerbosity::Verbose,
+        VerbosityLevel::Verbose,
         None,
         0
     ));
     assert!(!should_emit_progress_for_verbosity(
-        TelegramVerbosity::Verbose,
+        VerbosityLevel::Verbose,
         Some(1_000),
         2_000
     ));
     assert!(should_emit_progress_for_verbosity(
-        TelegramVerbosity::Debug,
+        VerbosityLevel::Debug,
         Some(1_000),
         2_500
     ));
     let verbose = progress_frame_for_verbosity(
-        TelegramVerbosity::Verbose,
+        VerbosityLevel::Verbose,
         ProgressEvent::ToolUse,
         "password=sekret cargo test",
     );
     assert_eq!(verbose, "🔧 Using tools…");
     let debug = progress_frame_for_verbosity(
-        TelegramVerbosity::Debug,
+        VerbosityLevel::Debug,
         ProgressEvent::ToolUse,
         "Bearer token bot123 failed",
     );
@@ -296,7 +294,7 @@ fn multi_tool_progress_frames_are_structured_at_verbose_and_debug() {
     ];
     let verbose = events
         .iter()
-        .map(|(event, body)| progress_frame_for_verbosity(TelegramVerbosity::Verbose, *event, body))
+        .map(|(event, body)| progress_frame_for_verbosity(VerbosityLevel::Verbose, *event, body))
         .collect::<Vec<_>>();
     assert_eq!(verbose[0], "🧭 Planning the next step…");
     assert_eq!(verbose[1], "🔧 Using tools…");
@@ -304,7 +302,7 @@ fn multi_tool_progress_frames_are_structured_at_verbose_and_debug() {
     assert_eq!(verbose[3], "✅ Verifying before replying…");
     assert_eq!(verbose[4], "⚠️ Error while working…");
     let debug = progress_frame_for_verbosity(
-        TelegramVerbosity::Debug,
+        VerbosityLevel::Debug,
         ProgressEvent::ToolUse,
         "calling tool secrets --password=hidden",
     );
@@ -885,4 +883,57 @@ fn gateway_prompt_names_current_chat_scope() {
     assert!(p2.contains("chat/thread chat-b/thread-2"), "{p2}");
     assert!(!p1.contains("chat-b"), "{p1}");
     assert!(!p2.contains("chat-a"), "{p2}");
+}
+
+#[test]
+fn verbosity_command_is_listed_and_stores_scope_local_preference() {
+    let help = command_help();
+    assert!(help.contains("/verbosity"), "{help}");
+    assert_eq!(
+        slash_name("/verbosity@smartagent_bot quiet"),
+        Some("verbosity")
+    );
+    let mut db = test_db("telegram-verbosity-pref");
+    super::set_verbosity_in_db(
+        &mut db,
+        "chat-a",
+        "main",
+        "u1",
+        super::VerbosityLevel::Quiet,
+    )
+    .unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main", "u1"),
+        super::VerbosityLevel::Quiet
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main", "u2"),
+        super::VerbosityLevel::Normal
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-b", "main", "u1"),
+        super::VerbosityLevel::Normal
+    );
+}
+
+#[test]
+fn verbosity_filters_progress_task_workflow_notifications() {
+    let mut db = test_db("telegram-verbosity-filter");
+    super::set_verbosity_in_db(&mut db, "chat-a", "", "*", super::VerbosityLevel::Quiet).unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "", "*"),
+        super::VerbosityLevel::Quiet
+    );
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "progress"
+    ));
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "task"
+    ));
+    assert!(!super::notification_allowed_in_db(
+        &db, "chat-a", "", "*", "workflow"
+    ));
+    assert!(super::notification_allowed_in_db(
+        &db, "chat-b", "", "*", "task"
+    ));
 }

@@ -48,7 +48,7 @@ pub(crate) const TELEGRAM_COMMANDS: &[BotCommand] = &[
     },
     BotCommand {
         name: "verbosity",
-        description: "Set progress updates: quiet, normal, verbose, or debug",
+        description: "Show or set notification verbosity",
     },
     BotCommand {
         name: "reset",
@@ -147,8 +147,8 @@ pub(crate) fn slash_command(
         "reset" => reset_context(chat, thread),
         "model" if !arg.is_empty() => set_model_preference(chat, thread, user, arg),
         "model" => Ok(model_menu_text(chat, thread, user)),
-        "verbosity" if !arg.is_empty() => set_verbosity_preference(chat, thread, arg),
-        "verbosity" => Ok(verbosity_menu_text(chat, thread)),
+        "verbosity" if !arg.is_empty() => set_verbosity(chat, thread, user, arg),
+        "verbosity" => Ok(verbosity_status(chat, thread, user)),
         "remember" => remember_context_fact(chat, thread, arg),
         "resolve" => resolve_block_text(arg),
         "stop" => stop_context(chat, thread),
@@ -171,9 +171,10 @@ pub(crate) enum CommandClass {
 pub(crate) fn command_class(cmd: &str) -> Option<CommandClass> {
     Some(match cmd {
         "start" | "help" | "commands" => CommandClass::UserSafe,
-        "memory" | "reset" | "remember" | "resolve" => CommandClass::ChatScoped,
-        "board" | "tasks" | "status" | "agents" | "runs" | "skills" | "model" | "verbosity"
-        | "stop" => CommandClass::AdminOnly,
+        "memory" | "reset" | "remember" | "resolve" | "verbosity" => CommandClass::ChatScoped,
+        "board" | "tasks" | "status" | "agents" | "runs" | "skills" | "model" | "stop" => {
+            CommandClass::AdminOnly
+        }
         _ => return None,
     })
 }
@@ -360,6 +361,131 @@ pub(crate) fn remember_context_fact(
     Ok("Remembered for this chat.".into())
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum VerbosityLevel {
+    Quiet,
+    Normal,
+    Verbose,
+    Debug,
+}
+
+impl VerbosityLevel {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            VerbosityLevel::Quiet => "quiet",
+            VerbosityLevel::Normal => "normal",
+            VerbosityLevel::Verbose => "verbose",
+            VerbosityLevel::Debug => "debug",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "quiet" | "q" => Some(VerbosityLevel::Quiet),
+            "normal" | "n" => Some(VerbosityLevel::Normal),
+            "verbose" | "v" => Some(VerbosityLevel::Verbose),
+            "debug" | "d" => Some(VerbosityLevel::Debug),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn verbosity_key(chat: &str, thread: &str, user: &str) -> String {
+    format!(
+        "verbosity:{}:{}",
+        history_scope(chat, thread),
+        safe_id_part(user)
+    )
+}
+
+fn scope_verbosity_key(chat: &str, thread: &str) -> String {
+    verbosity_key(chat, thread, "*")
+}
+
+pub(crate) fn verbosity_from_db(db: &Db, chat: &str, thread: &str, user: &str) -> VerbosityLevel {
+    let user_key = verbosity_key(chat, thread, user);
+    let scope_key = scope_verbosity_key(chat, thread);
+    [user_key, scope_key]
+        .iter()
+        .find_map(|k| db.get(k))
+        .and_then(|e| json::parse(&e.meta).ok())
+        .and_then(|v| {
+            v.get("level")
+                .and_then(Value::as_str)
+                .and_then(VerbosityLevel::parse)
+        })
+        .unwrap_or(VerbosityLevel::Normal)
+}
+
+pub(crate) fn verbosity(chat: &str, thread: &str, user: &str) -> VerbosityLevel {
+    open_db()
+        .map(|db| verbosity_from_db(&db, chat, thread, user))
+        .unwrap_or(VerbosityLevel::Normal)
+}
+
+pub(crate) fn set_verbosity_in_db(
+    db: &mut Db,
+    chat: &str,
+    thread: &str,
+    user: &str,
+    level: VerbosityLevel,
+) -> Result<(), String> {
+    let key = verbosity_key(chat, thread, user);
+    let meta = format!(
+        r#"{{"kind":"telegram_verbosity","chat":"{}","thread":"{}","user":"{}","level":"{}","ts":{}}}"#,
+        json::escape(chat),
+        json::escape(thread),
+        json::escape(user),
+        level.as_str(),
+        unix_secs()
+    );
+    db.put(&key, &meta, VEC0.to_vec())
+}
+
+pub(crate) fn set_verbosity(
+    chat: &str,
+    thread: &str,
+    user: &str,
+    choice: &str,
+) -> Result<String, String> {
+    let Some(level) = VerbosityLevel::parse(choice) else {
+        return Ok("Usage: /verbosity quiet|normal|verbose|debug".into());
+    };
+    let mut db = open_db()?;
+    set_verbosity_in_db(&mut db, chat, thread, user, level)?;
+    Ok(format!(
+        "Telegram verbosity set to {} for this chat/thread/user.",
+        level.as_str()
+    ))
+}
+
+pub(crate) fn verbosity_status(chat: &str, thread: &str, user: &str) -> String {
+    let level = verbosity(chat, thread, user);
+    format!("Current Telegram verbosity: {}. Set with /verbosity quiet|normal|verbose|debug. quiet suppresses progress/task/workflow notifications; normal is default; verbose/debug allow more detail as producers add it.", level.as_str())
+}
+
+pub(crate) fn notification_allowed_for_level(level: VerbosityLevel, kind: &str) -> bool {
+    match kind {
+        "progress" | "task" | "workflow" => level >= VerbosityLevel::Normal,
+        "debug" => level >= VerbosityLevel::Debug,
+        _ => true,
+    }
+}
+
+pub(crate) fn notification_allowed_in_db(
+    db: &Db,
+    chat: &str,
+    thread: &str,
+    user: &str,
+    kind: &str,
+) -> bool {
+    notification_allowed_for_level(verbosity_from_db(db, chat, thread, user), kind)
+}
+
+pub(crate) fn notification_allowed(chat: &str, thread: &str, user: &str, kind: &str) -> bool {
+    notification_allowed_for_level(verbosity(chat, thread, user), kind)
+}
+
 pub(crate) fn model_pref_key(chat: &str, thread: &str, user: &str) -> String {
     format!(
         "model:{}:{}",
@@ -442,93 +568,6 @@ pub(crate) fn model_menu_text(chat: &str, thread: &str, user: &str) -> String {
         out.push_str(&format!("\n{}. {m}", i + 1));
     }
     out
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) enum TelegramVerbosity {
-    Quiet,
-    Normal,
-    Verbose,
-    Debug,
-}
-
-impl TelegramVerbosity {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            TelegramVerbosity::Quiet => "quiet",
-            TelegramVerbosity::Normal => "normal",
-            TelegramVerbosity::Verbose => "verbose",
-            TelegramVerbosity::Debug => "debug",
-        }
-    }
-}
-
-pub(crate) fn normalize_verbosity_choice(choice: &str) -> Option<TelegramVerbosity> {
-    match choice.trim().to_ascii_lowercase().as_str() {
-        "0" | "quiet" | "off" => Some(TelegramVerbosity::Quiet),
-        "1" | "normal" | "default" => Some(TelegramVerbosity::Normal),
-        "2" | "verbose" => Some(TelegramVerbosity::Verbose),
-        "3" | "debug" => Some(TelegramVerbosity::Debug),
-        _ => None,
-    }
-}
-
-pub(crate) fn verbosity_key(chat: &str, thread: &str) -> String {
-    format!("verbosity:{}", history_scope(chat, thread))
-}
-
-pub(crate) fn verbosity_from_db(db: &Db, chat: &str, thread: &str) -> TelegramVerbosity {
-    db.get(&verbosity_key(chat, thread))
-        .and_then(|e| json::parse(&e.meta).ok())
-        .and_then(|v| {
-            v.get("level")
-                .and_then(Value::as_str)
-                .and_then(normalize_verbosity_choice)
-        })
-        .unwrap_or(TelegramVerbosity::Normal)
-}
-
-pub(crate) fn verbosity_preference(chat: &str, thread: &str) -> TelegramVerbosity {
-    open_db()
-        .map(|db| verbosity_from_db(&db, chat, thread))
-        .unwrap_or(TelegramVerbosity::Normal)
-}
-
-pub(crate) fn set_verbosity_preference(
-    chat: &str,
-    thread: &str,
-    choice: &str,
-) -> Result<String, String> {
-    let Some(level) = normalize_verbosity_choice(choice) else {
-        return Ok(verbosity_menu_text(chat, thread));
-    };
-    let mut db = open_db()?;
-    set_verbosity_preference_in_db(&mut db, chat, thread, level)?;
-    Ok(format!(
-        "Telegram progress verbosity set to {} for this chat/thread.",
-        level.as_str()
-    ))
-}
-
-pub(crate) fn set_verbosity_preference_in_db(
-    db: &mut Db,
-    chat: &str,
-    thread: &str,
-    level: TelegramVerbosity,
-) -> Result<(), String> {
-    let meta = format!(
-        r#"{{"kind":"telegram_verbosity","chat":"{}","thread":"{}","level":"{}","ts":{}}}"#,
-        json::escape(chat),
-        json::escape(thread),
-        level.as_str(),
-        unix_secs()
-    );
-    db.put(&verbosity_key(chat, thread), &meta, VEC0.to_vec())
-}
-
-pub(crate) fn verbosity_menu_text(chat: &str, thread: &str) -> String {
-    let current = verbosity_preference(chat, thread).as_str();
-    format!("Current progress verbosity: {current}\nChoose with /verbosity quiet, /verbosity normal, /verbosity verbose, or /verbosity debug. Verbose/debug show safe progress and tool-call markers; hidden chain-of-thought and secrets are never shown.")
 }
 
 pub(crate) fn callback_model_choice(data: &str, message_date: u64, now: u64) -> Option<&str> {
