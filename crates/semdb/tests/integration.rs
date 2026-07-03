@@ -12,6 +12,7 @@ fn tmp(name: &str) -> PathBuf {
     // In-repo scratch only. CARGO_MANIFEST_DIR is the crate dir.
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
     let _ = std::fs::create_dir_all(&dir);
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
     let p = dir.join(format!("semdb-it-{name}-{}", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p
@@ -45,7 +46,10 @@ fn cli_roundtrip() {
             .env("SMARTAGENT_SEMDB_SOCKET", &sock)
             .output()
             .unwrap();
-        (out.status.success(), String::from_utf8_lossy(&out.stdout).to_string())
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).to_string(),
+        )
     };
 
     let mut daemon = Command::new(bin)
@@ -63,14 +67,34 @@ fn cli_roundtrip() {
     }
 
     assert!(run(&["create", &db]).0);
-    assert!(run(&["put", &db, "--id", "a", "--vector", "1,0,0", "--meta", r#"{"t":"first"}"#]).0);
+    assert!(
+        run(&[
+            "put",
+            &db,
+            "--id",
+            "a",
+            "--vector",
+            "1,0,0",
+            "--meta",
+            r#"{"t":"first"}"#
+        ])
+        .0
+    );
     assert!(run(&["put", &db, "--id", "b", "--vector", "0,1,0"]).0);
 
     let (ok, got) = run(&["get", &db, "--id", "a"]);
     assert!(ok);
     assert!(got.contains("first"));
 
-    let (ok, hits) = run(&["search", &db, "--vector", "0.9,0.1,0", "--k", "1", "--exact"]);
+    let (ok, hits) = run(&[
+        "search",
+        &db,
+        "--vector",
+        "0.9,0.1,0",
+        "--k",
+        "1",
+        "--exact",
+    ]);
     assert!(ok);
     assert!(hits.lines().next().unwrap().contains("\ta\t"));
 
