@@ -65,6 +65,8 @@ Useful slash commands inside `./pi`:
 /audit           recent hook firings
 /memory query    memory recall
 /sab [url]       toggle the visual browser pane
+/team            open the fleet sidebar / agent panel
+/index [project] reindex one project or all workspace projects
 ```
 
 ## Common Commands
@@ -136,9 +138,9 @@ concepts, not the dependency stacks.
 <details>
 <summary><strong>Tool Catalog</strong></summary>
 
-The core active tool catalog is 20 standalone Rust binaries exposed to pi by thin extensions. Additional shared/event extensions support the TUI and lifecycle, but are not counted as core tools. Voice is built but disabled until an external speech server is deployed.
+The core active tool catalog is 22 standalone Rust binaries exposed to pi by thin extensions. Additional shared/event extensions support the TUI and lifecycle, but are not counted as core tools. Voice is built but disabled until an external speech server is deployed.
 
-### Core active tools (20)
+### Core active tools (22)
 
 | Tool | Reference pattern | What it does |
 |------|-------------------|--------------|
@@ -150,9 +152,11 @@ The core active tool catalog is 20 standalone Rust binaries exposed to pi by thi
 | `skills` | [Agent Skills](https://github.com/anthropics/skills) | `SKILL.md` loader, matcher, validator |
 | `schedule` | [Temporal](https://github.com/temporalio/temporal) | Durable cron and one-shot reminders |
 | `search` | [SearXNG](https://github.com/searxng/searxng) | Web metasearch client; output is fenced as untrusted data |
-| `notify` | [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications |
+| `notify` | [ntfy](https://github.com/binwiederhier/ntfy) | Push notifications; bearer auth comes from policy-gated secret `ntfy_token` |
+| `telegram` | Telegram Bot API | Bot bridge with streaming replies, slash commands, callbacks, scoped context, and workflow/task broadcasts |
 | `secrets` | [Infisical](https://github.com/Infisical/infisical) | Policy-gated, audited secret store |
 | `browser` | [browser-use](https://github.com/browser-use/browser-use) | Real Chrome over CDP: open, click, type, wait, scroll, snapshot |
+| `sa-browser` | browser-use visual companion | Visual browser pane in the pi TUI plus DOM snapshots |
 | `orchestrate` | [LangGraph](https://github.com/langchain-ai/langgraph) | Fan out headless-pi subagents with persisted results |
 | `mcp` | Model Context Protocol | MCP client for stdio and HTTP/HTTPS servers |
 | `sandbox` | [Daytona](https://github.com/daytonaio/daytona) | Isolated command execution with secret masking and resource caps |
@@ -165,9 +169,14 @@ The core active tool catalog is 20 standalone Rust binaries exposed to pi by thi
 
 ### Additional active extension tools
 
-| Tool | Role |
-|------|------|
-| `sa-browser` | Visual browser pane for the pi TUI plus DOM snapshots |
+| Extension | Role |
+|-----------|------|
+| `akurai-router` | model provider registration |
+| `commands` | instant TUI slash commands (`/board`, `/status`, `/runs`, `/index`, `/sab`, and peers) |
+| `hooks` | lifecycle hook dispatcher and edit/write kanban gate |
+| `session-memory` | session intent capture/recall |
+| `statusline` | live three-row TUI statusline |
+| `agentpanel` | `/team` sidebar with fleet status cards |
 
 ### Built but disabled
 
@@ -175,8 +184,7 @@ The core active tool catalog is 20 standalone Rust binaries exposed to pi by thi
 |------|--------|
 | `voice` | Delisted/disabled until a titan speech server exists; not an active pi tool |
 
-Shared libraries include `httpc` for HTTP/HTTPS and JSON, plus extension-only
-pieces such as session memory, hooks, commands, and the statusline.
+Shared libraries include `httpc` for HTTP/HTTPS and JSON. Recent reliability fixes include atomic codeindex/codegraph-style replacement patterns, MCP per-call HTTP timeouts, vault slug-equivalent wikilink rewrites, and secrets-gated notify bearer auth.
 
 </details>
 

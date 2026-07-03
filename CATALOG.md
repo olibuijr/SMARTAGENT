@@ -15,13 +15,13 @@ Every tool `./pi` exposes, one row per `extensions/*.ts`. **When you add, rename
 | `skills` | `skills` | Agent Skills loader: list, show (`--head`), search, match (prompt-scored auto-trigger) |
 | `schedule` | `schedule` | Durable scheduler: add (`--notify`; `--cron` recurring OR `--at` one-shot), pause/resume, list/next/rm/tick. Supervised daemon fires jobs |
 | `search` | `search` | SearXNG search: query (`--time-range`/`--site`/`--urls-only`/`--snippet-chars`, k=5), health. Wrapped UNTRUSTED |
-| `notify` | `notify` | Push notifications (ntfy): send |
+| `notify` | `notify` | Push notifications (ntfy): send. Bearer auth, when configured, comes from policy-gated secret `ntfy_token`; no secret value appears in tool parameters |
 | `telegram` | `telegram` | Telegram Bot API bridge: send (`--chat`, `--text`, 4096 chunking), poll (`getUpdates` offset in `data/telegram.semdb`), listen, commands (Bot API `setMyCommands`; reopen chat/app if Telegram caches old menu). Token only via `secrets get telegram_bot_token`; allow-list via `telegram_allowed_chats` |
 | `secrets` | `secrets` | Policy-gated secret store: set/get(as 'pi')/list/audit. Deny-by-default; policy-allow is admin-only, OFF the agent surface |
 | `browser` | `browser` | Real Chrome CDP: open/click/type(`--enter`)/back/wait/scroll/attr (`--quiet`/`--max-text`/`--max-links`), probe. Wrapped UNTRUSTED |
 | `sa-browser` | `sa-browser` | Visual browser: right-side 50% TUI overlay pane, bottom-filled (address bar + loading status + truecolor page art — sextant 2×3 px/cell default, quad/half fallbacks; tablet viewport emulation default; std-only zlib/PNG/renderer in Rust); activate/deactivate/open/snapshot/status/probe, bare-host URLs, `/sab` toggle. Successor-in-waiting to `browser` (both compose browser::cdp — port verbs, retire, rename) |
 | `orchestrate` | `orchestrate` | Fan out N headless-pi subagents: run, list, out (collect output). Fork-bomb depth guard |
-| `mcp` | `mcp` | MCP client (stdio+HTTP/HTTPS): tools (`--names-only`/`--filter`), call (`--head`). argv exec, no sh -c |
+| `mcp` | `mcp` | MCP client (stdio+HTTP/HTTPS): tools (`--names-only`/`--filter`), call (`--head`). argv exec, no sh -c; HTTP calls have per-request timeouts |
 | `sandbox` | `sandbox` | Isolated exec: run (`--tail`, 16KB cap, `--stdin`, `--no-isolate`), clean. Env scrubbed + secrets tmpfs-masked, isolation ON |
 | `context` | `context` | Principal identity/context loader (TELOS): compose/validate/stat |
 | `evals` | `evals` | Trace/score/diff + self-heal: log, score (`--min-pass`/`--fail-only`), diff, runs, triage (`--tasks-db`/`--dry-run`/`--all` — failing runs → deduped board tasks, cursor-incremental, p1 escalation; wired to the stop hook) |
