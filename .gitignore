@@ -23,6 +23,8 @@ workspaces/
 secrets.key
 *credentials*
 config/*.local.conf
+# local mail config (himalaya) — user-specific; password fetched via secrets bridge
+config/himalaya*.toml
 
 # Rust
 target/
