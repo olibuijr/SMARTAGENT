@@ -17,11 +17,17 @@ const MAX_DESC_CHARS: usize = 100;
 
 /// Create a new skill under `root` (or `<root>/<category>` when given).
 /// Rejects a name collision — use `edit`/`patch` on an existing skill.
+/// `role`/`task` are optional Agent-Skills-filing tags (`metadata.smartagent.
+/// role` / `.task`) — who this skill is for (Coordinator/Builder/QA/Ops) and
+/// what task type it covers, so `list`/`match --role R --task T` can filter.
+#[allow(clippy::too_many_arguments)]
 pub fn create(
     root: &Path,
     name: &str,
     category: Option<&str>,
     desc: Option<&str>,
+    role: Option<&str>,
+    task: Option<&str>,
     body: &str,
 ) -> Result<String, String> {
     validate_name(name)?;
@@ -31,7 +37,7 @@ pub fn create(
             existing.display()
         ));
     }
-    let content = build_content(body, name, desc, category)?;
+    let content = build_content(body, name, desc, category, role, task)?;
     validate_content(&content)?;
     let dir = skill_dir(root, name, category)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -66,25 +72,34 @@ pub fn patch(root: &Path, name: &str, old: &str, new: &str) -> Result<String, St
 /// Full-content rewrite of an existing skill's SKILL.md.
 pub fn edit(root: &Path, name: &str, body: &str, desc: Option<&str>) -> Result<String, String> {
     let path = find(root, name)?.ok_or_else(|| format!("no skill '{name}'"))?;
-    let content = build_content(body, name, desc, None)?;
+    let content = build_content(body, name, desc, None, None, None)?;
     validate_content(&content)?;
     std::fs::write(&path, &content).map_err(|e| e.to_string())?;
     Ok(format!("edited '{name}' ({})", path.display()))
 }
 
-/// Remove a skill's SKILL.md and prune the now-empty skill/category dirs.
+/// Remove a skill entirely — its SKILL.md AND any `scripts/`/`references/`/
+/// `assets/` supporting files it accumulated, then prune the now-empty
+/// category dir. A skill is its whole directory, not just SKILL.md; leaving
+/// orphaned supporting files behind on delete would be a leak.
 pub fn delete(root: &Path, name: &str) -> Result<String, String> {
     let path = find(root, name)?.ok_or_else(|| format!("no skill '{name}'"))?;
-    std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-    if let Some(dir) = path.parent() {
-        remove_if_empty(dir, root);
+    let dir = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| root.to_path_buf());
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    if let Some(category_dir) = dir.parent() {
+        remove_if_empty(category_dir, root);
     }
     Ok(format!("deleted '{name}'"))
 }
 
 /// Locate a skill by its frontmatter `name` under `root`. `root` not existing
 /// yet is not an error — a project's first self-created skill has no dir.
-fn find(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+/// `pub(crate)` so `files.rs` (supporting-file management) can resolve a
+/// skill's own directory without duplicating discovery logic.
+pub(crate) fn find(root: &Path, name: &str) -> Result<Option<PathBuf>, String> {
     if !root.exists() {
         return Ok(None);
     }
@@ -131,12 +146,16 @@ fn validate_name(name: &str) -> Result<(), String> {
 /// frontmatter (non-empty `name` + `description`), it is used as-is;
 /// otherwise frontmatter is synthesized from `name`/`desc` — Hermes: "if
 /// body is provided without frontmatter, synthesize frontmatter from
-/// --name/--desc".
+/// --name/--desc". `role`/`task`, when given, are only applied on the
+/// synthesis path (same as `category`) — a caller who hand-writes their own
+/// frontmatter (including a `metadata:` block) owns it entirely.
 fn build_content(
     body: &str,
     name: &str,
     desc: Option<&str>,
     category: Option<&str>,
+    role: Option<&str>,
+    task: Option<&str>,
 ) -> Result<String, String> {
     let fm = frontmatter::parse(body);
     let has_frontmatter = body.starts_with("---");
@@ -160,6 +179,21 @@ fn build_content(
     out.push_str(&format!("description: {final_desc}\n"));
     if let Some(c) = category.map(str::trim).filter(|c| !c.is_empty()) {
         out.push_str(&format!("category: {c}\n"));
+    }
+    let role = role.map(str::trim).filter(|s| !s.is_empty());
+    let task = task.map(str::trim).filter(|s| !s.is_empty());
+    if role.is_some() || task.is_some() {
+        // Role/task organization: filed under `metadata.smartagent.*` rather
+        // than deep directory nesting — per-project scoping (`--project`)
+        // already handles location, so frontmatter tags are simpler.
+        out.push_str("metadata:\n");
+        out.push_str("  smartagent:\n");
+        if let Some(r) = role {
+            out.push_str(&format!("    role: {r}\n"));
+        }
+        if let Some(t) = task {
+            out.push_str(&format!("    task: {t}\n"));
+        }
     }
     out.push_str("---\n");
     let rest = if has_frontmatter {
@@ -202,8 +236,10 @@ fn validate_content(content: &str) -> Result<(), String> {
 }
 
 /// Remove `dir`, then walk upward removing now-empty ancestor dirs — stops
-/// at (never removes) `root` itself.
-fn remove_if_empty(mut dir: &Path, root: &Path) {
+/// at (never removes) `root` itself. `pub(crate)` so `files.rs` can prune a
+/// skill's `scripts/`/`references/`/`assets/` subdirs the same way, bounded
+/// at the skill's own dir instead of the skills root.
+pub(crate) fn remove_if_empty(mut dir: &Path, root: &Path) {
     while dir != root {
         let is_empty = std::fs::read_dir(dir)
             .map(|mut e| e.next().is_none())
@@ -239,6 +275,8 @@ mod tests {
             "deploy-drill",
             None,
             Some("Roll out a build and verify it landed"),
+            None,
+            None,
             "## When to Use\nAfter any deploy.\n",
         )
         .unwrap();
@@ -248,7 +286,7 @@ mod tests {
         assert!(written.contains("description: Roll out a build and verify it landed"));
         assert!(written.contains("## When to Use"));
 
-        let dup = create(&root, "deploy-drill", None, Some("again"), "body");
+        let dup = create(&root, "deploy-drill", None, Some("again"), None, None, "body");
         assert!(dup.is_err());
         assert!(dup.unwrap_err().contains("already exists"));
     }
@@ -257,7 +295,7 @@ mod tests {
     fn create_honors_existing_frontmatter_and_category_dir() {
         let root = scratch("manage-create-fm");
         let body = "---\nname: golf-swing\ndescription: fix a slice\n---\n## Procedure\ndo it\n";
-        create(&root, "golf-swing", Some("sports"), None, body).unwrap();
+        create(&root, "golf-swing", Some("sports"), None, None, None, body).unwrap();
         let path = root.join("sports/golf-swing/SKILL.md");
         assert!(path.exists(), "expected {}", path.display());
         let written = std::fs::read_to_string(&path).unwrap();
@@ -267,14 +305,67 @@ mod tests {
     #[test]
     fn create_rejects_missing_description_and_bad_name() {
         let root = scratch("manage-create-invalid");
-        let no_desc = create(&root, "no-desc", None, None, "body only");
+        let no_desc = create(&root, "no-desc", None, None, None, None, "body only");
         assert!(no_desc.is_err());
 
-        let bad_name = create(&root, "Not_Kebab", None, Some("d"), "body");
+        let bad_name = create(&root, "Not_Kebab", None, Some("d"), None, None, "body");
         assert!(bad_name.is_err());
 
-        let too_long = create(&root, "too-long", None, Some(&"x".repeat(101)), "body");
+        let too_long = create(
+            &root,
+            "too-long",
+            None,
+            Some(&"x".repeat(101)),
+            None,
+            None,
+            "body",
+        );
         assert!(too_long.unwrap_err().contains("must be"));
+    }
+
+    #[test]
+    fn create_persists_role_and_task_under_metadata_smartagent() {
+        let root = scratch("manage-create-role-task");
+        create(
+            &root,
+            "deploy-drill",
+            None,
+            Some("Roll out a build and verify it landed"),
+            Some("Builder"),
+            Some("deploy"),
+            "## When to Use\nAfter any deploy.\n",
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(root.join("deploy-drill/SKILL.md")).unwrap();
+        assert!(written.contains("metadata:\n  smartagent:\n"), "{written}");
+        assert!(written.contains("role: Builder"), "{written}");
+        assert!(written.contains("task: deploy"), "{written}");
+
+        // Round trip through discovery: the tags must be readable back out.
+        let found = registry::discover(&root)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == "deploy-drill")
+            .unwrap();
+        assert_eq!(found.role.as_deref(), Some("Builder"));
+        assert_eq!(found.task.as_deref(), Some("deploy"));
+    }
+
+    #[test]
+    fn create_without_role_or_task_omits_metadata_block() {
+        let root = scratch("manage-create-no-role-task");
+        create(
+            &root,
+            "plain-skill",
+            None,
+            Some("no role or task tags"),
+            None,
+            None,
+            "body",
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(root.join("plain-skill/SKILL.md")).unwrap();
+        assert!(!written.contains("metadata:"), "{written}");
     }
 
     #[test]
@@ -285,6 +376,8 @@ mod tests {
             "curl-retry",
             None,
             Some("retry a flaky curl call"),
+            None,
+            None,
             "## Procedure\nrun curl once\nrun curl once more\n",
         )
         .unwrap();
@@ -317,6 +410,8 @@ mod tests {
             "release-checklist",
             Some("ops"),
             Some("ship a release safely"),
+            None,
+            None,
             "## Procedure\nold steps\n",
         )
         .unwrap();
