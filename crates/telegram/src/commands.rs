@@ -892,6 +892,10 @@ USAGE:
   telegram poll [--timeout 25]
   telegram listen [--sleep 2] [--gateway AGENT]
   telegram commands                 register Telegram slash-command menu
+  telegram updates [--limit 10] [--no-advance]
+  telegram diag [--chat ID_OR_@USERNAME]
+  telegram chat --chat ID_OR_@USERNAME
+  telegram member --chat ID_OR_@USERNAME [--user USER_ID|me]
 
 Token is read only via secrets get name=telegram_bot_token as caller pi.
 Allowed chats come from config/smartagent.conf telegram_allowed_chats.
