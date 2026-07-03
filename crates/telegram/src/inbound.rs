@@ -311,6 +311,7 @@ pub(crate) enum ProgressEvent {
     ToolUse,
     Waiting,
     Verifying,
+    Error,
     FinalAnswer,
 }
 
@@ -321,6 +322,7 @@ impl ProgressEvent {
             ProgressEvent::ToolUse => "🔧 Using tools…",
             ProgressEvent::Waiting => "⏳ Waiting for a result…",
             ProgressEvent::Verifying => "✅ Verifying before replying…",
+            ProgressEvent::Error => "⚠️ Error while working…",
             ProgressEvent::FinalAnswer => "💬 Final answer ready.",
         }
     }
@@ -331,6 +333,17 @@ pub(crate) fn progress_scope_key(chat: &str, thread: &str) -> String {
 }
 
 pub(crate) fn should_emit_progress(last_ms: Option<u128>, now_ms: u128) -> bool {
+    should_emit_progress_for_verbosity(TelegramVerbosity::Verbose, last_ms, now_ms)
+}
+
+pub(crate) fn should_emit_progress_for_verbosity(
+    level: TelegramVerbosity,
+    last_ms: Option<u128>,
+    now_ms: u128,
+) -> bool {
+    if level == TelegramVerbosity::Quiet || level == TelegramVerbosity::Normal {
+        return false;
+    }
     const MIN_PROGRESS_EDIT_MS: u128 = 1_500;
     last_ms
         .map(|last| now_ms.saturating_sub(last) >= MIN_PROGRESS_EDIT_MS)
@@ -345,6 +358,8 @@ pub(crate) fn progress_event_for_stream_line(line: &str) -> ProgressEvent {
         ProgressEvent::Waiting
     } else if l.contains("verify") || l.contains("test") {
         ProgressEvent::Verifying
+    } else if l.contains("error") || l.contains("failed") || l.contains("panic") {
+        ProgressEvent::Error
     } else if l.contains("plan") || l.contains("think") {
         ProgressEvent::Planning
     } else {
@@ -353,11 +368,39 @@ pub(crate) fn progress_event_for_stream_line(line: &str) -> ProgressEvent {
 }
 
 pub(crate) fn progress_frame(event: ProgressEvent, body: &str) -> String {
+    progress_frame_for_verbosity(TelegramVerbosity::Debug, event, body)
+}
+
+pub(crate) fn progress_frame_for_verbosity(
+    level: TelegramVerbosity,
+    event: ProgressEvent,
+    body: &str,
+) -> String {
     if event == ProgressEvent::FinalAnswer {
-        clip_tg(body)
-    } else {
-        clip_tg(&format!("{}\n\n{}", event.telegram_message(), body))
+        return clip_tg(body);
     }
+    match level {
+        TelegramVerbosity::Quiet | TelegramVerbosity::Normal => String::new(),
+        TelegramVerbosity::Verbose => clip_tg(event.telegram_message()),
+        TelegramVerbosity::Debug => {
+            let safe = sanitize_progress_body(body);
+            if safe.is_empty() {
+                clip_tg(event.telegram_message())
+            } else {
+                clip_tg(&format!("{}\n\n{}", event.telegram_message(), safe))
+            }
+        }
+    }
+}
+
+pub(crate) fn sanitize_progress_body(body: &str) -> String {
+    let redacted = redact_secretish(body);
+    let first = redacted.lines().next().unwrap_or("").trim();
+    first
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .take(240)
+        .collect::<String>()
 }
 
 /// Streaming reply (hermes-style): send a placeholder, then live-edit it as
@@ -381,6 +424,7 @@ pub(crate) fn stream_reply(
         false,
     )?;
     let stream_started = std::time::Instant::now();
+    let verbosity = verbosity_preference(chat, thread);
     let mut tool_markers = 0usize;
     let progress_scope = progress_scope_key(chat, thread);
     eprintln!("[tg] progress scope {progress_scope}: planning");
@@ -442,16 +486,24 @@ pub(crate) fn stream_reply(
                     "",
                 );
                 eprintln!("[tg] tool marker scope={chat}/{thread} marker={status}");
-                let preview = stream_preview(&latest, &status);
-                let _ = edit_message_retry(&token, chat, mid, &clip_tg(&preview), false);
-                shown = preview;
-                last_edit = std::time::Instant::now();
+                if verbosity >= TelegramVerbosity::Verbose {
+                    let preview = stream_preview(&latest, &status);
+                    let _ = edit_message_retry(&token, chat, mid, &clip_tg(&preview), false);
+                    shown = preview;
+                    last_edit = std::time::Instant::now();
+                }
             }
             continue;
         }
         if line.starts_with(GATEWAY_STREAM_THINKING_PREFIX) {
             let frame = thinking_fallback().to_string();
-            if frame != shown && should_emit_progress(Some(0), last_edit.elapsed().as_millis()) {
+            if frame != shown
+                && should_emit_progress_for_verbosity(
+                    verbosity,
+                    Some(0),
+                    last_edit.elapsed().as_millis(),
+                )
+            {
                 let _ = api::edit_message(&token, chat, mid, &frame, false);
                 shown = frame;
                 last_edit = std::time::Instant::now();
@@ -460,9 +512,16 @@ pub(crate) fn stream_reply(
         }
         latest = line.replace("\\n", "\n"); // un-escape the streamed snapshot
         let event = progress_event_for_stream_line(&latest);
-        let frame = progress_frame(event, &latest);
+        let frame = progress_frame_for_verbosity(verbosity, event, &latest);
         // Throttle: edit at most every 1.5s, only when the text grew.
-        if frame != shown && should_emit_progress(Some(0), last_edit.elapsed().as_millis()) {
+        if !frame.is_empty()
+            && frame != shown
+            && should_emit_progress_for_verbosity(
+                verbosity,
+                Some(0),
+                last_edit.elapsed().as_millis(),
+            )
+        {
             let _ = edit_message_retry(&token, chat, mid, &frame, false);
             shown = frame;
             last_edit = std::time::Instant::now();
@@ -511,7 +570,8 @@ pub(crate) fn telegram_tool_status(info: &str) -> Option<String> {
     if !s.starts_with('🛠') {
         return None;
     }
-    let safe = s
+    let redacted = redact_secretish(s);
+    let safe = redacted
         .chars()
         .filter(|c| {
             c.is_ascii_alphanumeric()

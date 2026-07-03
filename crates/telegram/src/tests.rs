@@ -1,7 +1,9 @@
 use super::{
     build_gateway_prompt, chunks, command_help, command_menu_body, progress_event_for_stream_line,
-    progress_frame, progress_scope_key, should_emit_progress, simulate_stream_frames,
-    slash_command, slash_name, streaming_preview, ProgressEvent, TELEGRAM_COMMANDS,
+    progress_frame, progress_frame_for_verbosity, progress_scope_key, sanitize_progress_body,
+    should_emit_progress, should_emit_progress_for_verbosity, simulate_stream_frames,
+    slash_command, slash_name, streaming_preview, ProgressEvent, TelegramVerbosity,
+    TELEGRAM_COMMANDS,
 };
 
 #[test]
@@ -178,6 +180,7 @@ fn progress_events_map_to_telegram_safe_messages() {
         (ProgressEvent::ToolUse, "🔧 Using tools…"),
         (ProgressEvent::Waiting, "⏳ Waiting for a result…"),
         (ProgressEvent::Verifying, "✅ Verifying before replying…"),
+        (ProgressEvent::Error, "⚠️ Error while working…"),
         (ProgressEvent::FinalAnswer, "💬 Final answer ready."),
     ];
     for (event, msg) in cases {
@@ -201,9 +204,116 @@ fn progress_stream_lines_select_events_and_frames() {
         progress_event_for_stream_line("verify tests"),
         ProgressEvent::Verifying
     );
+    assert_eq!(
+        progress_event_for_stream_line("tool failed with error"),
+        ProgressEvent::ToolUse
+    );
+    assert_eq!(
+        progress_event_for_stream_line("request failed"),
+        ProgressEvent::Error
+    );
     let frame = progress_frame(ProgressEvent::ToolUse, "running cargo test");
     assert!(frame.starts_with("🔧 Using tools…"), "{frame}");
     assert!(frame.contains("running cargo test"), "{frame}");
+}
+
+#[test]
+fn verbosity_command_is_listed_and_scope_local() {
+    let help = command_help();
+    assert!(help.contains("/verbosity"), "{help}");
+    let dir =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("telegram-verbosity-test.semdb");
+    let _ = std::fs::remove_file(&path);
+    let mut db = semdb::storage::Db::create(&path).unwrap();
+    super::set_verbosity_preference_in_db(&mut db, "chat-a", "main", TelegramVerbosity::Debug)
+        .unwrap();
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "main"),
+        TelegramVerbosity::Debug
+    );
+    assert_eq!(
+        super::verbosity_from_db(&db, "chat-a", "topic-2"),
+        TelegramVerbosity::Normal
+    );
+}
+
+#[test]
+fn verbosity_controls_progress_and_sanitizes_debug_body() {
+    assert!(!should_emit_progress_for_verbosity(
+        TelegramVerbosity::Quiet,
+        None,
+        10_000
+    ));
+    assert!(!should_emit_progress_for_verbosity(
+        TelegramVerbosity::Normal,
+        None,
+        10_000
+    ));
+    assert!(should_emit_progress_for_verbosity(
+        TelegramVerbosity::Verbose,
+        None,
+        0
+    ));
+    assert!(!should_emit_progress_for_verbosity(
+        TelegramVerbosity::Verbose,
+        Some(1_000),
+        2_000
+    ));
+    assert!(should_emit_progress_for_verbosity(
+        TelegramVerbosity::Debug,
+        Some(1_000),
+        2_500
+    ));
+    let verbose = progress_frame_for_verbosity(
+        TelegramVerbosity::Verbose,
+        ProgressEvent::ToolUse,
+        "password=sekret cargo test",
+    );
+    assert_eq!(verbose, "🔧 Using tools…");
+    let debug = progress_frame_for_verbosity(
+        TelegramVerbosity::Debug,
+        ProgressEvent::ToolUse,
+        "Bearer token bot123 failed",
+    );
+    assert!(debug.starts_with("🔧 Using tools…"), "{debug}");
+    assert!(!debug.contains("bot123"), "{debug}");
+    assert!(sanitize_progress_body("Authorization: Bearer token bot123").contains("[redacted]"));
+}
+
+#[test]
+fn multi_tool_progress_frames_are_structured_at_verbose_and_debug() {
+    let events = [
+        (ProgressEvent::Planning, "plan next tool calls"),
+        (
+            ProgressEvent::ToolUse,
+            "calling tool secrets with password=hidden",
+        ),
+        (ProgressEvent::Waiting, "waiting for browser"),
+        (ProgressEvent::Verifying, "verify cargo test"),
+        (ProgressEvent::Error, "request failed"),
+    ];
+    let verbose = events
+        .iter()
+        .map(|(event, body)| progress_frame_for_verbosity(TelegramVerbosity::Verbose, *event, body))
+        .collect::<Vec<_>>();
+    assert_eq!(verbose[0], "🧭 Planning the next step…");
+    assert_eq!(verbose[1], "🔧 Using tools…");
+    assert_eq!(verbose[2], "⏳ Waiting for a result…");
+    assert_eq!(verbose[3], "✅ Verifying before replying…");
+    assert_eq!(verbose[4], "⚠️ Error while working…");
+    let debug = progress_frame_for_verbosity(
+        TelegramVerbosity::Debug,
+        ProgressEvent::ToolUse,
+        "calling tool secrets --password=hidden",
+    );
+    assert!(debug.starts_with("🔧 Using tools…"), "{debug}");
+    assert!(debug.contains("calling tool"), "{debug}");
+    assert!(!debug.contains("hidden"), "{debug}");
+    let tool = super::telegram_tool_status("🛠 memory running --password=hidden").unwrap();
+    assert!(tool.starts_with("🛠 memory running"), "{tool}");
+    assert!(!tool.contains("hidden"), "{tool}");
 }
 
 #[test]

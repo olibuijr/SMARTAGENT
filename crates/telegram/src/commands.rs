@@ -47,6 +47,10 @@ pub(crate) const TELEGRAM_COMMANDS: &[BotCommand] = &[
         description: "Choose this chat's reply model",
     },
     BotCommand {
+        name: "verbosity",
+        description: "Set progress updates: quiet, normal, verbose, or debug",
+    },
+    BotCommand {
         name: "reset",
         description: "Clear this chat/thread rolling context",
     },
@@ -143,6 +147,8 @@ pub(crate) fn slash_command(
         "reset" => reset_context(chat, thread),
         "model" if !arg.is_empty() => set_model_preference(chat, thread, user, arg),
         "model" => Ok(model_menu_text(chat, thread, user)),
+        "verbosity" if !arg.is_empty() => set_verbosity_preference(chat, thread, arg),
+        "verbosity" => Ok(verbosity_menu_text(chat, thread)),
         "remember" => remember_context_fact(chat, thread, arg),
         "resolve" => resolve_block_text(arg),
         "stop" => stop_context(chat, thread),
@@ -166,9 +172,8 @@ pub(crate) fn command_class(cmd: &str) -> Option<CommandClass> {
     Some(match cmd {
         "start" | "help" | "commands" => CommandClass::UserSafe,
         "memory" | "reset" | "remember" | "resolve" => CommandClass::ChatScoped,
-        "board" | "tasks" | "status" | "agents" | "runs" | "skills" | "model" | "stop" => {
-            CommandClass::AdminOnly
-        }
+        "board" | "tasks" | "status" | "agents" | "runs" | "skills" | "model" | "verbosity"
+        | "stop" => CommandClass::AdminOnly,
         _ => return None,
     })
 }
@@ -439,6 +444,93 @@ pub(crate) fn model_menu_text(chat: &str, thread: &str, user: &str) -> String {
     out
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum TelegramVerbosity {
+    Quiet,
+    Normal,
+    Verbose,
+    Debug,
+}
+
+impl TelegramVerbosity {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            TelegramVerbosity::Quiet => "quiet",
+            TelegramVerbosity::Normal => "normal",
+            TelegramVerbosity::Verbose => "verbose",
+            TelegramVerbosity::Debug => "debug",
+        }
+    }
+}
+
+pub(crate) fn normalize_verbosity_choice(choice: &str) -> Option<TelegramVerbosity> {
+    match choice.trim().to_ascii_lowercase().as_str() {
+        "0" | "quiet" | "off" => Some(TelegramVerbosity::Quiet),
+        "1" | "normal" | "default" => Some(TelegramVerbosity::Normal),
+        "2" | "verbose" => Some(TelegramVerbosity::Verbose),
+        "3" | "debug" => Some(TelegramVerbosity::Debug),
+        _ => None,
+    }
+}
+
+pub(crate) fn verbosity_key(chat: &str, thread: &str) -> String {
+    format!("verbosity:{}", history_scope(chat, thread))
+}
+
+pub(crate) fn verbosity_from_db(db: &Db, chat: &str, thread: &str) -> TelegramVerbosity {
+    db.get(&verbosity_key(chat, thread))
+        .and_then(|e| json::parse(&e.meta).ok())
+        .and_then(|v| {
+            v.get("level")
+                .and_then(Value::as_str)
+                .and_then(normalize_verbosity_choice)
+        })
+        .unwrap_or(TelegramVerbosity::Normal)
+}
+
+pub(crate) fn verbosity_preference(chat: &str, thread: &str) -> TelegramVerbosity {
+    open_db()
+        .map(|db| verbosity_from_db(&db, chat, thread))
+        .unwrap_or(TelegramVerbosity::Normal)
+}
+
+pub(crate) fn set_verbosity_preference(
+    chat: &str,
+    thread: &str,
+    choice: &str,
+) -> Result<String, String> {
+    let Some(level) = normalize_verbosity_choice(choice) else {
+        return Ok(verbosity_menu_text(chat, thread));
+    };
+    let mut db = open_db()?;
+    set_verbosity_preference_in_db(&mut db, chat, thread, level)?;
+    Ok(format!(
+        "Telegram progress verbosity set to {} for this chat/thread.",
+        level.as_str()
+    ))
+}
+
+pub(crate) fn set_verbosity_preference_in_db(
+    db: &mut Db,
+    chat: &str,
+    thread: &str,
+    level: TelegramVerbosity,
+) -> Result<(), String> {
+    let meta = format!(
+        r#"{{"kind":"telegram_verbosity","chat":"{}","thread":"{}","level":"{}","ts":{}}}"#,
+        json::escape(chat),
+        json::escape(thread),
+        level.as_str(),
+        unix_secs()
+    );
+    db.put(&verbosity_key(chat, thread), &meta, VEC0.to_vec())
+}
+
+pub(crate) fn verbosity_menu_text(chat: &str, thread: &str) -> String {
+    let current = verbosity_preference(chat, thread).as_str();
+    format!("Current progress verbosity: {current}\nChoose with /verbosity quiet, /verbosity normal, /verbosity verbose, or /verbosity debug. Verbose/debug show safe progress and tool-call markers; hidden chain-of-thought and secrets are never shown.")
+}
+
 pub(crate) fn callback_model_choice(data: &str, message_date: u64, now: u64) -> Option<&str> {
     if now.saturating_sub(message_date) > CALLBACK_MAX_AGE_SECS {
         return None;
@@ -611,16 +703,35 @@ pub(crate) fn telegram_status_report(limit: usize) -> String {
 }
 
 pub(crate) fn redact_secretish(s: &str) -> String {
-    let mut out = s.to_string();
-    for marker in ["bot", "token", "Authorization", "Bearer"] {
-        if out
-            .to_ascii_lowercase()
-            .contains(&marker.to_ascii_lowercase())
-        {
-            out = out.replace(marker, "[redacted]");
+    let mut out = Vec::new();
+    for part in s.split_whitespace() {
+        let lower = part.to_ascii_lowercase();
+        let secret_key = [
+            "password",
+            "passwd",
+            "secret",
+            "token",
+            "authorization",
+            "bearer",
+            "bot",
+            "api_key",
+            "apikey",
+        ]
+        .iter()
+        .any(|m| lower.contains(m));
+        if secret_key {
+            if let Some((k, _)) = part.split_once('=') {
+                out.push(format!("{k}=[redacted]"));
+            } else if let Some((k, _)) = part.split_once(':') {
+                out.push(format!("{k}:[redacted]"));
+            } else {
+                out.push("[redacted]".to_string());
+            }
+        } else {
+            out.push(part.to_string());
         }
     }
-    out.chars().take(240).collect()
+    out.join(" ").chars().take(240).collect()
 }
 
 pub(crate) fn chunk_count(s: &str) -> usize {
