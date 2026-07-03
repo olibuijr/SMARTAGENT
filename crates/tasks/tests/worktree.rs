@@ -46,6 +46,22 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     assert!(worktree::path_allowed_for_task("T-902", &a).unwrap());
     assert!(!worktree::path_allowed_for_task("T-902", &b).unwrap());
 
+    // Change-detection powers the done-gate: a fresh worktree has no changes
+    // (the false-done fingerprint); an edited or committed one counts as work.
+    worktree::ensure_for_doing("T-910").unwrap();
+    assert!(worktree::has_worktree("T-910"));
+    assert!(!worktree::has_worktree("T-999"), "unknown task has no worktree");
+    assert!(!worktree::changed("T-910").unwrap(), "fresh worktree has no changes");
+    std::fs::write(d.join("worktrees/T-910/fix.rs"), "// real fix\n").unwrap();
+    assert!(worktree::changed("T-910").unwrap(), "uncommitted edit counts as changed");
+
+    worktree::ensure_for_doing("T-911").unwrap();
+    assert!(!worktree::changed("T-911").unwrap());
+    std::fs::write(d.join("worktrees/T-911/f.txt"), "x\n").unwrap();
+    run(&d.join("worktrees/T-911"), &["add", "-A"]);
+    run(&d.join("worktrees/T-911"), &["commit", "-m", "T-911 work"]);
+    assert!(worktree::changed("T-911").unwrap(), "committed-ahead counts as changed");
+
     worktree::ensure_for_doing("T-904").unwrap();
     let out = worktree::reap_abandoned(0).unwrap();
     assert!(out.contains("reaped"), "{out}");

@@ -42,6 +42,37 @@ pub fn ensure_for_doing(id: &str) -> Result<String, String> {
     }
 }
 
+/// True if a live worktree exists for this task (isolation on + dir present).
+/// The done-gate uses this so non-isolated setups skip the change check.
+pub fn has_worktree(id: &str) -> bool {
+    if disabled() { return false; }
+    match repo_root() {
+        Ok(root) => task_dir(&root, id).exists(),
+        Err(_) => false,
+    }
+}
+
+/// True if the task's worktree holds real work: uncommitted edits in its
+/// working tree, or commits on task/<id> ahead of the base branch. The
+/// done-gate rejects "done" when this is false — that is the exact signature
+/// of a false-done (criteria checked, but the fix was never built).
+pub fn changed(id: &str) -> Result<bool, String> {
+    let root = repo_root()?;
+    let dir = task_dir(&root, id);
+    if !dir.exists() { return Ok(false); }
+    // Uncommitted edits in the worktree working directory.
+    if run(&dir, &["status", "--porcelain"]).map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        return Ok(true);
+    }
+    // Commits on the task branch beyond the base (checked-out) branch.
+    let base = run(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|_| "main".into());
+    let branch = task_branch(id);
+    let ahead = run(&root, &["rev-list", "--count", &format!("{base}..{branch}")]).ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    Ok(ahead > 0)
+}
+
 pub fn finish_done(id: &str) -> Result<String, String> {
     if disabled() { return Ok(String::new()); }
     let root = match repo_root() { Ok(r) => r, Err(e) if strict() => return Err(e), Err(_) => return Ok(String::new()) };

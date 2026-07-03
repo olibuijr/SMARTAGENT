@@ -317,6 +317,22 @@ pub fn run(args: &[String]) -> Result<String, String> {
                     t.criteria.len()
                 ));
             }
+            // Verification gate: a task worked in an isolated worktree must have
+            // produced real changes before it can be done. Checked criteria are
+            // self-certified and were being ticked without implementing the fix;
+            // an empty worktree is the fingerprint of that false-done. Genuine
+            // no-code tasks (investigation, triage) pass --allow-empty.
+            if col == "done"
+                && !has(args, "--force")
+                && !has(args, "--allow-empty")
+                && worktree::has_worktree(&t.id)
+                && !worktree::changed(&t.id)?
+            {
+                return Err(format!(
+                    "{0}: worktrees/{0} has no changes — the fix was not implemented (criteria were checked but nothing was built). Edit the files in the worktree, or pass --allow-empty if this task genuinely needs no code change.",
+                    t.id
+                ));
+            }
             t.col = col.to_string();
             if col == "doing" {
                 t.owner = actor.clone();
@@ -350,6 +366,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
             let mut fwd = vec!["move".to_string(), id, "done".to_string()];
             if has(args, "--force") {
                 fwd.push("--force".into());
+            }
+            if has(args, "--allow-empty") {
+                fwd.push("--allow-empty".into());
             }
             if let Some(db) = flag(args, "--db") {
                 fwd.push("--db".into());
