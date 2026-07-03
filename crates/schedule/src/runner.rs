@@ -74,7 +74,16 @@ pub fn tick(journal: &Journal) -> Result<Vec<(String, i32)>, String> {
         if !job.enabled {
             continue; // paused
         }
-        let cron = Cron::parse(&job.cron)?;
+        // Skip a job with an unparseable cron instead of propagating `?` — that
+        // error bubbled to daemon() and killed the whole loop, stopping EVERY
+        // job because of one bad entry. Log and carry on.
+        let cron = match Cron::parse(&job.cron) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[schedule] skipping job {} — bad cron '{}': {e}", job.id, job.cron);
+                continue;
+            }
+        };
         if let Some(fire) = due_fire(job, &cron, now) {
             let mut exit = run_cmd(&job.cmd);
             journal.append(&Event::Ran { id: job.id.clone(), fire, exit, attempt: 1 })?;
@@ -99,8 +108,16 @@ pub fn daemon(journal: &Journal) -> Result<(), String> {
         let now = procutil::unix_secs();
         let sleep_secs = 60 - (now % 60);
         std::thread::sleep(std::time::Duration::from_secs(sleep_secs as u64));
-        for (id, exit) in tick(journal)? {
-            eprintln!("[schedule] ran {id} exit {exit}");
+        // A transient tick error (lock contention, one bad replay) must not
+        // kill the daemon and silently stop every scheduled job — log and
+        // continue to the next minute.
+        match tick(journal) {
+            Ok(rs) => {
+                for (id, exit) in rs {
+                    eprintln!("[schedule] ran {id} exit {exit}");
+                }
+            }
+            Err(e) => eprintln!("[schedule] tick error (continuing): {e}"),
         }
     }
 }
