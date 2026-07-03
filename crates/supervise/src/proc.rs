@@ -35,11 +35,17 @@ fn service_process_matches(pid: u32, needle: &str, argv: &[String], workdir: &Pa
     let Ok(bytes) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
         return false;
     };
-    let actual: Vec<String> = bytes
+    let mut actual: Vec<String> = bytes
         .split(|&b| b == 0)
         .filter(|s| !s.is_empty())
         .map(|s| String::from_utf8_lossy(s).into_owned())
         .collect();
+    // Some programs (chromium) rewrite their cmdline as ONE space-separated
+    // string (process title) — the NUL split then yields a single field and
+    // argv[0] comparison can never match. Re-split on whitespace.
+    if actual.len() == 1 && actual[0].contains(' ') {
+        actual = actual[0].split_whitespace().map(str::to_string).collect();
+    }
     let Some(actual_arg0) = actual.first() else {
         return false;
     };
@@ -48,7 +54,12 @@ fn service_process_matches(pid: u32, needle: &str, argv: &[String], workdir: &Pa
     }
     let expected_arg0 = resolve_program(&argv[0], workdir);
     let actual_arg0 = resolve_program(actual_arg0, workdir);
-    if actual_arg0 != expected_arg0 {
+    // Exact path match, or basename match: launcher wrappers exec the real
+    // binary under a different path (Arch: /usr/bin/chromium is a script that
+    // execs /usr/lib/chromium/chromium), which made the watch declare a
+    // healthy service dead and spawn doomed duplicates forever. The needle
+    // and cwd checks still scope the match to OUR instance.
+    if actual_arg0 != expected_arg0 && actual_arg0.file_name() != expected_arg0.file_name() {
         return false;
     }
     let Ok(cwd) = std::fs::read_link(format!("/proc/{pid}/cwd")) else {
