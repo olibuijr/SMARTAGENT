@@ -5,7 +5,7 @@ use std::path::Path;
 
 use semdb::cli;
 use semdb::json::{escape, parse, Value};
-use semdb::storage::Db;
+use semdb::storage::{Db, Entry};
 
 use crate::chunk::Chunk;
 
@@ -42,10 +42,81 @@ pub fn put_chunks(db_path: &Path, chunks: &[Chunk], vectors: &[Vec<f32>]) -> Res
         ));
     }
     let mut db = open_or_create(db_path)?;
-    for (chunk, vector) in chunks.iter().zip(vectors.iter()) {
+    put_chunks_in(&mut db, chunks, vectors)?;
+    Ok(chunks.len())
+}
+
+pub fn replace_doc(db_path: &Path, doc_id: &str, chunks: &[Chunk], vectors: &[Vec<f32>]) -> Result<(usize, usize), String> {
+    let mut db = open_or_create(db_path)?;
+    replace_doc_in(&mut db, doc_id, chunks, vectors, None)
+}
+
+fn replace_doc_in(
+    db: &mut Db,
+    doc_id: &str,
+    chunks: &[Chunk],
+    vectors: &[Vec<f32>],
+    fail_after_puts: Option<usize>,
+) -> Result<(usize, usize), String> {
+    if chunks.len() != vectors.len() {
+        return Err(format!("{} chunks but {} vectors", chunks.len(), vectors.len()));
+    }
+    let old = doc_entries(db, doc_id);
+    let old_ids: HashSet<String> = old.iter().map(|(id, _)| id.clone()).collect();
+    let new_ids: HashSet<String> = chunks.iter().map(|c| c.id.clone()).collect();
+    let removed = old.len();
+    let result = put_chunks_in_with_failure(db, chunks, vectors, fail_after_puts)
+        .and_then(|_| {
+            for id in old_ids.difference(&new_ids) {
+                db.delete(id)?;
+            }
+            Ok((chunks.len(), removed))
+        });
+    if let Err(e) = result {
+        rollback_doc_replace(db, &old, &new_ids, &old_ids);
+        return Err(e);
+    }
+    result
+}
+
+fn put_chunks_in(db: &mut Db, chunks: &[Chunk], vectors: &[Vec<f32>]) -> Result<(), String> {
+    put_chunks_in_with_failure(db, chunks, vectors, None)
+}
+
+fn put_chunks_in_with_failure(
+    db: &mut Db,
+    chunks: &[Chunk],
+    vectors: &[Vec<f32>],
+    fail_after_puts: Option<usize>,
+) -> Result<(), String> {
+    for (i, (chunk, vector)) in chunks.iter().zip(vectors.iter()).enumerate() {
+        if fail_after_puts == Some(i) {
+            return Err("simulated replace failure".into());
+        }
         db.put(&chunk.id, &meta_json(chunk), vector.clone())?;
     }
-    Ok(chunks.len())
+    Ok(())
+}
+
+fn doc_entries(db: &Db, doc_id: &str) -> Vec<(String, Entry)> {
+    db.index
+        .iter()
+        .filter_map(|(id, e)| {
+            RetrievedChunk::from_meta(id, 0.0, &e.meta)
+                .ok()
+                .filter(|c| c.doc_id == doc_id)
+                .map(|_| (id.clone(), e.clone()))
+        })
+        .collect()
+}
+
+fn rollback_doc_replace(db: &mut Db, old: &[(String, Entry)], new_ids: &HashSet<String>, old_ids: &HashSet<String>) {
+    for id in new_ids.difference(old_ids) {
+        let _ = db.delete(id);
+    }
+    for (id, entry) in old {
+        let _ = db.put(id, &entry.meta, entry.vector.clone());
+    }
 }
 
 pub fn retrieve(
@@ -176,5 +247,46 @@ mod tests {
         assert_eq!(got.citation(), "[ID:doc:000000]");
         assert_eq!(got.text, "hello\nworld");
         assert_eq!(got.start, 2);
+    }
+}
+
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.join("docs.semdb")
+    }
+
+    fn chunk(doc: &str, order: usize, text: &str) -> Chunk {
+        Chunk {
+            id: format!("{doc}:{order:06}"),
+            doc_id: doc.into(),
+            source: "test".into(),
+            kind: "text".into(),
+            order,
+            start: 0,
+            end: text.len(),
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn failed_replace_keeps_old_doc_retrievable() {
+        let path = scratch("rag-replace-rollback");
+        let old = vec![chunk("doc", 0, "old text")];
+        put_chunks(&path, &old, &[vec![1.0, 0.0]]).unwrap();
+        let mut db = Db::open(&path).unwrap();
+        let new = vec![chunk("doc", 0, "new text"), chunk("doc", 1, "more new")];
+        let err = replace_doc_in(&mut db, "doc", &new, &[vec![0.0, 1.0], vec![0.0, 1.0]], Some(1)).unwrap_err();
+        assert!(err.contains("simulated"), "{err}");
+        drop(db);
+        let got = get(&path, "doc:000000").unwrap();
+        assert_eq!(got.text, "old text");
+        assert!(get(&path, "doc:000001").is_err(), "partial new chunk survived rollback");
     }
 }

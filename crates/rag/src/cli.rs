@@ -77,10 +77,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
                 embedder.embed_batch(&texts)?
             };
-            // Re-ingest safety: drop any existing chunks for this doc first,
-            // or an edited doc with fewer/reordered chunks leaves stale orphans.
-            let removed = store::delete_doc(&db, &doc_id).unwrap_or(0);
-            let n = store::put_chunks(&db, &chunks, &vectors)?;
+            // Re-ingest safety: stage replacement and roll back on failure so
+            // a failed edited ingest never drops the previously retrievable doc.
+            let (n, removed) = store::replace_doc(&db, &doc_id, &chunks, &vectors)?;
             if removed > 0 {
                 Ok(format!(
                     "re-ingested {n} chunks from {source} as {doc_id} (replaced {removed})"
