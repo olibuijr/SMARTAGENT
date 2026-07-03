@@ -236,7 +236,7 @@ fn run_cargo_done_checks(t: &Task) -> Result<(), String> {
         return Ok(());
     }
     let cwd = if worktree::has_worktree(&t.id) {
-        worktree::current_task_path(&t.id)?
+        worktree::main_checkout_path()?
     } else {
         std::env::current_dir().map_err(|e| e.to_string())?
     };
@@ -475,6 +475,13 @@ pub fn run(args: &[String]) -> Result<String, String> {
             if col == "done" && !has(args, "--force") {
                 run_cargo_done_checks(&t)?;
             }
+            let note = if col == "doing" {
+                worktree::ensure_for_doing(&t.id)?
+            } else if col == "done" {
+                worktree::finish_done(&t.id)?
+            } else {
+                String::new()
+            };
             t.col = col.to_string();
             if col == "doing" {
                 t.owner = actor.clone();
@@ -493,13 +500,6 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 "done" => notify_task_lifecycle("completed", &t, &actor, None),
                 _ => {}
             }
-            let note = if col == "doing" {
-                worktree::ensure_for_doing(&t.id)?
-            } else if col == "done" {
-                worktree::finish_done(&t.id)?
-            } else {
-                String::new()
-            };
             Ok(format!("{} → {}{}", t.id, col, note))
         }
         Some("done") => {

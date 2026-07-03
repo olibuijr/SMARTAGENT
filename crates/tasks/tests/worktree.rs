@@ -16,20 +16,41 @@ fn env_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn run(dir: &Path, args: &[&str]) {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
-    assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {:?}: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn porcelain_empty(dir: &Path) -> bool {
-    let out = Command::new("git").arg("-C").arg(dir).args(["status", "--porcelain"]).output().unwrap();
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).trim().is_empty()
 }
 
 fn repo(name: &str) -> PathBuf {
-    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+    let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/test-scratch")
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    Command::new("git").args(["init", "-b", "main"]).arg(&d).output().unwrap();
+    Command::new("git")
+        .args(["init", "-b", "main"])
+        .arg(&d)
+        .output()
+        .unwrap();
     run(&d, &["config", "user.email", "test@example.invalid"]);
     run(&d, &["config", "user.name", "Test"]);
     std::fs::write(d.join("README.md"), "base\n").unwrap();
@@ -53,7 +74,12 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     let out = worktree::ensure_for_doing("T-900").unwrap();
     assert!(out.contains("worktrees/T-900"), "{out}");
     assert!(d.join("worktrees/T-900/.git").exists());
-    let branches = Command::new("git").arg("-C").arg(&d).args(["branch", "--list", "task/T-900"]).output().unwrap();
+    let branches = Command::new("git")
+        .arg("-C")
+        .arg(&d)
+        .args(["branch", "--list", "task/T-900"])
+        .output()
+        .unwrap();
     assert!(String::from_utf8_lossy(&branches.stdout).contains("task/T-900"));
 
     // (a) Clean merge: main checkout ends up clean and fast-forwarded onto
@@ -64,15 +90,32 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     assert!(out.contains("merged task/T-901"), "{out}");
     assert!(d.join("result.txt").exists());
     assert!(!d.join("worktrees/T-901").exists());
-    assert!(porcelain_empty(&d), "main checkout left dirty after clean merge");
-    assert!(!d.join(".git/MERGE_HEAD").exists(), "main checkout left mid-merge");
+    assert!(
+        porcelain_empty(&d),
+        "main checkout left dirty after clean merge"
+    );
+    assert!(
+        !d.join(".git/MERGE_HEAD").exists(),
+        "main checkout left mid-merge"
+    );
     // The root's own operation was a pure fast-forward (moved the ref, no
     // in-place merge command run there) — the reflog says so.
-    let reflog = Command::new("git").arg("-C").arg(&d).args(["reflog", "-1"]).output().unwrap();
+    let reflog = Command::new("git")
+        .arg("-C")
+        .arg(&d)
+        .args(["reflog", "-1"])
+        .output()
+        .unwrap();
     let reflog_line = String::from_utf8_lossy(&reflog.stdout).to_lowercase();
-    assert!(reflog_line.contains("fast-forward") || reflog_line.contains("merge"), "{reflog_line}");
+    assert!(
+        reflog_line.contains("fast-forward") || reflog_line.contains("merge"),
+        "{reflog_line}"
+    );
     // No merge-scratch state left behind under worktrees/ either.
-    let leftover = std::fs::read_dir(d.join("worktrees")).unwrap().filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().starts_with(".merge-"));
+    let leftover = std::fs::read_dir(d.join("worktrees"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().starts_with(".merge-"));
     assert!(!leftover, "isolated merge scratch worktree not cleaned up");
 
     worktree::ensure_for_doing("T-902").unwrap();
@@ -86,17 +129,29 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     // (the false-done fingerprint); an edited or committed one counts as work.
     worktree::ensure_for_doing("T-910").unwrap();
     assert!(worktree::has_worktree("T-910"));
-    assert!(!worktree::has_worktree("T-999"), "unknown task has no worktree");
-    assert!(!worktree::changed("T-910").unwrap(), "fresh worktree has no changes");
+    assert!(
+        !worktree::has_worktree("T-999"),
+        "unknown task has no worktree"
+    );
+    assert!(
+        !worktree::changed("T-910").unwrap(),
+        "fresh worktree has no changes"
+    );
     std::fs::write(d.join("worktrees/T-910/fix.rs"), "// real fix\n").unwrap();
-    assert!(worktree::changed("T-910").unwrap(), "uncommitted edit counts as changed");
+    assert!(
+        worktree::changed("T-910").unwrap(),
+        "uncommitted edit counts as changed"
+    );
 
     worktree::ensure_for_doing("T-911").unwrap();
     assert!(!worktree::changed("T-911").unwrap());
     std::fs::write(d.join("worktrees/T-911/f.txt"), "x\n").unwrap();
     run(&d.join("worktrees/T-911"), &["add", "-A"]);
     run(&d.join("worktrees/T-911"), &["commit", "-m", "T-911 work"]);
-    assert!(worktree::changed("T-911").unwrap(), "committed-ahead counts as changed");
+    assert!(
+        worktree::changed("T-911").unwrap(),
+        "committed-ahead counts as changed"
+    );
 
     // (b) Conflict-abort: a task branch that conflicts with the base must
     // NOT corrupt the base. The conflict is discovered and aborted in the
@@ -108,18 +163,64 @@ fn worktree_lifecycle_create_merge_isolate_and_reap() {
     worktree::ensure_for_doing("T-920").unwrap();
     std::fs::write(d.join("worktrees/T-920/conflict.txt"), "worktree version\n").unwrap();
     run(&d.join("worktrees/T-920"), &["add", "-A"]);
-    run(&d.join("worktrees/T-920"), &["commit", "-m", "T-920 change"]);
+    run(
+        &d.join("worktrees/T-920"),
+        &["commit", "-m", "T-920 change"],
+    );
     std::fs::write(d.join("conflict.txt"), "main version\n").unwrap();
     run(&d, &["add", "-A"]);
     run(&d, &["commit", "-m", "main diverges same line"]);
-    let out = worktree::finish_done("T-920").unwrap();
-    assert!(out.contains("MERGE CONFLICT"), "expected conflict abort, got: {out}");
+    let out = worktree::finish_done("T-920").unwrap_err();
+    assert!(
+        out.contains("MERGE CONFLICT"),
+        "expected conflict abort, got: {out}"
+    );
     assert!(!d.join(".git/MERGE_HEAD").exists(), "base left mid-merge");
-    assert_eq!(std::fs::read_to_string(d.join("conflict.txt")).unwrap(), "main version\n", "base corrupted by aborted merge");
-    assert!(d.join("worktrees/T-920").exists(), "worktree must be preserved on conflict");
-    assert!(porcelain_empty(&d), "main checkout left dirty (UU/M) by aborted conflict merge");
-    let leftover = std::fs::read_dir(d.join("worktrees")).unwrap().filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().starts_with(".merge-"));
-    assert!(!leftover, "isolated merge scratch worktree not cleaned up after conflict");
+    assert_eq!(
+        std::fs::read_to_string(d.join("conflict.txt")).unwrap(),
+        "main version\n",
+        "base corrupted by aborted merge"
+    );
+    assert!(
+        d.join("worktrees/T-920").exists(),
+        "worktree must be preserved on conflict"
+    );
+    assert!(
+        porcelain_empty(&d),
+        "main checkout left dirty (UU/M) by aborted conflict merge"
+    );
+    let leftover = std::fs::read_dir(d.join("worktrees"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().starts_with(".merge-"));
+    assert!(
+        !leftover,
+        "isolated merge scratch worktree not cleaned up after conflict"
+    );
+
+    worktree::ensure_for_doing("T-930").unwrap();
+    std::fs::write(d.join("worktrees/T-930/unmerged.txt"), "branch-only\n").unwrap();
+    run(&d.join("worktrees/T-930"), &["add", "-A"]);
+    run(
+        &d.join("worktrees/T-930"),
+        &["commit", "-m", "T-930 branch-only"],
+    );
+    let out = worktree::finish_done("T-930").unwrap();
+    assert!(out.contains("merged task/T-930"), "{out}");
+    let ancestor = Command::new("git")
+        .arg("-C")
+        .arg(&d)
+        .args(["merge-base", "--is-ancestor", "HEAD", "main"])
+        .status()
+        .unwrap();
+    assert!(
+        ancestor.success(),
+        "main must contain the merge commit after finish_done reports success"
+    );
+    assert!(
+        d.join("unmerged.txt").exists(),
+        "main checkout must contain task branch changes before done succeeds"
+    );
 
     worktree::ensure_for_doing("T-904").unwrap();
     let out = worktree::reap_abandoned(0).unwrap();
@@ -142,14 +243,20 @@ fn sequential_merges_leave_no_residue() {
     let out1 = worktree::finish_done("T-960").unwrap();
     assert!(out1.contains("merged task/T-960"), "{out1}");
     assert!(porcelain_empty(&d), "residue after first merge");
-    assert!(!d.join(".git/tasks-merge.lock").exists(), "lock not released after first merge");
+    assert!(
+        !d.join(".git/tasks-merge.lock").exists(),
+        "lock not released after first merge"
+    );
 
     worktree::ensure_for_doing("T-961").unwrap();
     std::fs::write(d.join("worktrees/T-961/two.txt"), "two\n").unwrap();
     let out2 = worktree::finish_done("T-961").unwrap();
     assert!(out2.contains("merged task/T-961"), "{out2}");
     assert!(porcelain_empty(&d), "residue after second merge");
-    assert!(!d.join(".git/tasks-merge.lock").exists(), "lock not released after second merge");
+    assert!(
+        !d.join(".git/tasks-merge.lock").exists(),
+        "lock not released after second merge"
+    );
 
     assert!(d.join("one.txt").exists());
     assert!(d.join("two.txt").exists());
@@ -178,13 +285,28 @@ fn concurrent_merges_are_serialized_without_residue() {
     let r1 = t1.join().expect("T-970 merge thread panicked");
     let r2 = t2.join().expect("T-971 merge thread panicked");
 
-    assert!(r1.as_deref().unwrap_or("").contains("merged task/T-970"), "{r1:?}");
-    assert!(r2.as_deref().unwrap_or("").contains("merged task/T-971"), "{r2:?}");
+    assert!(
+        r1.as_deref().unwrap_or("").contains("merged task/T-970"),
+        "{r1:?}"
+    );
+    assert!(
+        r2.as_deref().unwrap_or("").contains("merged task/T-971"),
+        "{r2:?}"
+    );
     assert!(d.join("left.txt").exists());
     assert!(d.join("right.txt").exists());
     assert!(!d.join("worktrees/T-970").exists());
     assert!(!d.join("worktrees/T-971").exists());
-    assert!(porcelain_empty(&d), "residue left on main after concurrent merges");
-    assert!(!d.join(".git/MERGE_HEAD").exists(), "main left mid-merge by a racing merge");
-    assert!(!d.join(".git/tasks-merge.lock").exists(), "lock not released after concurrent merges");
+    assert!(
+        porcelain_empty(&d),
+        "residue left on main after concurrent merges"
+    );
+    assert!(
+        !d.join(".git/MERGE_HEAD").exists(),
+        "main left mid-merge by a racing merge"
+    );
+    assert!(
+        !d.join(".git/tasks-merge.lock").exists(),
+        "lock not released after concurrent merges"
+    );
 }
