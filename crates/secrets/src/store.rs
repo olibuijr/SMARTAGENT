@@ -4,6 +4,7 @@
 //! (0600, /dev/urandom), and the secret NAME as associated data so a value
 //! can't be moved to another name. Tampering fails the tag on read.
 
+use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -97,14 +98,35 @@ fn load_or_make_key(dir: &Path) -> Result<Vec<u8>, String> {
             f.read_exact(&mut key)
         })
         .map_err(|e| format!("read /dev/urandom: {e}"))?;
-    std::fs::write(&path, &key).map_err(|e| e.to_string())?;
-    // Best-effort 0600 perms.
+    // Atomic create: two processes racing first-init would otherwise each write
+    // a DIFFERENT key, and whichever loses the race can no longer decrypt the
+    // secrets sealed with its key ("tampered/corrupt") — permanent, silent
+    // secret loss. create_new + mode(0600) also closes the world-readable
+    // window that a write-then-chmod left open.
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
-    Ok(key)
+    match opts.open(&path) {
+        Ok(mut f) => {
+            use std::io::Write;
+            f.write_all(&key).map_err(|e| e.to_string())?;
+            Ok(key)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Another process won the race — adopt the key it committed.
+            let k = std::fs::read(&path).map_err(|e| e.to_string())?;
+            if k.len() >= 32 {
+                Ok(k)
+            } else {
+                Err("secrets.key exists but is truncated".into())
+            }
+        }
+        Err(e) => Err(format!("create secrets.key: {e}")),
+    }
 }
 
 /// 96-bit AEAD nonce from the OS CSPRNG. A fresh nonce per `set` is required —
