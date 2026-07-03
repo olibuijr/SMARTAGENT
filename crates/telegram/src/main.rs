@@ -84,7 +84,7 @@ fn broadcast(args: &[String]) -> Result<String, String> {
     let kind = flag(args, "--kind").unwrap_or_else(|| "normal".into());
     let token = bot_token()?;
     let chats = Config::load()
-        .resolve("telegram_allowed_chats", "SMARTAGENT_TELEGRAM_CHATS", None)
+        .resolve("telegram_allowed_chats", "SMARTAGENT_TELEGRAM_ALLOWED_CHATS", None)
         .unwrap_or_default();
     let mut n = 0;
     for chat in chats.split(',').map(str::trim).filter(|c| !c.is_empty()) {
@@ -201,7 +201,16 @@ fn poll(args: &[String]) -> Result<String, String> {
                 .as_deref()
                 .map(|name| is_group_mention(chat_type, raw_text, name))
                 .unwrap_or(false);
-            if allow_chat(&chat).is_err() && !mention_ok {
+            // Hard allow-list gate FIRST: an @-mention is a noise filter within
+            // an allowed chat, never a way in. Previously `is_err() && !mention_ok`
+            // let ANY untrusted group grant full agent access just by @-mentioning
+            // the bot. Now a non-allow-listed chat is always rejected; within an
+            // allowed group we additionally require the bot be addressed.
+            if allow_chat(&chat).is_err() {
+                continue;
+            }
+            let is_group = matches!(chat_type, "group" | "supergroup" | "channel");
+            if is_group && !mention_ok {
                 continue;
             }
             let text = if mention_ok {

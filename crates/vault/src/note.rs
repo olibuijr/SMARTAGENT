@@ -21,12 +21,26 @@ pub fn slugify(title: &str) -> String {
 }
 
 pub fn note_path(vault: &Path, name: &str) -> PathBuf {
+    // Path-traversal guard: a note name is a filename, never a path. Names like
+    // "../../etc/passwd" or "/etc/shadow" would otherwise let read/append/rm/mv
+    // reach any .md outside the vault. Reduce to the final path component and
+    // strip a trailing .md so only vault-local files are ever addressed.
+    let leaf = Path::new(name)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let leaf = leaf.strip_suffix(".md").unwrap_or(&leaf).to_string();
+    if leaf.is_empty() || leaf == "." || leaf == ".." {
+        // Nothing addressable — return a vault-local placeholder that will fail
+        // to read/exist rather than escaping the vault.
+        return vault.join("_.md");
+    }
     // Accept either a bare name or a name.md; resolve by slug match too.
-    let direct = vault.join(format!("{name}.md"));
+    let direct = vault.join(format!("{leaf}.md"));
     if direct.exists() {
         return direct;
     }
-    let slug = slugify(name);
+    let slug = slugify(&leaf);
     let by_slug = vault.join(format!("{slug}.md"));
     if by_slug.exists() {
         return by_slug;
@@ -114,5 +128,22 @@ mod tests {
         let c = "---\ntitle: X\n---\nbody here";
         assert_eq!(strip_frontmatter(c), "body here");
         assert_eq!(strip_frontmatter("no fm"), "no fm");
+    }
+}
+
+#[cfg(test)]
+mod traversal_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn note_path_stays_in_vault() {
+        let vault = Path::new("/tmp/vault");
+        for evil in ["../../etc/passwd", "/etc/shadow", "../secret", "a/b/c", "..", "."] {
+            let p = note_path(vault, evil);
+            assert!(p.starts_with(vault), "escaped vault: {evil} -> {}", p.display());
+        }
+        // A normal name still resolves vault-local.
+        assert_eq!(note_path(vault, "my-note"), vault.join("my-note.md"));
     }
 }
