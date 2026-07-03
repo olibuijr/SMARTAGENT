@@ -28,6 +28,17 @@ const COMPACT_MIN_RECORDS: u64 = 4096;
 const COMPACT_RATIO: u64 = 4;
 const COMPACT_SWEEP_SECS: u64 = 60;
 
+const LIBRARY_RESERVED_BASENAMES: &[&str] = &[
+    "medvitund.semdb",
+    "tasks.semdb",
+    "hooks.semdb",
+    "workflow.semdb",
+    "goal.semdb",
+    "evals.semdb",
+    "rag.semdb",
+    "codegraph.symbols.semdb",
+];
+
 /// Run the daemon: bind the socket, start the compactor, serve forever.
 pub fn serve(_args: &[String]) -> Result<String, String> {
     let sock = crate::config::Config::load().semdb_socket();
@@ -236,6 +247,7 @@ fn parse_rows(req: &Value) -> Result<Vec<(String, String, Vec<f32>)>, String> {
 /// Get an open handle for `db`, opening the file once if it is not cached.
 fn handle(reg: &Registry, db: &str) -> Result<DbHandle, String> {
     let key = normalize(db);
+    refuse_library_reserved(&key)?;
     {
         // Scoped so the read guard is released BEFORE we request the write
         // lock below — std RwLock is not upgradeable, and holding a read guard
@@ -256,6 +268,7 @@ fn handle(reg: &Registry, db: &str) -> Result<DbHandle, String> {
 }
 
 fn create_db(reg: &Registry, key: &Path) -> Result<(), String> {
+    refuse_library_reserved(key)?;
     let mut map = wlock_reg(reg);
     if map.contains_key(key) {
         return Err(format!("{}: already exists", key.display()));
@@ -272,6 +285,19 @@ fn create_db(reg: &Registry, key: &Path) -> Result<(), String> {
 /// both cases) and append the file name, rather than the whole path (which
 /// canonicalizes differently pre/post creation). For a regular file this
 /// equals `canonicalize(full)`; only a symlinked db path (never used) differs.
+fn refuse_library_reserved(path: &Path) -> Result<(), String> {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+    if LIBRARY_RESERVED_BASENAMES.contains(&name) {
+        return Err(format!(
+            "{} is library-reserved; use the owning crate API instead of semdb CLI/daemon direct access",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 fn normalize(path: &str) -> PathBuf {
     let p = Path::new(path);
     let abs = if p.is_absolute() {
@@ -332,4 +358,31 @@ fn rlock_reg(reg: &Registry) -> std::sync::RwLockReadGuard<'_, HashMap<PathBuf, 
 }
 fn wlock_reg(reg: &Registry) -> std::sync::RwLockWriteGuard<'_, HashMap<PathBuf, DbHandle>> {
     reg.write().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn library_reserved_basenames_are_refused() {
+        for name in LIBRARY_RESERVED_BASENAMES {
+            let path = PathBuf::from("data").join(name);
+            let err = refuse_library_reserved(&path).unwrap_err();
+            assert!(err.contains("library-reserved"), "{name}: {err}");
+            assert!(err.contains("owning crate API"), "{name}: {err}");
+        }
+    }
+
+    #[test]
+    fn handle_refuses_to_adopt_library_reserved_db() {
+        let reg: Registry = Arc::new(RwLock::new(HashMap::new()));
+        let err = match handle(&reg, "data/medvitund.semdb") {
+            Ok(_) => panic!("reserved db was adopted"),
+            Err(e) => e,
+        };
+        assert!(err.contains("medvitund.semdb"));
+        assert!(err.contains("library-reserved"));
+        assert!(rlock_reg(&reg).is_empty());
+    }
 }
