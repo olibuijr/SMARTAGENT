@@ -237,7 +237,17 @@ fn poll(args: &[String]) -> Result<String, String> {
     let token = bot_token()?;
     let timeout = flag(args, "--timeout").unwrap_or_else(|| "25".into());
     let offset = offset()?;
-    let bot_username = api::get_me_username(&token).ok();
+    let me = api::call(&token, "getMe", "{}").ok();
+    let bot_username = me
+        .as_ref()
+        .and_then(|v| v.get("username"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let bot_id = me
+        .as_ref()
+        .and_then(|v| v.get("id"))
+        .map(val_s)
+        .unwrap_or_default();
     let result = api::get_updates(&token, offset, timeout.parse::<u64>().unwrap_or(0))?;
     let mut max_id = offset.saturating_sub(1);
     let mut out = Vec::new();
@@ -328,6 +338,7 @@ fn poll(args: &[String]) -> Result<String, String> {
                 .as_deref()
                 .map(|name| is_group_mention(chat_type, raw_text, name))
                 .unwrap_or(false);
+            let reply_to_bot = is_reply_to_bot(msg, &bot_id, bot_username.as_deref().unwrap_or(""));
             // Hard allow-list gate FIRST: an @-mention is a noise filter within
             // an allowed chat, never a way in. Previously `is_err() && !mention_ok`
             // let ANY untrusted group grant full agent access just by @-mentioning
@@ -349,7 +360,7 @@ fn poll(args: &[String]) -> Result<String, String> {
                 continue;
             }
             let is_group = matches!(chat_type, "group" | "supergroup" | "channel");
-            if is_group && !mention_ok {
+            if is_group && !mention_ok && !reply_to_bot {
                 continue;
             }
             let text = if mention_ok {
@@ -445,6 +456,25 @@ fn format_update_summary(it: &Value) -> String {
         }
     }
     format!("update={uid} kind=other")
+}
+
+fn is_reply_to_bot(msg: &Value, bot_id: &str, bot_username: &str) -> bool {
+    let Some(reply) = msg.get("reply_to_message") else {
+        return false;
+    };
+    let Some(from) = reply.get("from") else {
+        return false;
+    };
+    let is_bot = matches!(from.get("is_bot"), Some(Value::Bool(true)));
+    if !is_bot {
+        return false;
+    }
+    let reply_id = from.get("id").map(val_s).unwrap_or_default();
+    if !bot_id.is_empty() && reply_id == bot_id {
+        return true;
+    }
+    let reply_username = from.get("username").and_then(Value::as_str).unwrap_or("");
+    !bot_username.is_empty() && reply_username.eq_ignore_ascii_case(bot_username)
 }
 
 fn is_group_mention(chat_type: &str, text: &str, bot_username: &str) -> bool {
