@@ -146,6 +146,41 @@ run_tool_registration_smoke() {
     echo "ok ($GOT/22 extension tools registered in source)"
 }
 
+run_catalog_extension_smoke() {
+    echo "── smoke: extension catalog coverage ──"
+    MISSING=""
+    for f in extensions/*.ts; do
+        [ -f "$f" ] || continue
+        stem=$(basename "$f" .ts)
+        file=$(basename "$f")
+        if ! grep -Eq "\`$stem\`|\`$file\`|$file" CATALOG.md; then
+            MISSING="$MISSING $file"
+        fi
+    done
+    if [ -n "$MISSING" ]; then
+        echo "FAIL: CATALOG.md missing active extension rows:$MISSING"
+        exit 1
+    fi
+    echo "ok (all active extensions covered by CATALOG.md)"
+}
+
+run_catalog_smoke_regression() {
+    DIR="$ROOT/.scratch/catalog-smoke"
+    rm -rf "$DIR"
+    mkdir -p "$DIR/extensions"
+    printf 'export async function activate(pi) {}\n' > "$DIR/extensions/alpha-panel.ts"
+    printf '# Catalog\n\n| Tool | Backing crate | What it does |\n|---|---|---|\n| `alpha-panel.ts` | — | documented |\n' > "$DIR/CATALOG.md"
+    (cd "$DIR" && ROOT="$DIR" run_catalog_extension_smoke) >/dev/null
+    printf 'export async function activate(pi) {}\n' > "$DIR/extensions/beta-panel.ts"
+    set +e
+    OUT=$(cd "$DIR" && ROOT="$DIR" run_catalog_extension_smoke 2>&1)
+    RC=$?
+    set -e
+    if [ "$RC" -eq 0 ]; then echo "FAIL: catalog smoke missed missing beta-panel.ts"; exit 1; fi
+    printf '%s' "$OUT" | grep -q 'beta-panel.ts' || { echo "FAIL: catalog smoke did not name missing extension: $OUT"; exit 1; }
+    echo "ok (catalog smoke regression)"
+}
+
 run_statusline_smoke() {
     echo "── smoke: statusline probes bounded ──"
     # Mirrors extensions/lib/statusline-common.ts. Every probe must return
@@ -257,6 +292,8 @@ gate() {
     echo "ok (extension static globals)"
 
     run_tool_registration_smoke
+    run_catalog_smoke_regression
+    run_catalog_extension_smoke
     run_statusline_smoke
     run_help_smoke
     run_hook_gate_smoke
@@ -302,6 +339,10 @@ case "${1:-}" in
         ;;
     tools-smoke-test)
         run_tool_registration_smoke
+        ;;
+    catalog-smoke-test)
+        run_catalog_smoke_regression
+        run_catalog_extension_smoke
         ;;
     statusline-smoke-test)
         run_statusline_smoke
