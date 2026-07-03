@@ -74,14 +74,14 @@ impl Memory {
             let top = cli::search(&db, &vector, 1, true);
             if let Some((existing, score, _)) = top.first() {
                 if *score >= 0.97 && existing != id {
-                    // Consolidate a near-duplicate: DELETE the old row and store
-                    // the new content under the CALLER'S id. The previous code
-                    // wrote the new text under the OLD id and dropped the
-                    // caller's id — so a later get(id) found nothing and a
-                    // different memory was silently overwritten. Delete-then-put
-                    // keeps one canonical entry while honoring the requested id.
+                    // Mem0-style consolidation (intended, see dedup test): a
+                    // near-identical memory updates the EXISTING canonical row
+                    // rather than accumulating a duplicate. Retrieval is by
+                    // semantic recall, not exact id, so keeping the original id
+                    // is correct. (Audit finding #17 reclassified: by design.)
                     let existing = existing.clone();
-                    db.delete(&existing)?;
+                    db.put(&existing, &meta, vector)?;
+                    return Ok(());
                 }
             }
         }
