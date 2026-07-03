@@ -10,6 +10,7 @@ use std::time::Duration;
 /// Reject frames larger than this to prevent a corrupt/hostile length field
 /// from triggering a multi-GB allocation. CDP frames are well under this.
 const MAX_FRAME: usize = 64 * 1024 * 1024;
+const MAX_CONTROL_PAYLOAD: usize = 125;
 
 pub struct WebSocket {
     stream: TcpStream,
@@ -107,6 +108,12 @@ impl WebSocket {
     }
 
     fn send_pong(&mut self, payload: &[u8]) -> Result<(), String> {
+        if payload.len() > MAX_CONTROL_PAYLOAD {
+            return Err(format!(
+                "control frame payload too large: {} bytes (max {MAX_CONTROL_PAYLOAD})",
+                payload.len()
+            ));
+        }
         let mask = mask_key();
         let mut frame = vec![0x8A, 0x80 | payload.len() as u8];
         frame.extend_from_slice(&mask);
@@ -133,6 +140,11 @@ impl WebSocket {
                 l = (l << 8) | self.read_byte()? as usize;
             }
             len = l;
+        }
+        if opcode >= 0x8 && len > MAX_CONTROL_PAYLOAD {
+            return Err(format!(
+                "control frame payload too large: {len} bytes (max {MAX_CONTROL_PAYLOAD})"
+            ));
         }
         if len > MAX_FRAME {
             return Err(format!("frame too large: {len} bytes (max {MAX_FRAME})"));
@@ -375,6 +387,35 @@ mod tests {
             websocket_accept("dGhlIHNhbXBsZSBub25jZQ=="),
             "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
         );
+    }
+
+    fn loopback_ws() -> WebSocket {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        drop(server);
+        WebSocket {
+            stream: client,
+            buf: Vec::new(),
+            pos: 0,
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_control_frame_payload() {
+        let mut ws = loopback_ws();
+        ws.buf = vec![0x89, 126, 0, 126];
+        ws.buf.extend(std::iter::repeat(b'x').take(126));
+        let err = ws.read_frame().unwrap_err();
+        assert!(err.contains("control frame payload too large: 126 bytes"));
+    }
+
+    #[test]
+    fn send_pong_rejects_oversized_payload_before_length_cast() {
+        let mut ws = loopback_ws();
+        let err = ws.send_pong(&vec![b'x'; 126]).unwrap_err();
+        assert!(err.contains("control frame payload too large: 126 bytes"));
     }
 
     #[test]
