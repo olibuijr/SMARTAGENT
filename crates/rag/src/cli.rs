@@ -284,15 +284,21 @@ Embedding config: config/smartagent.conf (embeddings_endpoint, embeddings_model)
 /// Crude HTML→text: drop <script>/<style>, strip tags, decode a few entities,
 /// collapse whitespace. Enough to ingest a page's readable text over HTTP.
 fn strip_html(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
+    // Operate entirely on BYTES: the previous version sliced the &str at raw
+    // byte offsets (`lower[i..]`) which panics mid-UTF-8, and pushed `bytes[i]
+    // as char` which mojibakes every multibyte character. Accumulate bytes and
+    // lossy-decode once at the end.
     let bytes = html.as_bytes();
     let lower = html.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    let starts = |i: usize, needle: &str| lb[i..].starts_with(needle.as_bytes());
+    let mut out: Vec<u8> = Vec::with_capacity(html.len());
     let mut i = 0;
     let mut in_tag = false;
     let mut skip_to: Option<&str> = None;
     while i < bytes.len() {
         if let Some(end) = skip_to {
-            if lower[i..].starts_with(end) {
+            if starts(i, end) {
                 i += end.len();
                 skip_to = None;
             } else {
@@ -300,27 +306,28 @@ fn strip_html(html: &str) -> String {
             }
             continue;
         }
-        let c = bytes[i] as char;
-        if c == '<' {
-            if lower[i..].starts_with("<script") {
+        let b = bytes[i];
+        if b == b'<' {
+            if starts(i, "<script") {
                 skip_to = Some("</script>");
                 i += 1;
                 continue;
             }
-            if lower[i..].starts_with("<style") {
+            if starts(i, "<style") {
                 skip_to = Some("</style>");
                 i += 1;
                 continue;
             }
             in_tag = true;
-        } else if c == '>' {
+        } else if b == b'>' {
             in_tag = false;
-            out.push(' ');
+            out.push(b' ');
         } else if !in_tag {
-            out.push(c);
+            out.push(b);
         }
         i += 1;
     }
+    let out = String::from_utf8_lossy(&out).into_owned();
     let decoded = out
         .replace("&amp;", "&")
         .replace("&lt;", "<")

@@ -152,10 +152,18 @@ const DIST_EXTRA: [u8; 30] = [
 ];
 
 /// Inflate a raw DEFLATE stream (RFC 1951).
+/// Output ceiling: a DEFLATE stream can expand ~1000x (a decompression bomb),
+/// so a few KB of crafted PNG/zlib could OOM the process. 64MB is far above any
+/// real page render.
+const MAX_INFLATE_OUTPUT: usize = 64 * 1024 * 1024;
+
 pub fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
     let mut r = BitReader::new(data);
     let mut out: Vec<u8> = Vec::new();
     loop {
+        if out.len() > MAX_INFLATE_OUTPUT {
+            return Err("inflate output exceeds cap (decompression bomb?)".into());
+        }
         let last = r.bits(1)? == 1;
         match r.bits(2)? {
             0 => {
@@ -271,6 +279,11 @@ fn inflate_block(
     dist: &Huffman,
 ) -> Result<(), String> {
     loop {
+        // Bound output inside the block too — a single block's back-reference
+        // copies can expand output enormously without ever yielding control.
+        if out.len() > MAX_INFLATE_OUTPUT {
+            return Err("inflate output exceeds cap (decompression bomb?)".into());
+        }
         let sym = lit.decode(r)?;
         match sym {
             0..=255 => out.push(sym as u8),

@@ -133,7 +133,14 @@ impl StdioClient {
         if t.is_empty() {
             String::new()
         } else {
-            format!("; server stderr: {}", &t[t.len().saturating_sub(400)..])
+            // Char-boundary-safe tail: a raw byte offset can land mid-UTF-8 and
+            // panic when the server emits non-ASCII stderr. Walk forward to the
+            // next boundary at or after the 400-byte target.
+            let target = t.len().saturating_sub(400);
+            let start = (target..=t.len())
+                .find(|&i| t.is_char_boundary(i))
+                .unwrap_or(t.len());
+            format!("; server stderr: {}", &t[start..])
         }
     }
 }
