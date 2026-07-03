@@ -299,3 +299,39 @@ fn rejects_mismatched_dimensions() {
     let err = db.put("b", "{}", vec![1.0, 0.0]).unwrap_err();
     assert!(err.contains("dim"), "{err}");
 }
+
+#[test]
+fn concurrent_independent_handles_do_not_corrupt() {
+    // The gateway-fleet scenario: N processes each open their OWN Db handle on
+    // the SAME file and append concurrently (beat.rs, tasks, supervise, …).
+    // Before the flock fix these appends clobbered each other at stale offsets,
+    // and a reopen truncated the torn tail — losing rows. With LOCK_EX every
+    // frame lands intact after the true end, so all writes survive.
+    let path = tmp("concur");
+    Db::create(&path).unwrap();
+    let writers = 6usize;
+    let per = 40usize;
+    let handles: Vec<_> = (0..writers)
+        .map(|w| {
+            let p = path.clone();
+            std::thread::spawn(move || {
+                let mut db = Db::open(&p).unwrap();
+                for i in 0..per {
+                    db.put(&format!("w{w}n{i}"), "m", vec![w as f32, i as f32]).unwrap();
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    // A fresh open replays the whole log; every id must be present and intact.
+    let db = Db::open(&path).unwrap();
+    for w in 0..writers {
+        for i in 0..per {
+            assert!(db.get(&format!("w{w}n{i}")).is_some(), "lost w{w}n{i}");
+        }
+    }
+    assert_eq!(db.index.len(), writers * per, "row count mismatch");
+    let _ = std::fs::remove_file(&path);
+}

@@ -6,9 +6,49 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
 const MAGIC: &[u8; 8] = b"SEMDB01\n";
+
+// Inter-process advisory locking via inline `flock(2)` — std has no wrapper and
+// the tree is zero-dep, so we declare the one extern we need (PLATFORM_SUPPORT
+// pattern). Direct openers (gateway beat, tasks, workflow, supervise, telegram)
+// share a file with the daemon and each other; without this, concurrent
+// appends land at stale offsets and clobber each other's frames, and a compact
+// from one writer wipes another's rows. LOCK_EX serializes the whole
+// read-end→write / replay→rewrite critical section across processes.
+#[cfg(unix)]
+mod flock {
+    use std::os::unix::io::RawFd;
+    const LOCK_EX: i32 = 2;
+    const LOCK_UN: i32 = 8;
+    extern "C" {
+        fn flock(fd: RawFd, operation: i32) -> i32;
+    }
+    /// RAII exclusive lock on an fd; released on drop. Blocks until acquired.
+    pub struct Guard(RawFd);
+    impl Guard {
+        pub fn exclusive(fd: RawFd) -> Result<Guard, String> {
+            // Retry on EINTR so a signal during the blocking wait doesn't lose the lock.
+            loop {
+                let rc = unsafe { flock(fd, LOCK_EX) };
+                if rc == 0 {
+                    return Ok(Guard(fd));
+                }
+                let err = std::io::Error::last_os_error();
+                if err.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(format!("flock: {err}"));
+                }
+            }
+        }
+    }
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            unsafe { flock(self.0, LOCK_UN) };
+        }
+    }
+}
 const OP_PUT: u8 = 1;
 const OP_DEL: u8 = 2;
 
@@ -88,38 +128,7 @@ impl Db {
             return Err(format!("{}: not a semdb file", path.display()));
         }
 
-        let mut index = HashMap::new();
-        let mut records = 0u64;
-        let mut pos = MAGIC.len();
-        let valid_end = loop {
-            if pos == buf.len() {
-                break pos; // clean end
-            }
-            if pos + 8 > buf.len() {
-                break pos; // torn length/crc header
-            }
-            let len = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
-            let crc = u32::from_le_bytes(buf[pos + 4..pos + 8].try_into().unwrap());
-            let body_start = pos + 8;
-            if body_start + len > buf.len() {
-                break pos; // torn body
-            }
-            let body = &buf[body_start..body_start + len];
-            if crc32(body) != crc {
-                break pos; // corrupt record — stop replay here
-            }
-            match decode_record(body) {
-                Some((OP_PUT, id, entry)) => {
-                    index.insert(id, entry.expect("put has entry"));
-                }
-                Some((OP_DEL, id, _)) => {
-                    index.remove(&id);
-                }
-                _ => break pos, // unknown op — treat as corruption boundary
-            }
-            records += 1;
-            pos = body_start + len;
-        };
+        let (index, records, valid_end) = replay_log(&buf);
 
         if valid_end < buf.len() {
             // Recover: drop the torn tail so future appends start clean.
@@ -221,7 +230,21 @@ impl Db {
 
     /// Rewrite the log with only live entries (drops tombstoned history).
     pub fn compact(&mut self) -> Result<(), String> {
-        let tmp = self.path.with_extension("compact");
+        // Hold LOCK_EX for the whole rewrite so no writer appends into the old
+        // file after we snapshot it and before the rename swaps it out (that
+        // append would be silently discarded). Under the lock, re-replay the
+        // ON-DISK log so we compact the COMPLETE current state, not this
+        // handle's possibly-stale in-memory index (other processes may have
+        // appended rows we never saw) — otherwise compaction deletes them.
+        let _lock = flock::Guard::exclusive(self.file.as_raw_fd())?;
+        let mut buf = Vec::new();
+        self.file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+        self.file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        let (index, _records, _end) = replay_log(&buf);
+        // Unique tmp per pid so two concurrent compactors never share a scratch file.
+        let tmp = self
+            .path
+            .with_extension(format!("compact.{}", std::process::id()));
         {
             let mut f = OpenOptions::new()
                 .create(true)
@@ -230,7 +253,7 @@ impl Db {
                 .open(&tmp)
                 .map_err(|e| e.to_string())?;
             f.write_all(MAGIC).map_err(|e| e.to_string())?;
-            for (id, e) in &self.index {
+            for (id, e) in &index {
                 let body = encode_put(id, &e.meta, &e.vector);
                 write_framed(&mut f, &body)?;
             }
@@ -243,16 +266,62 @@ impl Db {
             .open(&self.path)
             .map_err(|e| e.to_string())?;
         self.file.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
-        self.records = self.index.len() as u64;
+        self.records = index.len() as u64;
+        self.index = index;
         Ok(())
     }
 
     fn append(&mut self, body: &[u8]) -> Result<(), String> {
+        // Hold LOCK_EX across seek-end → write → sync so a concurrent writer
+        // (another process or another Db handle) cannot land a frame at the
+        // same offset. Re-seek under the lock picks up appends made since our
+        // last write, so our frame always goes after the true end.
+        let _lock = flock::Guard::exclusive(self.file.as_raw_fd())?;
+        self.file.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
         write_framed(&mut self.file, body)?;
         self.file.sync_data().map_err(|e| e.to_string())?;
         self.records += 1;
         Ok(())
     }
+}
+
+/// Replay a raw log buffer into (index, valid-record-count, byte offset of the
+/// first torn/corrupt record). Shared by open() and compact() so a compaction
+/// never rewrites from a stale in-memory index.
+fn replay_log(buf: &[u8]) -> (HashMap<String, Entry>, u64, usize) {
+    let mut index = HashMap::new();
+    let mut records = 0u64;
+    let mut pos = MAGIC.len();
+    let valid_end = loop {
+        if pos == buf.len() {
+            break pos; // clean end
+        }
+        if pos + 8 > buf.len() {
+            break pos; // torn length/crc header
+        }
+        let len = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
+        let crc = u32::from_le_bytes(buf[pos + 4..pos + 8].try_into().unwrap());
+        let body_start = pos + 8;
+        if body_start + len > buf.len() {
+            break pos; // torn body
+        }
+        let body = &buf[body_start..body_start + len];
+        if crc32(body) != crc {
+            break pos; // corrupt record — stop replay here
+        }
+        match decode_record(body) {
+            Some((OP_PUT, id, entry)) => {
+                index.insert(id, entry.expect("put has entry"));
+            }
+            Some((OP_DEL, id, _)) => {
+                index.remove(&id);
+            }
+            _ => break pos, // unknown op — treat as corruption boundary
+        }
+        records += 1;
+        pos = body_start + len;
+    };
+    (index, records, valid_end)
 }
 
 fn write_framed(f: &mut File, body: &[u8]) -> Result<(), String> {
