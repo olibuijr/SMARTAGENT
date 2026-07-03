@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use codegraph::{graph::Graph, index};
+use std::path::PathBuf;
 
 fn scratch() -> PathBuf {
     let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch/cg-it");
@@ -31,8 +31,51 @@ fn index_and_query_structural() {
     assert_eq!(g2.defs("parse_config"), vec!["lib.rs:2\tfn"]);
     assert_eq!(g2.callers("parse_config"), vec!["main"]);
     // string occurrence excluded → exactly 2 call edges from main
-    let n = g2.edges.iter().filter(|e| e.kind == "calls" && e.to == "parse_config").count();
+    let n = g2
+        .edges
+        .iter()
+        .filter(|e| e.kind == "calls" && e.to == "parse_config")
+        .count();
     assert_eq!(n, 2);
     // impl Clone for Config
     assert!(g2.refs("Clone").iter().any(|r| r.contains("Config")));
+}
+
+#[test]
+fn indexes_multiple_language_fixtures() {
+    let mut g = Graph::new();
+    index::index_source(
+        &mut g,
+        "app.py",
+        "class App:\n def run(self): helper()\ndef helper(): pass\n",
+    );
+    index::index_source(
+        &mut g,
+        "app.ts",
+        "export function boot(){ render(); } class View {}",
+    );
+    index::index_source(
+        &mut g,
+        "server.go",
+        "package main\nfunc Serve(){ route() }\ntype Handler struct{}\n",
+    );
+    index::index_source(&mut g, "App.java", "class App { void start() { help(); } }");
+
+    assert!(g
+        .defs("App")
+        .iter()
+        .any(|d| d.contains("app.py") && d.ends_with("class")));
+    assert!(g
+        .defs("boot")
+        .iter()
+        .any(|d| d.contains("app.ts") && d.ends_with("function")));
+    assert!(g
+        .defs("Serve")
+        .iter()
+        .any(|d| d.contains("server.go") && d.ends_with("fn")));
+    assert!(g
+        .defs("start")
+        .iter()
+        .any(|d| d.contains("App.java") && d.ends_with("fn")));
+    assert!(g.callers("helper").contains(&"run".to_string()));
 }

@@ -10,7 +10,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "codegraph",
 		label: "Code Graph",
-		description: "Rust code graph: index (embed=true for semantic), defs/callers/refs/impls, path (call path between symbols), search (by meaning), stats. project = that repo's own graph; omit for root.",
+		description: "Multi-language code graph: Rust, Python, JS/TS, Go, Java, C/C++, C#, Kotlin, Scala, Ruby, PHP, Swift. index (embed=true for semantic), defs/callers/refs/impls, path, search, stats. project = that repo's own graph; omit for root.",
 		parameters: {
 			type: "object",
 			properties: {

@@ -5,13 +5,19 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use codegraph::graph::Graph;
-use codegraph::{index, symdb};
+use codegraph::{index, lang::Language, symdb};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
-        Ok(out) => { println!("{out}"); ExitCode::SUCCESS }
-        Err(e) => { eprintln!("error: {e}"); ExitCode::FAILURE }
+        Ok(out) => {
+            println!("{out}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -23,7 +29,10 @@ fn run(args: &[String]) -> Result<String, String> {
             // <repo>/.smartagent/codegraph.json — the single global slot
             // (data/codegraph.json) otherwise clobbers on every repo switch.
             let (repo, out) = if let Some(p) = flag(args, "--project") {
-                (semdb::workspace::resolve(&p)?, semdb::workspace::data_path(&p, "codegraph.json")?)
+                (
+                    semdb::workspace::resolve(&p)?,
+                    semdb::workspace::data_path(&p, "codegraph.json")?,
+                )
             } else {
                 (
                     args.get(1).filter(|a| !a.starts_with('-')).map(PathBuf::from)
@@ -34,9 +43,17 @@ fn run(args: &[String]) -> Result<String, String> {
             let mut graph = Graph::new();
             let files = index_repo(&repo, &mut graph);
             graph.save(&out)?;
-            let mut msg = format!("indexed {files} files → {} symbols, {} edges → {}", graph.symbols.len(), graph.edges.len(), out.display());
+            let mut msg = format!(
+                "indexed {files} files → {} symbols, {} edges → {}",
+                graph.symbols.len(),
+                graph.edges.len(),
+                out.display()
+            );
             if graph.symbols.is_empty() {
-                msg.push_str("\nnote: 0 symbols — codegraph lexes Rust sources only; a non-Rust repo indexes empty (use codeindex for text search there)");
+                msg.push_str(&format!(
+                    "\nnote: 0 symbols — no supported code symbols found. Supported languages: {}",
+                    Language::all_names()
+                ));
             }
             if has(args, "--embed") {
                 let idx = symbol_index_path(&out);
@@ -47,16 +64,33 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         Some("index-file") => {
             let graph_path = graph_arg(args)?;
-            let repo = flag(args, "--repo").map(PathBuf::from).ok_or("--repo required")?;
-            let file = flag(args, "--file").map(PathBuf::from).ok_or("--file required")?;
-            let src = std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
-            let rel = file.strip_prefix(&repo).unwrap_or(&file).to_string_lossy().to_string();
-            let mut graph = if graph_path.exists() { Graph::load(&graph_path)? } else { Graph::new() };
+            let repo = flag(args, "--repo")
+                .map(PathBuf::from)
+                .ok_or("--repo required")?;
+            let file = flag(args, "--file")
+                .map(PathBuf::from)
+                .ok_or("--file required")?;
+            let src = std::fs::read_to_string(&file)
+                .map_err(|e| format!("read {}: {e}", file.display()))?;
+            let rel = file
+                .strip_prefix(&repo)
+                .unwrap_or(&file)
+                .to_string_lossy()
+                .to_string();
+            let mut graph = if graph_path.exists() {
+                Graph::load(&graph_path)?
+            } else {
+                Graph::new()
+            };
             let before = graph.symbols.len();
             graph.remove_file(&rel);
             index::index_source(&mut graph, &rel, &src);
             graph.save(&graph_path)?;
-            Ok(format!("indexed file {rel}: symbols {} → {}", before, graph.symbols.len()))
+            Ok(format!(
+                "indexed file {rel}: symbols {} → {}",
+                before,
+                graph.symbols.len()
+            ))
         }
         Some("defs") => query(args, |g, n| g.defs(n), "not defined")?.pipe(Ok),
         Some("refs") => query(args, |g, n| g.refs(n), "no references")?.pipe(Ok),
@@ -64,20 +98,38 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("impls") => query(args, |g, n| g.impls(n), "no implementors")?.pipe(Ok),
         Some("path") => {
             let graph = Graph::load(&graph_arg(args)?)?;
-            let from = args.get(2).ok_or("usage: codegraph path <graph> <from> <to>")?;
-            let to = args.get(3).ok_or("usage: codegraph path <graph> <from> <to>")?;
+            let from = args
+                .get(2)
+                .ok_or("usage: codegraph path <graph> <from> <to>")?;
+            let to = args
+                .get(3)
+                .ok_or("usage: codegraph path <graph> <from> <to>")?;
             let chain = graph.call_path(from, to);
-            Ok(if chain.is_empty() { format!("no call path {from} → {to}") } else { chain.join(" → ") })
+            Ok(if chain.is_empty() {
+                format!("no call path {from} → {to}")
+            } else {
+                chain.join(" → ")
+            })
         }
         Some("unused") => {
             // Dead-code candidates: defined symbols nothing calls/refs/impls.
             let graph = Graph::load(&graph_arg(args)?)?;
             let dead = graph.unused();
-            if dead.is_empty() { return Ok("no unused symbols".into()); }
-            let limit = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(50usize);
+            if dead.is_empty() {
+                return Ok("no unused symbols".into());
+            }
+            let limit = flag(args, "--limit")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50usize);
             let total = dead.len();
-            let mut out: Vec<String> = dead.into_iter().take(limit).map(|s| format!("{}\t{}\t{}:{}", s.name, s.kind, s.file, s.line)).collect();
-            if total > limit { out.push(format!("…{total} total (--limit to widen)")); }
+            let mut out: Vec<String> = dead
+                .into_iter()
+                .take(limit)
+                .map(|s| format!("{}\t{}\t{}:{}", s.name, s.kind, s.file, s.line))
+                .collect();
+            if total > limit {
+                out.push(format!("…{total} total (--limit to widen)"));
+            }
             Ok(out.join("\n"))
         }
         Some("stats") => {
@@ -115,19 +167,29 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         Some("search") => {
             let graph_path = graph_arg(args)?;
-            let query = args.get(2).ok_or("usage: codegraph search <graph> <query> [--k N]")?;
+            let query = args
+                .get(2)
+                .ok_or("usage: codegraph search <graph> <query> [--k N]")?;
             let k = flag(args, "--k").and_then(|s| s.parse().ok()).unwrap_or(5);
             let found = symdb::search(&symbol_index_path(&graph_path), query, k)?;
             if found.is_empty() {
                 return Ok("no matches".into());
             }
-            Ok(found.iter().map(|f| format!("{:.4}\t{}", f.score, f.meta)).collect::<Vec<_>>().join("\n"))
+            Ok(found
+                .iter()
+                .map(|f| format!("{:.4}\t{}", f.score, f.meta))
+                .collect::<Vec<_>>()
+                .join("\n"))
         }
         _ => Ok(HELP.trim().into()),
     }
 }
 
-fn query(args: &[String], f: impl Fn(&Graph, &str) -> Vec<String>, empty: &str) -> Result<String, String> {
+fn query(
+    args: &[String],
+    f: impl Fn(&Graph, &str) -> Vec<String>,
+    empty: &str,
+) -> Result<String, String> {
     let graph = Graph::load(&graph_arg(args)?)?;
     let name = args.get(2).ok_or("symbol name required")?;
     let mut res = f(&graph, name);
@@ -135,7 +197,9 @@ fn query(args: &[String], f: impl Fn(&Graph, &str) -> Vec<String>, empty: &str) 
         return Ok(empty.to_string());
     }
     // Cap results (default 50) so a common symbol's refs/callers can't flood.
-    let limit = flag(args, "--limit").and_then(|s| s.parse().ok()).unwrap_or(50usize);
+    let limit = flag(args, "--limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50usize);
     let total = res.len();
     res.truncate(limit);
     let mut out = res.join("\n");
@@ -146,7 +210,10 @@ fn query(args: &[String], f: impl Fn(&Graph, &str) -> Vec<String>, empty: &str) 
 }
 
 fn graph_arg(args: &[String]) -> Result<PathBuf, String> {
-    args.get(1).filter(|a| !a.starts_with('-')).map(PathBuf::from).ok_or_else(|| "graph file required (or --project <name>)".into())
+    args.get(1)
+        .filter(|a| !a.starts_with('-'))
+        .map(PathBuf::from)
+        .ok_or_else(|| "graph file required (or --project <name>)".into())
 }
 
 /// Rewrite `<verb> --project X …` into `<verb> <graph-path> …` for the
@@ -156,14 +223,22 @@ fn with_project_graph(args: &[String]) -> Result<Vec<String>, String> {
     if args.first().map(String::as_str) == Some("index") {
         return Ok(args.to_vec());
     }
-    let Some(p) = flag(args, "--project") else { return Ok(args.to_vec()) };
+    let Some(p) = flag(args, "--project") else {
+        return Ok(args.to_vec());
+    };
     let graph = semdb::workspace::data_path(&p, "codegraph.json")?;
     let mut out = vec![args[0].clone(), graph.display().to_string()];
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
-        if a == "--project" { i += 2; continue; }
-        if a.starts_with("--project=") { i += 1; continue; }
+        if a == "--project" {
+            i += 2;
+            continue;
+        }
+        if a.starts_with("--project=") {
+            i += 1;
+            continue;
+        }
         out.push(a.clone());
         i += 1;
     }
@@ -177,9 +252,16 @@ fn symbol_index_path(graph: &Path) -> PathBuf {
 fn index_repo(root: &Path, graph: &mut Graph) -> usize {
     let rules = codeindex::gitignore::Rules::load(root);
     let mut files = 0;
-    for p in codeindex::walk::walk(root, &rules, Some("rs")) {
+    for p in codeindex::walk::walk(root, &rules, None) {
+        let rel = p
+            .strip_prefix(root)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .to_string();
+        if Language::from_path(&rel).is_none() {
+            continue;
+        }
         if let Ok(src) = std::fs::read_to_string(&p) {
-            let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().to_string();
             index::index_source(graph, &rel, &src);
             files += 1;
         }
@@ -192,7 +274,9 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-scratch").join(name);
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(name);
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -212,11 +296,15 @@ mod tests {
     }
 }
 
-trait Pipe: Sized { fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R { f(self) } }
+trait Pipe: Sized {
+    fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R {
+        f(self)
+    }
+}
 impl<T> Pipe for T {}
 
 const HELP: &str = r#"
-codegraph — Rust code knowledge graph (CodeGraph concept)
+codegraph — multi-language code knowledge graph (CodeGraph concept)
 
 USAGE:
   codegraph index <repo-dir> --out <graph.json> [--embed]
@@ -235,5 +323,7 @@ USAGE:
 Every graph-reading verb also accepts --project <name> in place of the
 graph path (per-repo graphs never clobber each other). Structural queries
 (defs/refs/callers/impls/path/unused) walk the graph; search is semdb-backed
-semantic symbol lookup over embeddings.
+semantic symbol lookup over embeddings. Supported languages: Rust, Python,
+JavaScript/JSX, TypeScript/TSX, Go, Java/Groovy, C, C++/CUDA/Metal, C#,
+Kotlin, Scala, Ruby, PHP, Swift.
 "#;

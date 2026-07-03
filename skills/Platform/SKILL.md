@@ -47,7 +47,7 @@ pi (agent spine, 4 core tools)  →  extensions/*.ts (thin TS glue, NO logic)
 |---|---|
 | semdb | vector store: embed/search/get/del/count — low-level; prefer domain tools |
 | memory | 3-tier memory (Mem0): remember/recall/update/promote; `project` = per-repo store |
-| codegraph | Rust code graph (CodeGraph): defs/refs/callers/impls/path; per-repo graphs |
+| codegraph | Multi-language code graph (CodeGraph): defs/refs/callers/impls/path; per-repo graphs |
 | codeindex | fast code search + workspace project index; count/files/lines modes |
 | vault | markdown second brain (Obsidian): notes, [[wikilinks]], backlinks, search |
 | skills | SKILL.md loader: list/show/search/**match** (prompt-scored auto-trigger) |
@@ -164,6 +164,6 @@ WIP full, blockers). Severity is decided in Rust (`<crate> statusline` →
 - **A service seems down?** `supervise status` FIRST when browser/search/
   schedule act dead; then `supervise restart <svc>`; logs via `supervise logs <svc> --tail`.
 - **Reindex after structural changes?** `codeindex index <repo>` (omit for
-  all), plus `codegraph index --project <repo>` for Rust repos.
+  all), plus `codegraph index --project <repo>` for supported-language repos.
 - **Edits blocked?** That's the kanban gate: nothing in `doing`. Pull a task
   (`tasks todo` → `tasks move T-n doing`); don't reach for RELAX first.
