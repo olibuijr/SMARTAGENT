@@ -226,7 +226,7 @@ fn rewrite_links(body: &str, old: &str, new: &str) -> (String, usize) {
         // target = up to first '|' or '#'
         let cut = inner.find(['|', '#']).unwrap_or(inner.len());
         let (target, suffix) = inner.split_at(cut);
-        if target.trim() == old {
+        if link_target_matches(target, old) {
             out.push_str(&format!("[[{new}{suffix}]]"));
             count += 1;
         } else {
@@ -236,6 +236,57 @@ fn rewrite_links(body: &str, old: &str, new: &str) -> (String, usize) {
     }
     out.push_str(rest);
     (out, count)
+}
+
+fn link_target_matches(target: &str, old: &str) -> bool {
+    let target = target.trim();
+    target == old || note::slugify(target) == note::slugify(old)
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-scratch")
+            .join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn rewrite_links_matches_slug_case_punctuation_and_preserves_suffixes() {
+        let body = "[[My Note]] [[my-note]] [[MY note|Alias]] [[my note#part]] [[other]]";
+        let (rewritten, n) = rewrite_links(body, "my-note", "new-note");
+        assert_eq!(n, 4);
+        assert_eq!(
+            rewritten,
+            "[[new-note]] [[new-note]] [[new-note|Alias]] [[new-note#part]] [[other]]"
+        );
+    }
+
+    #[test]
+    fn rename_note_rewrites_slug_equivalent_wikilinks() {
+        let v = scratch("vault-rename-slug-links");
+        std::fs::write(v.join("my-note.md"), "body").unwrap();
+        std::fs::write(
+            v.join("index.md"),
+            "A [[My Note]] B [[my-note|Alias]] C [[my note#anchor]] D [[other]]",
+        )
+        .unwrap();
+
+        let n = rename_note(&v, "my-note", "New Note").unwrap();
+        assert_eq!(n, 3);
+        assert!(v.join("new-note.md").exists());
+        let body = std::fs::read_to_string(v.join("index.md")).unwrap();
+        assert_eq!(
+            body,
+            "A [[new-note]] B [[new-note|Alias]] C [[new-note#anchor]] D [[other]]"
+        );
+    }
 }
 
 /// Tags = frontmatter `tags:` (comma/space separated) + inline `#tag` tokens.
@@ -282,7 +333,7 @@ fn note_tags(content: &str) -> Vec<String> {
         let lt = line.trim_start();
         if lt.starts_with("```") || lt.starts_with("~~~") { in_fence = !in_fence; continue; }
         if in_fence || lt.starts_with('#') && lt.chars().take_while(|c| *c == '#').count() >= 1 && lt.contains(' ') && lt.starts_with('#') && lt.split_whitespace().next().map(|w| w.chars().all(|c| c == '#')).unwrap_or(false) { continue; }
-        let mut chars = line.char_indices().peekable();
+        let chars = line.char_indices().peekable();
         for (i, c) in chars {
             if c == '#' && (i == 0 || !line[..i].ends_with(|p: char| p.is_alphanumeric())) {
                 let tag: String = line[i + 1..].chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
