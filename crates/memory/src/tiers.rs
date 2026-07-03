@@ -74,9 +74,14 @@ impl Memory {
             let top = cli::search(&db, &vector, 1, true);
             if let Some((existing, score, _)) = top.first() {
                 if *score >= 0.97 && existing != id {
+                    // Consolidate a near-duplicate: DELETE the old row and store
+                    // the new content under the CALLER'S id. The previous code
+                    // wrote the new text under the OLD id and dropped the
+                    // caller's id — so a later get(id) found nothing and a
+                    // different memory was silently overwritten. Delete-then-put
+                    // keeps one canonical entry while honoring the requested id.
                     let existing = existing.clone();
-                    db.put(&existing, &meta, vector)?;
-                    return Ok(());
+                    db.delete(&existing)?;
                 }
             }
         }
@@ -98,6 +103,12 @@ impl Memory {
 
     /// Promote an entry from one tier to another (copy, then remove source).
     pub fn promote(&self, id: &str, from: &str, to: &str) -> Result<(), String> {
+        // Same tier → nothing to move. Without this the copy-then-forget below
+        // would put the entry, then immediately delete it from the SAME tier —
+        // silently destroying the memory it was asked to "promote".
+        if from == to {
+            return Ok(());
+        }
         let from_path = self.tier_path(from);
         let db = Db::open(&from_path)?;
         let entry = db.get(id).ok_or_else(|| format!("id '{id}' not in {from}"))?.clone();

@@ -35,10 +35,16 @@ impl Regex {
     /// True if the pattern matches anywhere in `line` (respecting anchors).
     pub fn is_match(&self, line: &str) -> bool {
         let chars: Vec<char> = line.chars().collect();
+        // Backtracking step budget for the WHOLE line. A pathological pattern
+        // (nested quantifiers like `(a*)*` / `a*a*a*b` over a long run) can
+        // otherwise backtrack exponentially and hang `codeindex search -e`.
+        // On exhaustion the matcher bails to "no match" — safe: a search miss,
+        // not a crash or a freeze.
+        let mut steps: u64 = 2_000_000;
         for branch in &self.branches {
             let starts: Vec<usize> = if self.anchored_start { vec![0] } else { (0..=chars.len()).collect() };
             for start in starts {
-                if let Some(end) = match_here(branch, &chars, start) {
+                if let Some(end) = match_here(branch, &chars, start, &mut steps) {
                     if !self.anchored_end || end == chars.len() {
                         return true;
                     }
@@ -115,24 +121,28 @@ fn tok_matches(tok: &Token, c: char) -> bool {
 }
 
 /// Returns the end index if the token sequence matches starting at `pos`.
-fn match_here(tokens: &[Token], chars: &[char], pos: usize) -> Option<usize> {
+fn match_here(tokens: &[Token], chars: &[char], pos: usize, steps: &mut u64) -> Option<usize> {
+    if *steps == 0 {
+        return None; // budget exhausted — bail out of the backtrack
+    }
+    *steps -= 1;
     if tokens.is_empty() {
         return Some(pos);
     }
     match &tokens[0] {
-        Token::Star(inner) => match_repeat(inner, &tokens[1..], chars, pos, 0),
-        Token::Plus(inner) => match_repeat(inner, &tokens[1..], chars, pos, 1),
+        Token::Star(inner) => match_repeat(inner, &tokens[1..], chars, pos, 0, steps),
+        Token::Plus(inner) => match_repeat(inner, &tokens[1..], chars, pos, 1, steps),
         Token::Opt(inner) => {
             if pos < chars.len() && tok_matches(inner, chars[pos]) {
-                if let Some(e) = match_here(&tokens[1..], chars, pos + 1) {
+                if let Some(e) = match_here(&tokens[1..], chars, pos + 1, steps) {
                     return Some(e);
                 }
             }
-            match_here(&tokens[1..], chars, pos)
+            match_here(&tokens[1..], chars, pos, steps)
         }
         t => {
             if pos < chars.len() && tok_matches(t, chars[pos]) {
-                match_here(&tokens[1..], chars, pos + 1)
+                match_here(&tokens[1..], chars, pos + 1, steps)
             } else {
                 None
             }
@@ -140,7 +150,7 @@ fn match_here(tokens: &[Token], chars: &[char], pos: usize) -> Option<usize> {
     }
 }
 
-fn match_repeat(inner: &Token, rest: &[Token], chars: &[char], pos: usize, min: usize) -> Option<usize> {
+fn match_repeat(inner: &Token, rest: &[Token], chars: &[char], pos: usize, min: usize, steps: &mut u64) -> Option<usize> {
     // Greedy: consume as many as possible, then backtrack.
     let mut count = 0;
     let mut p = pos;
@@ -149,7 +159,10 @@ fn match_repeat(inner: &Token, rest: &[Token], chars: &[char], pos: usize, min: 
         count += 1;
     }
     while count >= min {
-        if let Some(e) = match_here(rest, chars, pos + count) {
+        if *steps == 0 {
+            return None;
+        }
+        if let Some(e) = match_here(rest, chars, pos + count, steps) {
             return Some(e);
         }
         if count == 0 {
@@ -158,7 +171,7 @@ fn match_repeat(inner: &Token, rest: &[Token], chars: &[char], pos: usize, min: 
         count -= 1;
     }
     if min == 0 {
-        match_here(rest, chars, pos)
+        match_here(rest, chars, pos, steps)
     } else {
         None
     }
@@ -200,5 +213,21 @@ mod tests {
         assert!(m("cat|dog", "a dog here"));
         assert!(m("cat|dog", "a cat here"));
         assert!(!m("cat|dog", "a fish here"));
+    }
+}
+
+#[cfg(test)]
+mod redos_tests {
+    use super::*;
+
+    #[test]
+    fn catastrophic_backtracking_terminates() {
+        // (a*)*b against a long run of 'a' with no 'b' is the classic ReDoS
+        // trigger; must return quickly (budget-bailed) instead of hanging.
+        let re = Regex::new("(a*)*b").unwrap();
+        let input = "a".repeat(60);
+        let t = std::time::Instant::now();
+        assert!(!re.is_match(&input));
+        assert!(t.elapsed().as_secs() < 2, "ReDoS: took {:?}", t.elapsed());
     }
 }
