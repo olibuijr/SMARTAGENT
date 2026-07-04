@@ -31,6 +31,7 @@ pub enum Ev {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn ask(agent: &str, message: &str, tx: UnboundedSender<Ev>) {
+    // agent may be any fleet member (linus/ada/…/jeeves).
     let agent = agent.to_string();
     let message = message.to_string();
     std::thread::spawn(move || {
@@ -247,5 +248,46 @@ pub async fn run_tool_async(tool: &'static str, args: Vec<String>) -> Vec<String
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let _ = tx.send(run_tool(tool, &refs));
     });
+    rx.await.unwrap_or_default()
+}
+
+/// Fleet roster + live status via the gateway `agents` op. Each line is a TSV:
+/// `name \t state \t doing \t role \t busy_secs \t tokens \t tools \t words`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn agents() -> Vec<String> {
+    agents_inner().unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn agents_inner() -> Option<Vec<String>> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+    let addr = GATEWAY_ADDR.parse().ok()?;
+    let s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(6))).ok();
+    let mut w = s.try_clone().ok()?;
+    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN)).as_bytes()).ok()?;
+    w.write_all(b"{\"op\":\"agents\"}\n").ok()?;
+    w.flush().ok()?;
+    let mut out = Vec::new();
+    for line in BufReader::new(s).lines() {
+        let Ok(line) = line else { break };
+        let t = line.trim();
+        match event_kind(t) {
+            // agents op emits rows as {"ev":"info","data":"<tsv>"} then done.
+            Some(("info", d)) if d != "auth ok" && d.contains('\t') => out.push(d),
+            Some(("done", _)) => break,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+/// Async wrapper for `use_resource`.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn agents_async() -> Vec<String> {
+    let (tx, rx) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || { let _ = tx.send(agents()); });
     rx.await.unwrap_or_default()
 }
