@@ -90,19 +90,26 @@ pub fn parse_events(events: &[Ev]) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut text = String::new();
 
+    let mut thinking = String::new();
     for ev in events {
+        // A thinking run and a text run are separate blocks; when one starts,
+        // flush the other so order is preserved.
+        if !matches!(ev, Ev::Thinking(_)) {
+            flush_thinking(&mut thinking, &mut blocks);
+        }
         match ev {
             Ev::Text(t) => text.push_str(t),
+            Ev::Thinking(t) => {
+                flush_text(&mut text, &mut blocks);
+                thinking.push_str(t);
+            }
             Ev::Info(s) => {
                 if let Some((name, status)) = parse_tool_info(s) {
                     flush_text(&mut text, &mut blocks);
                     apply_tool(&mut blocks, name, status);
                 }
-                // TODO(orchestrator): feed thinking (`Block::Thinking`) and
-                // file-diffs (`Block::Diff`) from enriched gateway events here.
-                // The gateway doesn't emit them yet; when it does, decode the
-                // marked info/event payload, `flush_text(&mut text, &mut blocks)`,
-                // then `blocks.push(...)` so ordering with text/tools is kept.
+                // TODO(orchestrator): file-diffs (`Block::Diff`) once the gateway
+                // forwards tool I/O.
             }
             Ev::Error(e) => {
                 if !text.is_empty() && !text.ends_with('\n') {
@@ -115,7 +122,17 @@ pub fn parse_events(events: &[Ev]) -> Vec<Block> {
         }
     }
     flush_text(&mut text, &mut blocks);
+    flush_thinking(&mut thinking, &mut blocks);
     blocks
+}
+
+/// Flush an accumulated thinking run into a `Block::Thinking`.
+fn flush_thinking(thinking: &mut String, blocks: &mut Vec<Block>) {
+    if !thinking.trim().is_empty() {
+        blocks.push(Block::Thinking(std::mem::take(thinking)));
+    } else {
+        thinking.clear();
+    }
 }
 
 /// Recognise a `🛠` tool info line. Returns `(tool_name, status)` or `None` for

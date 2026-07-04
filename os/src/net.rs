@@ -18,9 +18,12 @@ pub const GATEWAY_TOKEN: &str = "smartagent-os-dev";
 pub enum Ev {
     /// A text delta from the agent.
     Text(String),
+    /// A thinking/reasoning delta ({"ev":"thinking"}).
+    Thinking(String),
     /// The turn finished.
     Done,
-    /// Non-fatal info line from the gateway.
+    /// Non-fatal info line from the gateway — includes `🛠 <tool> …` tool
+    /// status, which `blocks::parse_events` turns into tool cards.
     Info(String),
     /// Connection/protocol error.
     Error(String),
@@ -68,9 +71,16 @@ fn run_ask(agent: &str, message: &str, tx: &UnboundedSender<Ev>) -> Result<(), S
             Some(("text", data)) => {
                 let _ = tx.unbounded_send(Ev::Text(data));
             }
-            Some(("info", _)) => {
-                // Status noise (auth ok, agent working/idle) — never shown in
-                // the chat transcript.
+            Some(("thinking", data)) => {
+                let _ = tx.unbounded_send(Ev::Thinking(data));
+            }
+            Some(("info", data)) => {
+                // Forward tool-status lines (`🛠 <tool> running…/✓/✗`) so the
+                // blocks renderer can build tool cards; swallow the rest (auth
+                // ok, agent working/idle) as noise.
+                if data.starts_with('🛠') {
+                    let _ = tx.unbounded_send(Ev::Info(data));
+                }
             }
             Some(("done", _)) => break,
             _ => {}
@@ -85,6 +95,7 @@ fn event_kind(line: &str) -> Option<(&'static str, String)> {
     let ev = field(line, "ev")?;
     let kind = match ev.as_str() {
         "text" => "text",
+        "thinking" => "thinking",
         "info" => "info",
         "done" => "done",
         _ => return None,

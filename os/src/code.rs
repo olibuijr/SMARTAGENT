@@ -347,7 +347,7 @@ fn ProjectChat(project: String) -> Element {
                     match ev {
                         Ev::Text(t) => streaming.with_mut(|s| s.push_str(&t)),
                         Ev::Error(e) => streaming.set(format!("⚠ {e}")),
-                        Ev::Info(_) => {}
+                        Ev::Thinking(_) | Ev::Info(_) => {}
                         Ev::Done => break,
                     }
                 }

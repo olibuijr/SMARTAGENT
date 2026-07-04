@@ -5,6 +5,10 @@
 use dioxus::prelude::*;
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
+// Feature CSS that isn't self-linked by its component (sessions/blocks/commands).
+const SESSIONS_CSS: Asset = asset!("/assets/sessions.css");
+const BLOCKS_CSS: Asset = asset!("/assets/blocks.css");
+const COMMANDS_CSS: Asset = asset!("/assets/commands.css");
 pub const LOGO: Asset = asset!("/assets/logo.png");
 pub const JEEVES: Asset = asset!("/assets/jeeves.png");
 
@@ -20,6 +24,9 @@ pub fn App() -> Element {
     let tab = use_signal(|| Tab::Chat);
     rsx! {
         document::Stylesheet { href: MAIN_CSS }
+        document::Stylesheet { href: SESSIONS_CSS }
+        document::Stylesheet { href: BLOCKS_CSS }
+        document::Stylesheet { href: COMMANDS_CSS }
         // Agent E: links theme.css (palette + safe-area tokens) and color-scheme.
         crate::theme::ThemeMeta {}
         document::Meta {

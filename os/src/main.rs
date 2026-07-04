@@ -6,6 +6,7 @@ mod app;
 mod blocks; // assistant-ui transcript blocks (Agent B)
 mod chat; // Chat tab
 mod code; // Code tab (Agent D)
+mod commands; // slash palette + choice dialogs (Agent F)
 mod cowork; // Cowork tab (Agent C)
 mod net; // gateway client (shared, read-only for feature agents)
 mod sessions; // persistent chat sessions (Agent A)

@@ -1,118 +1,155 @@
-//! Chat tab — streams jeeves's reply live over the gateway. Agent A layers
-//! persistent sessions on top (via `crate::sessions`); Agent B enriches the
-//! transcript rendering (via `crate::blocks`). For now it renders plain text.
+//! Chat tab — persistent sessions (Agent A) + rich assistant-ui transcript
+//! blocks (Agent B) + slash command palette (Agent F), streaming jeeves over
+//! the gateway. The orchestrator wires the modules together here.
 
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 
 use crate::app::JEEVES;
+use crate::blocks::{parse_events, Block, BlockView};
+use crate::commands::CommandPalette;
 use crate::net::{self, Ev};
+use crate::sessions::{use_sessions, SessionBar};
 
-#[derive(Clone, PartialEq)]
-pub struct Msg {
-    pub role: &'static str, // "you" | "jeeves"
-    pub text: String,
+/// Join the text of a parsed block list — what we persist for an assistant turn
+/// (thinking/tool cards are live-only; the durable record is the reply text).
+fn blocks_to_text(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    for b in blocks {
+        if let Block::Text(t) = b {
+            out.push_str(t);
+        }
+    }
+    out
 }
 
 #[component]
 pub fn Chat() -> Element {
-    let mut msgs = use_signal(Vec::<Msg>::new);
+    let sess = use_sessions();
     let mut input = use_signal(String::new);
-    let mut streaming = use_signal(String::new);
+    let mut live = use_signal(Vec::<Ev>::new); // events of the in-flight turn
     let mut busy = use_signal(|| false);
 
     let sender = use_coroutine(move |mut rx: UnboundedReceiver<String>| async move {
         while let Some(text) = rx.next().await {
             busy.set(true);
-            streaming.set(String::new());
+            live.set(Vec::new());
             let (tx, mut ev_rx) = futures_channel::mpsc::unbounded::<Ev>();
             net::ask("jeeves", &text, tx);
             while let Some(ev) = ev_rx.next().await {
                 match ev {
-                    Ev::Text(t) => streaming.with_mut(|s| s.push_str(&t)),
-                    Ev::Error(e) => streaming.set(format!("⚠ {e}")),
-                    Ev::Info(_) => {}
                     Ev::Done => break,
+                    other => live.with_mut(|v| v.push(other)),
                 }
             }
-            let reply = streaming();
+            let reply = blocks_to_text(&parse_events(&live()));
             if !reply.trim().is_empty() {
-                msgs.with_mut(|m| m.push(Msg { role: "jeeves", text: reply }));
+                sess.push_message(sess.active_id(), "jeeves", &reply);
             }
-            streaming.set(String::new());
+            live.set(Vec::new());
             busy.set(false);
         }
     });
 
-    let mut send = move || {
-        let text = input().trim().to_string();
+    // Send the current input; `/new` is a local session command, everything
+    // else goes to the fleet (a slash command sends its bare word).
+    let mut submit = move |raw: String| {
+        let text = raw.trim().to_string();
         if text.is_empty() || busy() {
             return;
         }
-        msgs.with_mut(|m| m.push(Msg { role: "you", text: text.clone() }));
+        if text == "/new" {
+            sess.create();
+            input.set(String::new());
+            return;
+        }
+        let msg = text.strip_prefix('/').unwrap_or(&text).to_string();
+        sess.push_message(sess.active_id(), "you", &text);
         input.set(String::new());
-        sender.send(text);
+        sender.send(msg);
     };
+
+    let show_palette = input().starts_with('/') && !busy();
+    let history = sess.active_messages();
 
     rsx! {
         div { class: "chat",
+            SessionBar {}
             div { class: "transcript",
-                if msgs().is_empty() && !busy() {
+                if history.is_empty() && !busy() {
                     div { class: "empty",
                         img { class: "empty-ava", src: JEEVES }
                         p { "Ask the fleet anything." }
                     }
                 }
-                for m in msgs() {
-                    Bubble { role: m.role, text: m.text }
+                for m in history.iter() {
+                    if m.role == "jeeves" {
+                        div { class: "bubble jeeves",
+                            img { class: "ava", src: JEEVES }
+                            div { class: "body",
+                                div { class: "who", "jeeves" }
+                                for b in parse_events(&[Ev::Text(m.text.clone())]) {
+                                    BlockView { block: b }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "bubble you",
+                            div { class: "body",
+                                div { class: "who", "you" }
+                                div { class: "text", "{m.text}" }
+                            }
+                        }
+                    }
                 }
                 if busy() {
                     div { class: "bubble jeeves",
                         img { class: "ava", src: JEEVES }
                         div { class: "body",
                             div { class: "who", "jeeves" }
-                            div { class: "text streaming", "{streaming}▋" }
+                            for b in parse_events(&live()) {
+                                BlockView { block: b }
+                            }
+                            if live().is_empty() {
+                                div { class: "text streaming", "▋" }
+                            }
                         }
                     }
+                }
+            }
+            if show_palette {
+                CommandPalette {
+                    query: input(),
+                    on_pick: move |name: String| {
+                        if name == "new" {
+                            sess.create();
+                            input.set(String::new());
+                        } else {
+                            input.set(String::new());
+                            submit(format!("/{name}"));
+                        }
+                    },
                 }
             }
             div { class: "composer",
                 input {
                     class: "field",
-                    placeholder: "Message jeeves…",
+                    placeholder: "Message jeeves…  (/ for commands)",
                     value: "{input}",
                     oninput: move |e| input.set(e.value()),
-                    onkeydown: move |e| if e.key() == Key::Enter { send(); },
+                    onkeydown: move |e| if e.key() == Key::Enter {
+                        let v = input();
+                        submit(v);
+                    },
                 }
                 button {
                     class: "send",
                     disabled: busy(),
-                    onclick: move |_| send(),
+                    onclick: move |_| {
+                        let v = input();
+                        submit(v);
+                    },
                     if busy() { "…" } else { "Send" }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn Bubble(role: &'static str, text: String) -> Element {
-    if role == "jeeves" {
-        rsx! {
-            div { class: "bubble jeeves",
-                img { class: "ava", src: JEEVES }
-                div { class: "body",
-                    div { class: "who", "jeeves" }
-                    div { class: "text", "{text}" }
-                }
-            }
-        }
-    } else {
-        rsx! {
-            div { class: "bubble you",
-                div { class: "body",
-                    div { class: "who", "you" }
-                    div { class: "text", "{text}" }
                 }
             }
         }
