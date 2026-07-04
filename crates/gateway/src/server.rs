@@ -774,6 +774,54 @@ fn handle_data_op(op: &str, path: &str, w: &mut UnixStream) {
     let _ = w.write_all(b"{\"ev\":\"done\"}\n");
 }
 
+/// Read-only allowlist for the generic tool runner: tool → the verbs (first
+/// arg) the OS app may invoke. Everything mutating (add/set/delete/move/put/
+/// done/create/write/issue/grant/compact/serve/…) is absent by construction.
+fn run_tool_allowed(tool: &str, verb: &str) -> bool {
+    let ok: &[&str] = match tool {
+        "memory" => &["recall", "list", "recent", "get", "stats"],
+        "vault" => &["list", "search", "show", "backlinks", "graph", "read"],
+        "skills" => &["list", "match", "show", "search"],
+        "schedule" => &["list", "next"],
+        "evals" => &["list", "results", "show"],
+        "hooks" => &["audit", "list"],
+        "supervise" => &["status", "statusline"],
+        "rag" => &["search", "list"],
+        "codegraph" => &["defs", "refs", "callers", "impls", "search", "path", "stats"],
+        "codeindex" => &["search", "projects", "stats"],
+        "search" => &["web", "search"],
+        "workflow" => &["runs", "list", "show"],
+        "tasks" => &["board", "list", "show"],
+        "secrets" => &["list", "audit"],
+        "context" => &["show", "compose"],
+        "notify" => &["list"],
+        _ => &[],
+    };
+    ok.contains(&verb)
+}
+
+/// Generic read-only tool runner. Streams the tool's stdout lines as
+/// `{"ev":"data",...}` then `{"ev":"done"}`. Denies anything outside the
+/// read-only allowlist.
+fn handle_run_op(tool: &str, args: &[String], w: &mut UnixStream) {
+    let verb = args.first().map(String::as_str).unwrap_or("");
+    let lines = if !run_tool_allowed(tool, verb) {
+        vec![format!("error: '{tool} {verb}' is not an allowed read-only command")]
+    } else {
+        let cfg = semdb::config::Config::load();
+        let repo = cfg.data_dir().parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let bin = repo.join("target/release").join(tool);
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_lines(&bin, &refs, &repo)
+    };
+    for line in lines {
+        let _ = w.write_all(
+            format!("{{\"ev\":\"data\",\"data\":\"{}\"}}\n", json::escape(&line)).as_bytes(),
+        );
+    }
+    let _ = w.write_all(b"{\"ev\":\"done\"}\n");
+}
+
 /// Run a command, return its stdout as lines (empty vec on failure).
 fn run_lines(program: impl AsRef<std::ffi::OsStr>, args: &[&str], cwd: &std::path::Path) -> Vec<String> {
     match std::process::Command::new(program.as_ref())
@@ -823,6 +871,19 @@ fn handle_client(stream: UnixStream, agents: Agents) {
             "board" | "mail" | "projects" | "tree" | "file" | "git" => {
                 let path = v.get("path").and_then(Value::as_str).unwrap_or("");
                 handle_data_op(op, path, &mut write_side);
+            }
+            // Generic read-only tool runner for the OS app's extensions
+            // command-center: `{"op":"run","tool":"memory","args":["recall","q"]}`
+            // → runs `target/release/memory recall q`, streams stdout as data.
+            // Allowlisted to read-only tool+verb pairs (run_tool_allowed).
+            "run" => {
+                let tool = v.get("tool").and_then(Value::as_str).unwrap_or("");
+                let args: Vec<String> = v
+                    .get("args")
+                    .and_then(Value::as_arr)
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                handle_run_op(tool, &args, &mut write_side);
             }
             "stop" if stop_all_requested(requested) => stop_all_agents(&agents, &mut write_side),
             "send" | "steer" | "attach" | "ask" | "status" | "stop" => {
