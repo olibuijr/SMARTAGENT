@@ -704,6 +704,91 @@ fn bridge_conn(tcp: std::net::TcpStream, sock: &std::path::Path, token: &str) {
     let _ = up.join();
 }
 
+/// Read-only data ops for the OS app. Each streams output lines back as
+/// `{"ev":"data","data":"<line>"}` then `{"ev":"done"}`. Path inputs are
+/// confined to `workspaces/` (traversal-guarded) for the code ops.
+fn handle_data_op(op: &str, path: &str, w: &mut UnixStream) {
+    let cfg = semdb::config::Config::load();
+    let repo = cfg.data_dir().parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let ws = repo.join("workspaces");
+    // Confine any project name / relative path to workspaces/ (no `..`).
+    let safe = |rel: &str| -> Option<std::path::PathBuf> {
+        if rel.is_empty() || rel.split('/').any(|c| c == "..") {
+            return None;
+        }
+        let full = ws.join(rel);
+        full.starts_with(&ws).then_some(full)
+    };
+    let bin = |name: &str| repo.join("target/release").join(name);
+
+    let out: Vec<String> = match op {
+        "board" => run_lines(&bin("tasks"), &["board"], &repo),
+        "mail" => run_lines(
+            "himalaya",
+            &["-c", "config/himalaya.toml", "envelope", "list", "-a", "olibuijr", "--page-size", "20"],
+            &repo,
+        ),
+        "projects" => std::fs::read_dir(&ws)
+            .map(|rd| {
+                let mut v: Vec<String> = rd
+                    .flatten()
+                    .filter(|e| e.path().join(".git").exists())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter(|n| !n.starts_with('.'))
+                    .collect();
+                v.sort();
+                v
+            })
+            .unwrap_or_default(),
+        "tree" => match safe(path) {
+            Some(p) => run_lines(
+                "git",
+                &["-C", &p.to_string_lossy(), "ls-files"],
+                &repo,
+            ),
+            None => vec!["error: bad path".into()],
+        },
+        "file" => match safe(path) {
+            Some(p) => std::fs::read_to_string(&p)
+                .unwrap_or_else(|e| format!("error: {e}"))
+                .lines()
+                .map(String::from)
+                .collect(),
+            None => vec!["error: bad path".into()],
+        },
+        "git" => match safe(path) {
+            Some(p) => run_lines(
+                "git",
+                &["-C", &p.to_string_lossy(), "status", "--porcelain"],
+                &repo,
+            ),
+            None => vec!["error: bad path".into()],
+        },
+        _ => vec![],
+    };
+    for line in out {
+        let _ = w.write_all(
+            format!("{{\"ev\":\"data\",\"data\":\"{}\"}}\n", json::escape(&line)).as_bytes(),
+        );
+    }
+    let _ = w.write_all(b"{\"ev\":\"done\"}\n");
+}
+
+/// Run a command, return its stdout as lines (empty vec on failure).
+fn run_lines(program: impl AsRef<std::ffi::OsStr>, args: &[&str], cwd: &std::path::Path) -> Vec<String> {
+    match std::process::Command::new(program.as_ref())
+        .args(args)
+        .current_dir(cwd)
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .map(String::from)
+            .collect(),
+        Err(e) => vec![format!("error: {e}")],
+    }
+}
+
 fn handle_client(stream: UnixStream, agents: Agents) {
     let reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
@@ -731,6 +816,13 @@ fn handle_client(stream: UnixStream, agents: Agents) {
                     "off"
                 };
                 write_info_done(&mut write_side, &format!("fleet autonomy: {state}"));
+            }
+            // Read-only data ops for the SMARTAGENT OS app (Cowork/Code tabs):
+            // shell to the real binaries / filesystem, stream lines as
+            // {"ev":"data",...}, then {"ev":"done"}.
+            "board" | "mail" | "projects" | "tree" | "file" | "git" => {
+                let path = v.get("path").and_then(Value::as_str).unwrap_or("");
+                handle_data_op(op, path, &mut write_side);
             }
             "stop" if stop_all_requested(requested) => stop_all_agents(&agents, &mut write_side),
             "send" | "steer" | "attach" | "ask" | "status" | "stop" => {
