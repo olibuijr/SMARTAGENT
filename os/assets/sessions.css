@@ -1,0 +1,205 @@
+/* ── Sessions (Agent A) — themed in-app session switcher ──────────────────── */
+/* Tokens (from main.css): --bg --panel --ink --muted --accent --amber --line   */
+
+.sessionbar {
+  position: relative;
+  display: inline-block;
+  min-width: 200px;
+  max-width: 320px;
+  font-size: 13px;
+}
+
+/* Current-session trigger button */
+.session-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.session-current:hover { border-color: #7dff9a55; }
+
+.session-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 2px;            /* pixel-square accent */
+  background: var(--accent);
+  box-shadow: 0 0 6px #7dff9a66;
+}
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.session-chevron { color: var(--muted); font-size: 11px; }
+
+/* Dropdown panel */
+.session-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 10px 30px #0009;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* + New session */
+.session-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed #7dff9a44;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.session-new:hover { background: #7dff9a14; }
+.session-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* Each session row */
+.session-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  padding: 2px;
+}
+.session-row.active { background: #7dff9a14; outline: 1px solid #7dff9a33; }
+
+.session-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.session-pick:hover { background: #ffffff0d; }
+.session-row.active .session-pick { color: var(--accent); }
+
+.session-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.session-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* Per-row … menu button */
+.session-more {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.session-more:hover { color: var(--ink); background: #ffffff0d; }
+
+/* Rename / Delete action row */
+.session-actions {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 4px 4px;
+}
+.session-action {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-action:hover { border-color: #7dff9a55; }
+.session-action.danger { color: var(--amber); }
+.session-action.danger:hover { border-color: var(--amber); background: #ffaf5f14; }
+
+/* Inline rename input */
+.session-rename {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid #7dff9a55;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.session-ok {
+  flex: 0 0 auto;
+  background: var(--accent);
+  color: #101018;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
