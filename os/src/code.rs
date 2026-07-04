@@ -57,98 +57,77 @@ pub struct GitChange {
 mod data {
     use super::{FileNode, GitChange, Project};
 
-    // TODO(orchestrator): back with real gateway op — list repos under `workspaces/`.
+    /// Real repos under `workspaces/` (gateway `projects` op), enriched with
+    /// branch + change count (gateway `git` op). Empty if gateway unreachable.
     pub fn projects() -> Vec<Project> {
-        vec![
-            Project { name: "golfkort".into(), path: "workspaces/golfkort".into(), branch: "main".into(), changes: 3 },
-            Project { name: "AkurAI".into(), path: "workspaces/AkurAI".into(), branch: "main".into(), changes: 0 },
-            Project { name: "AkurAI-Framework".into(), path: "workspaces/AkurAI-Framework".into(), branch: "feat/ai-components".into(), changes: 7 },
-            Project { name: "AkurAI-Router".into(), path: "workspaces/AkurAI-Router".into(), branch: "main".into(), changes: 1 },
-            Project { name: "AkurAI-Mail".into(), path: "workspaces/AkurAI-Mail".into(), branch: "main".into(), changes: 0 },
-        ]
+        // One request only — per-project git status is fetched lazily in the
+        // Browser, not here (N+1 blocking round-trips would freeze mount).
+        crate::net::request("projects", "")
+            .into_iter()
+            .filter(|n| !n.is_empty() && !n.starts_with("error:"))
+            .map(|name| Project {
+                path: format!("workspaces/{name}"),
+                name,
+                branch: String::new(),
+                changes: 0,
+            })
+            .collect()
     }
 
-    // TODO(orchestrator): back with real gateway op — flat, depth-annotated tree
-    // for one repo. Return the whole tree; the UI handles expand/collapse. A real
-    // op MAY instead stream children per-dir; keep the (name,path,is_dir,depth)
-    // shape and the UI adapts.
+    /// Flat depth-annotated tree from `git ls-files` (gateway `tree` op). The UI
+    /// synthesizes directory nodes from the file paths.
     pub fn tree(project: &str) -> Vec<FileNode> {
-        let n = |name: &str, path: &str, is_dir: bool, depth: usize| FileNode {
-            name: name.into(),
-            path: path.into(),
-            is_dir,
-            depth,
-        };
-        match project {
-            "golfkort" => vec![
-                n("manage.py", "manage.py", false, 0),
-                n("requirements.txt", "requirements.txt", false, 0),
-                n("ISA.md", "ISA.md", false, 0),
-                n("core", "core", true, 0),
-                n("models.py", "core/models.py", false, 1),
-                n("views.py", "core/views.py", false, 1),
-                n("urls.py", "core/urls.py", false, 1),
-                n("templates", "core/templates", true, 1),
-                n("base.html", "core/templates/base.html", false, 2),
-                n("leaderboard.html", "core/templates/leaderboard.html", false, 2),
-                n("tests", "tests", true, 0),
-                n("test_bookings.py", "tests/test_bookings.py", false, 1),
-            ],
-            _ => vec![
-                n("Cargo.toml", "Cargo.toml", false, 0),
-                n("README.md", "README.md", false, 0),
-                n("AGENTS.md", "AGENTS.md", false, 0),
-                n("src", "src", true, 0),
-                n("main.rs", "src/main.rs", false, 1),
-                n("app.rs", "src/app.rs", false, 1),
-                n("lib.rs", "src/lib.rs", false, 1),
-                n("crates", "crates", true, 0),
-                n("semdb", "crates/semdb", true, 1),
-                n("lib.rs", "crates/semdb/src/lib.rs", false, 2),
-                n("gateway", "crates/gateway", true, 1),
-                n("lib.rs", "crates/gateway/src/lib.rs", false, 2),
-            ],
+        let files = crate::net::request("tree", project);
+        let mut seen_dirs = std::collections::BTreeSet::new();
+        let mut nodes: Vec<FileNode> = Vec::new();
+        for path in files {
+            if path.is_empty() || path.starts_with("error:") { continue; }
+            let parts: Vec<&str> = path.split('/').collect();
+            // synthesize ancestor dirs
+            for d in 1..parts.len() {
+                let dir = parts[..d].join("/");
+                if seen_dirs.insert(dir.clone()) {
+                    nodes.push(FileNode { name: parts[d - 1].to_string(), path: dir, is_dir: true, depth: d - 1 });
+                }
+            }
+            nodes.push(FileNode {
+                name: parts.last().unwrap().to_string(),
+                path: path.clone(),
+                is_dir: false,
+                depth: parts.len() - 1,
+            });
         }
+        nodes.sort_by(|a, b| a.path.cmp(&b.path));
+        nodes
     }
 
-    // TODO(orchestrator): back with real gateway op — read one file's contents
-    // (repo-relative path) for the read-only viewer.
+    /// File contents (gateway `file` op) — path is `project/relative`.
     pub fn file(project: &str, path: &str) -> String {
-        format!(
-            "// {project} :: {path}\n// ── read-only placeholder — orchestrator backs this with a gateway file-read op.\n//\n// The agent edits files; this pane only views them. Line numbers, monospace,\n// and horizontal scroll for long lines are all handled by the viewer.\n\nfn main() {{\n    println!(\"{project} / {path}\");\n}}\n"
-        )
+        crate::net::request("file", &format!("{project}/{path}")).join("\n")
     }
 
-    // TODO(orchestrator): back with real gateway op — `git status` for the repo.
+    /// `git status --porcelain` mapped to change entries (gateway `git` op).
     pub fn git(project: &str) -> Vec<GitChange> {
-        let g = |status: &str, path: &str| GitChange { status: status.into(), path: path.into() };
-        match project {
-            "golfkort" => vec![
-                g("M", "core/views.py"),
-                g("M", "core/templates/leaderboard.html"),
-                g("?", "tests/test_bookings.py"),
-            ],
-            "AkurAI-Router" => vec![g("M", "src/router.rs")],
-            "AkurAI-Framework" => vec![
-                g("M", "crates/llm/src/stream.rs"),
-                g("A", "crates/ui/src/assistant.rs"),
-                g("M", "CHANGELOG.md"),
-                g("?", "crates/ui/src/tool_card.rs"),
-                g("M", "BATCHES.md"),
-                g("D", "crates/legacy/mod.rs"),
-                g("M", "AGENTS.md"),
-            ],
-            _ => vec![],
-        }
+        crate::net::request("git", project)
+            .into_iter()
+            .filter(|l| l.len() >= 3 && !l.starts_with("error:"))
+            .map(|l| {
+                let code = l.trim_start().chars().next().unwrap_or('?');
+                let status = match code { 'M' => "M", 'A' => "A", 'D' => "D", 'R' => "R", _ => "?" }.to_string();
+                let path = l.get(3..).unwrap_or("").trim().to_string();
+                GitChange { status, path }
+            })
+            .collect()
     }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Ancestor dir paths of a repo-relative path (`a/b/c.rs` → `["a", "a/b"]`).
+/// Ancestor directory paths of a repo-relative path (`a/b/c.rs` → `["a","a/b"]`).
+/// A node is visible only when every ancestor dir is expanded.
 fn ancestors(path: &str) -> Vec<String> {
     let parts: Vec<&str> = path.split('/').collect();
-    (1..parts.len()).map(|i| parts[..i].join("/")).collect()
+    (1..parts.len()).map(|d| parts[..d].join("/")).collect()
 }
 
 // ── Component ────────────────────────────────────────────────────────────────

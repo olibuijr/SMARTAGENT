@@ -178,24 +178,42 @@ mod data {
         ]
     }
 
-    // TODO(orchestrator): back with real gateway op — the `tasks` binary board
-    // for the active project (op:"tasks.board").
+    /// Real fleet board over the gateway `board` op. Parses `tasks board`:
+    /// column headers (`BACKLOG (n)` …) set the current stage; indented `  T-… `
+    /// rows are cards under it. Falls back to empty if the gateway is unreachable.
     pub fn board() -> Vec<Task> {
-        let t = |title: &str, stage: Stage| Task {
-            title: title.into(),
-            stage,
-        };
-        vec![
-            t("Sækja um fjárhagsaðstoð Akureyrarbæ", Stage::Backlog),
-            t("Örorku/endurhæfingarlífeyrir umsókn", Stage::Backlog),
-            t("Klára RSK skil 2023", Stage::Ready),
-            t("Færa localai á Proxmox", Stage::Ready),
-            t("Gateway mail op (himalaya)", Stage::Doing),
-            t("Cowork tab UI", Stage::Doing),
-            t("Telegram streaming svör", Stage::Review),
-            t("APK build + verify á síma", Stage::Done),
-            t("Pixel-brand tokens", Stage::Done),
-        ]
+        let lines = crate::net::request("board", "");
+        let mut out = Vec::new();
+        let mut stage = Stage::Backlog;
+        for line in lines {
+            let up = line.trim_start();
+            let set = |s: &str| Stage::ALL.iter().copied().find(|st| up.starts_with(&s.to_uppercase()));
+            if let Some(st) = ["backlog", "ready", "doing", "review", "done"]
+                .iter()
+                .find_map(|k| if up.to_lowercase().starts_with(k) { set(k) } else { None })
+            {
+                stage = st;
+                continue;
+            }
+            // Card row: "  T-123 p2 Title… @owner [n/m]" — strip id/prio and tags.
+            if let Some(rest) = up.strip_prefix("T-").and_then(|r| r.split_once(' ')) {
+                let title = rest
+                    .1
+                    .trim_start_matches(|c: char| c == 'p' || c.is_ascii_digit() || c == ' ')
+                    .split(" @")
+                    .next()
+                    .unwrap_or("")
+                    .split(" [")
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !title.is_empty() {
+                    out.push(Task { title, stage });
+                }
+            }
+        }
+        out
     }
 }
 

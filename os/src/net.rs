@@ -95,6 +95,7 @@ fn event_kind(line: &str) -> Option<(&'static str, String)> {
     let ev = field(line, "ev")?;
     let kind = match ev.as_str() {
         "text" => "text",
+        "data" => "data",
         "thinking" => "thinking",
         "info" => "info",
         "done" => "done",
@@ -150,4 +151,50 @@ fn esc(s: &str) -> String {
         }
     }
     o
+}
+
+/// Blocking request/collect for a read-only data op (board/mail/projects/tree/
+/// file/git). Connects, auths, sends `{"op":op,"path":path}`, returns every
+/// `{"ev":"data",...}` line until `done`. Call from a worker thread (see
+/// `request_async`), never on the UI thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn request(op: &str, path: &str) -> Vec<String> {
+    run_request(op, path).unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_request(op: &str, path: &str) -> Option<Vec<String>> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+    // Fast-fail connect + read timeout so an unreachable gateway can't wedge a
+    // caller (the sync data seams fetch on mount).
+    let addr = GATEWAY_ADDR.parse().ok()?;
+    let s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(6))).ok();
+    let mut w = s.try_clone().ok()?;
+    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN)).as_bytes()).ok()?;
+    w.write_all(format!("{{\"op\":\"{}\",\"path\":\"{}\"}}\n", esc(op), esc(path)).as_bytes()).ok()?;
+    w.flush().ok()?;
+    let mut out = Vec::new();
+    for line in BufReader::new(s).lines() {
+        let Ok(line) = line else { break };
+        match event_kind(line.trim()) {
+            Some(("data", d)) => out.push(d),
+            Some(("done", _)) => break,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+/// Async wrapper for Dioxus `use_resource`: runs the blocking request on a
+/// worker thread and awaits the result, so the render thread never blocks.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn request_async(op: &'static str, path: String) -> Vec<String> {
+    let (tx, rx) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(request(op, &path));
+    });
+    rx.await.unwrap_or_default()
 }
