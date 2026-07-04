@@ -1,0 +1,71 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Theme / Shell — Agent E (see os/PLAN.md)
+   Single source of truth for the color palette + safe-area insets.
+
+   How OS dark/light following works end-to-end (Android system WebView):
+     1. App theme is a DayNight theme (Dioxus.toml → [android.application] theme),
+        so `android:isLightTheme` tracks the OS setting.
+     2. MainActivity enables `setAlgorithmicDarkeningAllowed(true)` (API 33+),
+        which lets the WebView map the app theme onto `prefers-color-scheme`.
+     3. This file declares `color-scheme` + real `prefers-color-scheme` media
+        queries so the WebView honors our CSS instead of algorithmically
+        inverting colors.
+   On the web target, `prefers-color-scheme` already reflects the OS directly.
+
+   NOTE: main.css no longer defines the palette tokens — they live here so there
+   is exactly one authority and no CSS load-order hazard between the two sheets.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Tell the UA the page supports both schemes: enables native dark form
+     controls / scrollbars and stops the WebView from force-inverting us. */
+  color-scheme: light dark;
+
+  /* Real safe-area insets, exposed as tokens the shell consumes.
+     `viewport-fit=cover` (set in app.rs meta) is what makes env() non-zero. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* ── Dark palette (default / brand) ── */
+  --bg: #161620;
+  --panel: #1c1c26;
+  --rail: #12121a;
+  --ink: #e8e2d8;
+  --muted: #8a8a9a;
+  --accent: #7dff9a;
+  --amber: #ffaf5f;
+  --line: #2a2a36;
+
+  /* Interaction tints derived per-scheme so hover/active read on both. */
+  --hover: #ffffff0d;
+  --active-tint: #7dff9a14;
+}
+
+/* ── Light palette ──
+   Warm paper background keeps the pixel-art brand (logo.png / jeeves.png)
+   legible; accent + amber darkened so they hold contrast on white. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f3ec;
+    --panel: #ffffff;
+    --rail: #e8e7de;
+    --ink: #1c1c26;
+    --muted: #5f5f6b;
+    --accent: #1a9d51;
+    --amber: #b5741f;
+    --line: #d9d8cf;
+
+    --hover: #1c1c2610;
+    --active-tint: #1a9d5118;
+  }
+}
+
+/* Root paints under the insets so status/nav bars blend with the shell. */
+html, body { background: var(--bg); }
+
+/* Safe-area application lives in main.css's shell rules, which consume the
+   --safe-* tokens above via var(). Custom properties cascade globally, so the
+   result is identical no matter which sheet the browser links first — no
+   load-order hazard and no shorthand-reset of the inset padding. */
