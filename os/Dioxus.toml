@@ -1,0 +1,26 @@
+# Dioxus config — Agent E (Theme/Shell).
+#
+# Purpose: make the Android system WebView follow the OS dark/light setting so
+# CSS `prefers-color-scheme` reports correctly (the app was rendering light in
+# system dark mode). Two native pieces are required (per Android WebView docs):
+#
+#   1. A DayNight app theme so `android:isLightTheme` tracks the OS setting.
+#      dx maps [android.application].theme onto the manifest's android:theme.
+#   2. `setAlgorithmicDarkeningAllowed(true)` on the WebView (API 33+), done in
+#      the custom MainActivity below (overrides WryActivity.onWebViewCreate).
+#
+# The CSS half (prefers-color-scheme media queries + color-scheme) is in
+# assets/theme.css, injected via src/theme.rs (ThemeMeta / apply_theme).
+
+[application]
+name = "SMARTAGENT OS"
+# Custom MainActivity that enables algorithmic darkening on the system WebView.
+# Path is relative to this crate root.
+android_main_activity = "android/MainActivity.kt"
+
+[android.application]
+# DayNight variant of the default AppCompat.Light.NoActionBar theme. Provided by
+# androidx.appcompat (already a gradle dependency), so no styles.xml override is
+# needed and this survives dx's project regeneration.
+theme = "@style/Theme.AppCompat.DayNight.NoActionBar"
+supports_rtl = true

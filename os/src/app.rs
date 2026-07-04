@@ -20,11 +20,12 @@ pub fn App() -> Element {
     let tab = use_signal(|| Tab::Chat);
     rsx! {
         document::Stylesheet { href: MAIN_CSS }
+        // Agent E: links theme.css (palette + safe-area tokens) and color-scheme.
+        crate::theme::ThemeMeta {}
         document::Meta {
             name: "viewport",
             content: "width=device-width, initial-scale=1, viewport-fit=cover",
         }
-        document::Meta { name: "color-scheme", content: "dark light" }
         div { class: "app",
             Rail { tab }
             main { class: "pane",
