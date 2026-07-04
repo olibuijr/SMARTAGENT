@@ -102,80 +102,46 @@ mod data {
     // TODO(orchestrator): back with real gateway op — himalaya inbox over the
     // gateway TCP bridge (op:"mail.inbox").
     pub fn inbox() -> Vec<Mail> {
-        vec![
-            Mail {
-                sender: "Skatturinn".into(),
-                subject: "Staðfesting á umsókn".into(),
-                snippet: "Umsókn þín um endurgreiðslu hefur verið móttekin og er í vinnslu…".into(),
-                time: "08:12".into(),
-                unread: true,
-            },
-            Mail {
-                sender: "Klara".into(),
-                subject: "Depill — dýralæknir kl. 15".into(),
-                snippet: "Manstu eftir tímanum í dag? Ég kemst ekki, geturðu farið með hann?".into(),
-                time: "07:44".into(),
-                unread: true,
-            },
-            Mail {
-                sender: "AkurAI · billing".into(),
-                subject: "Invoice #1042 paid".into(),
-                snippet: "Your monthly follow-up retainer for June has been settled. Thanks!".into(),
-                time: "Yesterday".into(),
-                unread: false,
-            },
-            Mail {
-                sender: "GSÍ".into(),
-                subject: "Mótaskrá 2027 — forskráning".into(),
-                snippet: "Forskráning fyrir keppnistímabilið er opin. Tryggðu þér sæti…".into(),
-                time: "Yesterday".into(),
-                unread: false,
-            },
-            Mail {
-                sender: "Zophonias".into(),
-                subject: "re: helgin".into(),
-                snippet: "Hljómar vel pabbi, sjáumst þá á laugardaginn 🎸".into(),
-                time: "Mon".into(),
-                unread: false,
-            },
-        ]
+        // Real inbox via the gateway `mail` op (himalaya envelope list — a
+        // markdown table). Parse rows `| ID | FLAGS | SUBJECT | FROM | DATE |`.
+        crate::net::request("mail", "")
+            .into_iter()
+            .filter_map(|line| {
+                if !line.starts_with('|') { return None; }
+                let cols: Vec<String> = line.split('|').map(|c| c.trim().to_string()).collect();
+                // cols: ["", id, flags, subject, from, date, ""]
+                if cols.len() < 6 || cols[1] == "ID" || cols[1].starts_with('-') { return None; }
+                let unread = cols[2].contains('*');
+                let date = cols[5].split(' ').next().unwrap_or("").to_string();
+                Some(Mail {
+                    sender: cols[4].clone(),
+                    subject: cols[3].clone(),
+                    snippet: String::new(),
+                    time: date,
+                    unread,
+                })
+            })
+            .take(25)
+            .collect()
     }
 
     // TODO(orchestrator): back with real gateway op — `schedule` today view +
     // reminders (op:"agenda.today").
     pub fn agenda() -> Vec<AgendaItem> {
-        vec![
-            AgendaItem {
-                at: "09:30".into(),
-                title: "AkurAI kickoff — Norðurorka".into(),
-                kind: "event",
-                done: true,
-            },
-            AgendaItem {
-                at: "12:00".into(),
-                title: "Borða hádegismat".into(),
-                kind: "reminder",
-                done: false,
-            },
-            AgendaItem {
-                at: "14:00".into(),
-                title: "Deep-focus: gateway mail op".into(),
-                kind: "event",
-                done: false,
-            },
-            AgendaItem {
-                at: "15:00".into(),
-                title: "Depill — dýralæknir".into(),
-                kind: "event",
-                done: false,
-            },
-            AgendaItem {
-                at: "17:30".into(),
-                title: "Ganga með Depil".into(),
-                kind: "reminder",
-                done: false,
-            },
-        ]
+        // Real scheduled jobs via the gateway `run` op (`schedule list`):
+        // each line is `name 	 cron 	 cmd 	 last: <date>`.
+        crate::net::run_tool("schedule", &["list"])
+            .into_iter()
+            .filter_map(|line| {
+                if line.trim().is_empty() || line.starts_with("error:") { return None; }
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.is_empty() { return None; }
+                let title = parts[0].trim().to_string();
+                if title.is_empty() { return None; }
+                let at = parts.get(1).map(|c| c.trim().to_string()).unwrap_or_default();
+                Some(AgendaItem { at, title, kind: "reminder", done: false })
+            })
+            .collect()
     }
 
     /// Real fleet board over the gateway `board` op. Parses `tasks board`:
