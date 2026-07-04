@@ -198,3 +198,54 @@ pub async fn request_async(op: &'static str, path: String) -> Vec<String> {
     });
     rx.await.unwrap_or_default()
 }
+
+/// Blocking read-only tool invocation via the gateway generic `run` op:
+/// `run_tool("memory", &["recall","golf"])` → the tool's stdout lines. Call
+/// from a worker thread. Only read-only tool+verb pairs are allowed server-side.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_tool(tool: &str, args: &[&str]) -> Vec<String> {
+    run_tool_inner(tool, args).unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_tool_inner(tool: &str, args: &[&str]) -> Option<Vec<String>> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+    let addr = GATEWAY_ADDR.parse().ok()?;
+    let s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut w = s.try_clone().ok()?;
+    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN)).as_bytes()).ok()?;
+    let args_json: String = args
+        .iter()
+        .map(|a| format!("\"{}\"", esc(a)))
+        .collect::<Vec<_>>()
+        .join(",");
+    w.write_all(
+        format!("{{\"op\":\"run\",\"tool\":\"{}\",\"args\":[{}]}}\n", esc(tool), args_json).as_bytes(),
+    )
+    .ok()?;
+    w.flush().ok()?;
+    let mut out = Vec::new();
+    for line in BufReader::new(s).lines() {
+        let Ok(line) = line else { break };
+        match event_kind(line.trim()) {
+            Some(("data", d)) => out.push(d),
+            Some(("done", _)) => break,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+/// Async wrapper for `use_resource`.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn run_tool_async(tool: &'static str, args: Vec<String>) -> Vec<String> {
+    let (tx, rx) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let _ = tx.send(run_tool(tool, &refs));
+    });
+    rx.await.unwrap_or_default()
+}
