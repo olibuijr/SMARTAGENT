@@ -1,0 +1,185 @@
+/* Assistant-UI transcript blocks — Agent B. Linked alongside main.css by the
+   orchestrator at merge time. Palette tokens (--bg/--panel/--ink/--muted/
+   --accent/--amber/--line) come from main.css :root; block-local extras below. */
+
+:root {
+  --blk-add: #7dff9a; /* green — diff additions */
+  --blk-del: #ff6b6b; /* red   — diff deletions */
+}
+
+img { image-rendering: pixelated; }
+
+.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.blk { min-width: 0; }
+
+/* ── Text ── */
+.blk-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  font-size: 14px;
+  color: var(--ink);
+}
+.seg-text { white-space: pre-wrap; }
+.code-fence {
+  display: block;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #10101a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+/* ── Thinking (collapsible) ── */
+.blk-think {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #ffffff05;
+}
+.think-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 7px 10px;
+  font: inherit;
+  color: var(--muted);
+}
+.think-head:hover { color: var(--ink); }
+.think-caret { font-size: 11px; width: 12px; }
+.think-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+.think-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 12px 10px 29px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ── Tool-call card ── */
+.blk-tool {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.tool-ico { font-size: 14px; line-height: 1; }
+.tool-name {
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: 1px solid transparent;
+}
+.pill-sym { font-size: 11px; line-height: 1; }
+
+.pill-running {
+  color: var(--amber);
+  background: #ffaf5f1a;
+  border-color: #ffaf5f44;
+}
+.pill-running .pill-sym { animation: blk-pulse 1s ease-in-out infinite; }
+.pill-ok {
+  color: var(--accent);
+  background: #7dff9a1a;
+  border-color: #7dff9a44;
+}
+.pill-fail {
+  color: var(--blk-del);
+  background: #ff6b6b1a;
+  border-color: #ff6b6b44;
+}
+
+/* Left accent stripe echoing the status colour. */
+.tool-running { border-left: 3px solid var(--amber); }
+.tool-ok { border-left: 3px solid var(--accent); }
+.tool-fail { border-left: 3px solid var(--blk-del); }
+
+@keyframes blk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── File-edit diff ── */
+.blk-diff {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #10101a;
+}
+.diff-head {
+  padding: 7px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+.diff-body {
+  overflow-x: auto;
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.dl {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: pre;
+}
+.dl-gutter {
+  flex: 0 0 1ch;
+  text-align: center;
+  color: var(--muted);
+  user-select: none;
+}
+.dl-txt { flex: 1; min-width: 0; }
+.dl-ctx { color: var(--ink); }
+.dl-add {
+  background: #7dff9a14;
+  color: var(--blk-add);
+}
+.dl-add .dl-gutter { color: var(--blk-add); }
+.dl-del {
+  background: #ff6b6b14;
+  color: var(--blk-del);
+}
+.dl-del .dl-gutter { color: var(--blk-del); }
