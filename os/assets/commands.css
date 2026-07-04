@@ -1,0 +1,192 @@
+/* Slash commands + multiple-choice dialogs — Agent F. Linked alongside main.css
+   by the orchestrator at merge time. Palette tokens (--bg/--panel/--ink/--muted/
+   --accent/--amber/--line) come from main.css :root; feature-local extras below. */
+
+:root {
+  --cmd-radius: 12px;
+}
+
+img { image-rendering: pixelated; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Slash-command palette
+   Render directly above the composer while the input starts with '/'.
+   ───────────────────────────────────────────────────────────────────────── */
+.cmd-palette {
+  display: flex;
+  flex-direction: column;
+  margin: 0 16px 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--cmd-radius);
+  box-shadow: 0 8px 24px #00000055;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cmd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  padding: 12px 14px;
+  min-height: 44px; /* comfortable tap target */
+}
+.cmd-row:last-child { border-bottom: 0; }
+.cmd-row:hover,
+.cmd-row:focus-visible {
+  background: #7dff9a14;
+  outline: none;
+}
+.cmd-row:active { background: #7dff9a22; }
+
+.cmd-name {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 14px;
+}
+.cmd-desc {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-empty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Multiple-choice modal
+   Full-screen dim backdrop with a centred card; big tappable option buttons.
+   ───────────────────────────────────────────────────────────────────────── */
+.choice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(16px + env(safe-area-inset-top)) 16px
+           calc(16px + env(safe-area-inset-bottom));
+  background: #0b0b12cc;
+  backdrop-filter: blur(2px);
+}
+
+.choice-card {
+  width: 100%;
+  max-width: 460px;
+  max-height: 88vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px #00000077;
+  padding: 22px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.choice-q {
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--ink);
+  font-weight: 600;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.choice-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.choice-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  padding: 14px 16px;
+  min-height: 50px; /* large tap target */
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, transform .04s ease;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.choice-opt:hover,
+.choice-opt:focus-visible {
+  border-color: #7dff9a55;
+  background: #7dff9a12;
+  outline: none;
+}
+.choice-opt:active { transform: translateY(1px); }
+
+.choice-opt-other {
+  color: var(--amber);
+  border-style: dashed;
+  font-weight: 600;
+}
+.choice-opt-other:hover,
+.choice-opt-other:focus-visible {
+  border-color: #ffaf5f66;
+  background: #ffaf5f12;
+}
+
+.choice-other {
+  display: flex;
+  gap: 10px;
+}
+.choice-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+}
+.choice-input:focus { border-color: #7dff9a55; }
+
+.choice-send {
+  flex: 0 0 auto;
+  background: var(--accent);
+  color: #101018;
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+  padding: 0 18px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.choice-send:disabled { opacity: .5; cursor: default; }
+
+@media (max-width: 560px) {
+  .choice-card { border-radius: 14px; }
+}
