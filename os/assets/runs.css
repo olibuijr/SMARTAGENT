@@ -1,0 +1,153 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Runs tab — workflow Runs view (TUI /runs parity).
+   Palette tokens (--bg, --panel, --ink, --muted, --accent, --amber, --line)
+   are owned by theme.css; this sheet only consumes them. Pixel brand touches
+   throughout — crisp, monospace, square-cornered cards.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.runs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.runs img { image-rendering: pixelated; }
+
+.runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  padding-top: calc(14px + var(--safe-top));
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.runs-title {
+  color: var(--amber);
+  font-family: "Press Start", ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+.runs-refresh {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.runs-refresh:hover { border-color: var(--accent); color: var(--accent); }
+.runs-refresh:active { transform: translateY(1px); }
+
+.runs-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 16px 18px;
+  padding-bottom: calc(16px + var(--safe-bottom));
+}
+
+/* ── Run cards ── */
+.runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.run-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.run-def {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.run-status {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.run-status-running { color: var(--amber);  background: #ffaf5f1a; border-color: #ffaf5f44; }
+.run-status-done    { color: var(--accent); background: #7dff9a1a; border-color: #7dff9a44; }
+.run-status-failed  { color: #ff6b6b;       background: #ff6b6b1a; border-color: #ff6b6b44; }
+.run-status-other   { color: var(--muted);  background: var(--hover); border-color: var(--line); }
+
+.run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.run-id {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.run-step {
+  color: var(--ink);
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.run-task {
+  color: var(--accent);
+  border: 1px solid #7dff9a33;
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+/* Unstructured line — surface it verbatim so nothing is lost. */
+.run-card-raw { border-left-color: var(--muted); }
+.run-raw {
+  color: var(--ink);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Loading / empty / error states ── */
+.runs-state {
+  margin: 40px auto;
+  max-width: 420px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.runs-empty { color: var(--muted); }
+.runs-loading { color: var(--muted); }
+.runs-error .runs-state-title { color: #ff6b6b; font-weight: 700; }
+.runs-error .runs-state-hint { color: var(--muted); font-size: 12px; }
