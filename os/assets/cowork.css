@@ -1,0 +1,230 @@
+/* Cowork tab — dark pixel brand cockpit. Owned by Agent C (cowork.rs).
+   Mobile-first single column; renders inside `.pane`. Scoped under `.cowork`
+   so it never collides with main.css or sibling module styles. */
+
+.cowork {
+  /* Dark pixel brand tokens (kept local so the tab is self-contained). */
+  --bg: #161620;
+  --panel: #1c1c26;
+  --ink: #e8e2d8;
+  --muted: #8a8a9a;
+  --accent: #7dff9a;
+  --amber: #ffaf5f;
+  --line: #2a2a36;
+
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 12px 12px calc(24px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+}
+
+.cowork img { image-rendering: pixelated; }
+
+/* ── Card shell ─────────────────────────────────────────────────────────── */
+.cw-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+}
+
+.cw-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.cw-title {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.cw-sub { font-size: 10px; color: var(--muted); }
+.cw-badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--bg);
+  background: var(--accent);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+/* ── Mail ───────────────────────────────────────────────────────────────── */
+.cw-mail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cw-mailrow {
+  display: flex;
+  gap: 8px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.cw-mailrow:last-child { border-bottom: 0; }
+.cw-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: transparent;
+}
+.cw-mailrow.unread .cw-dot { background: var(--accent); }
+.cw-mailbody { min-width: 0; flex: 1; }
+.cw-mailtop { display: flex; align-items: baseline; gap: 8px; }
+.cw-sender {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cw-mailrow.unread .cw-sender { color: var(--ink); }
+.cw-time { margin-left: auto; font-size: 10px; color: var(--muted); white-space: nowrap; }
+.cw-subject {
+  font-size: 13px;
+  color: var(--ink);
+  margin: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cw-mailrow.unread .cw-subject { color: var(--amber); }
+.cw-snippet {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Agenda ─────────────────────────────────────────────────────────────── */
+.cw-agenda { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cw-agrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.cw-agrow:last-child { border-bottom: 0; }
+.cw-at {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  width: 44px;
+}
+.cw-kind { font-size: 11px; flex: 0 0 auto; }
+.cw-kind-event { color: var(--accent); }
+.cw-kind-reminder { color: var(--amber); }
+.cw-agtitle {
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cw-agrow.done .cw-at,
+.cw-agrow.done .cw-agtitle { color: var(--muted); text-decoration: line-through; }
+
+/* ── Board ──────────────────────────────────────────────────────────────── */
+.cw-add { display: flex; gap: 8px; margin-bottom: 10px; }
+.cw-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.cw-input::placeholder { color: var(--muted); }
+.cw-input:focus { outline: none; border-color: var(--accent); }
+.cw-addbtn {
+  flex: 0 0 auto;
+  width: 38px;
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cw-addbtn:active { transform: translateY(1px); }
+
+.cw-board {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cw-col {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+}
+.cw-colhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cw-colname {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.cw-col-doing .cw-colname { color: var(--amber); }
+.cw-col-done .cw-colname { color: var(--accent); }
+.cw-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.cw-cards { display: flex; flex-direction: column; gap: 6px; }
+.cw-taskcard {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cw-col-doing .cw-taskcard { border-left-color: var(--amber); }
+.cw-col-done .cw-taskcard { border-left-color: var(--muted); opacity: 0.75; }
+.cw-taskcard:hover { border-color: var(--accent); }
+.cw-taskcard:active { transform: translateY(1px); }
+.cw-more { font-size: 10px; color: var(--muted); padding: 2px 2px 0; }
+
+/* ── Wider screens: agenda + board breathe into columns ─────────────────── */
+@media (min-width: 720px) {
+  .cw-board {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+}
