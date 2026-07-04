@@ -20,6 +20,8 @@ pub enum Event {
     State(bool),
     /// Streamed assistant text fragment.
     Text(String),
+    /// Streamed thinking/reasoning fragment.
+    Thinking(String),
     /// A turn finished; payload is full assistant text plus token usage.
     TurnEnd(String, Usage),
     /// A tool call started (payload: tool name) — visibility while "quiet".
@@ -225,11 +227,19 @@ fn reader_loop(stdout: std::process::ChildStdout, tx: Sender<Event>, busy: Arc<M
             }
             "message_update" => {
                 if let Some(ev) = v.get("assistantMessageEvent") {
-                    if ev.get("type").and_then(Value::as_str) == Some("text_delta") {
-                        if let Some(d) = ev.get("delta").and_then(Value::as_str) {
-                            turn_text.push_str(d);
-                            let _ = tx.send(Event::Text(d.to_string()));
+                    match ev.get("type").and_then(Value::as_str) {
+                        Some("text_delta") => {
+                            if let Some(d) = ev.get("delta").and_then(Value::as_str) {
+                                turn_text.push_str(d);
+                                let _ = tx.send(Event::Text(d.to_string()));
+                            }
                         }
+                        Some("thinking_delta") => {
+                            if let Some(d) = ev.get("delta").and_then(Value::as_str) {
+                                let _ = tx.send(Event::Thinking(d.to_string()));
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

@@ -340,6 +340,15 @@ fn start_event_pump(
                         &format!("{{\"ev\":\"text\",\"data\":\"{}\"}}\n", json::escape(&t)),
                     );
                 }
+                Event::Thinking(t) => {
+                    // Reasoning stream — forwarded for rich clients (the OS app's
+                    // collapsible thinking blocks). Not appended to the plain
+                    // transcript file.
+                    broadcast(
+                        &clients,
+                        &format!("{{\"ev\":\"thinking\",\"data\":\"{}\"}}\n", json::escape(&t)),
+                    );
+                }
                 Event::State(b) => {
                     *busy_since.lock().unwrap() = if b { Some(Instant::now()) } else { None };
                     broadcast(
