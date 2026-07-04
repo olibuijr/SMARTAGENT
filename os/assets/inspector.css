@@ -1,0 +1,261 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Agent Inspector — fleet agent/session detail sheet + reusable context gauge.
+   Uses the brand tokens defined in theme.css (--bg/--panel/--ink/--muted/
+   --accent/--amber/--line). A local red is derived for the "critical" gauge
+   level since the palette has no red token.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.inspector {
+  --insp-red: #ff6b6b;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 14px;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* ── Header ── */
+.insp-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.insp-ava {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 8px;
+  image-rendering: pixelated;
+}
+.insp-id { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.insp-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insp-sub {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.insp-refresh {
+  margin-left: auto;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  width: 34px; height: 34px;
+  font: inherit; font-size: 16px;
+  cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+.insp-refresh:hover { color: var(--accent); border-color: #7dff9a55; }
+.insp-refresh:active { transform: translateY(1px); }
+
+/* ── Body layout ── */
+.insp-body { display: flex; flex-direction: column; gap: 14px; }
+
+/* Role / state row */
+.insp-meta { display: flex; gap: 10px; flex-wrap: wrap; }
+.insp-field {
+  flex: 1 1 auto;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.insp-key {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.insp-val { font-size: 13px; color: var(--ink); font-weight: 600; }
+
+/* Live-state badge */
+.insp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.st-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px transparent;
+}
+.st-working { color: var(--accent); }
+.st-working .st-dot { background: var(--accent); box-shadow: 0 0 6px #7dff9a88; }
+.st-idle { color: var(--muted); }
+.st-idle .st-dot { background: var(--muted); }
+.st-error { color: var(--insp-red); }
+.st-error .st-dot { background: var(--insp-red); box-shadow: 0 0 6px #ff6b6b88; }
+.st-other { color: var(--amber); }
+.st-other .st-dot { background: var(--amber); }
+
+/* ── Section block ── */
+.insp-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.insp-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.insp-block-title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.insp-block-note { font-size: 11px; color: var(--amber); }
+
+/* Current task */
+.insp-task {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  word-break: break-word;
+}
+.insp-task.muted { color: var(--muted); font-style: italic; }
+
+/* ── Context gauge (reusable) ── */
+.ctx-gauge { display: flex; flex-direction: column; gap: 6px; }
+.ctx-track {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.ctx-fill {
+  height: 100%;
+  border-radius: 6px 0 0 6px;
+  transition: width .3s ease;
+  image-rendering: pixelated;
+}
+.ctx-ok { background: var(--accent); }
+.ctx-warn { background: var(--amber); }
+.ctx-crit { background: var(--insp-red); }
+.ctx-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+.ctx-used { font-variant-numeric: tabular-nums; }
+.ctx-pct { font-weight: 700; }
+.ctx-ok-t { color: var(--accent); }
+.ctx-warn-t { color: var(--amber); }
+.ctx-crit-t { color: var(--insp-red); }
+
+/* ── Stat chips ── */
+.insp-stats { display: flex; gap: 10px; }
+.insp-chip {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.insp-chip-n {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.insp-chip-l {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── Tool-activity timeline ── */
+.insp-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 6px;
+  display: flex;
+  flex-direction: column;
+}
+.tl-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0 5px 14px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+/* Connecting rail down the left side. */
+.tl-item::before {
+  content: "";
+  position: absolute;
+  left: 3px; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+.tl-item:first-child::before { top: 50%; }
+.tl-last::before { bottom: 50%; }
+.tl-node {
+  position: absolute;
+  left: -1px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--panel);
+}
+.tl-last .tl-node { background: var(--amber); }
+.tl-tool {
+  padding-left: 6px;
+  word-break: break-word;
+  font-variant-ligatures: none;
+}
+
+/* ── States: loading / error / empty ── */
+.insp-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+.insp-spinner { color: var(--accent); }
+.insp-error-glyph, .insp-empty-glyph { font-size: 26px; color: var(--amber); }
+.insp-error-msg { color: var(--ink); font-weight: 600; }
+.insp-error-sub, .insp-empty-line { font-size: 11px; color: var(--muted); }
+.insp-hl { color: var(--accent); }
