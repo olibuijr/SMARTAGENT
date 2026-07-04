@@ -34,6 +34,13 @@ fn App() -> Element {
     let tab = use_signal(|| Tab::Chat);
     rsx! {
         document::Stylesheet { href: MAIN_CSS }
+        // Edge-to-edge + follow the OS light/dark theme. The CSS then pads the
+        // status-bar / nav-bar insets with env(safe-area-inset-*).
+        document::Meta {
+            name: "viewport",
+            content: "width=device-width, initial-scale=1, viewport-fit=cover",
+        }
+        document::Meta { name: "color-scheme", content: "dark light" }
         div { class: "app",
             Rail { tab }
             main { class: "pane",
