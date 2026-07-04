@@ -10,8 +10,15 @@
 use futures_channel::mpsc::UnboundedSender;
 
 /// Dev default — the gateway TCP bridge on the LAN. Made configurable later.
-pub const GATEWAY_ADDR: &str = "192.168.1.166:9330";
-pub const GATEWAY_TOKEN: &str = "smartagent-os-dev";
+/// Gateway target — read live from the Settings store (persisted on device),
+/// falling back to the LAN dev default. Called from worker threads, so the
+/// Settings getters use a thread-safe cache (not a Dioxus signal).
+pub fn gateway_addr() -> String {
+    crate::settings::gateway_addr()
+}
+pub fn gateway_token() -> String {
+    crate::settings::gateway_token()
+}
 
 /// One streamed reply's events.
 #[derive(Clone, Debug)]
@@ -48,10 +55,10 @@ fn run_ask(agent: &str, message: &str, tx: &UnboundedSender<Ev>) -> Result<(), S
     use std::net::TcpStream;
 
     let stream =
-        TcpStream::connect(GATEWAY_ADDR).map_err(|e| format!("connect {GATEWAY_ADDR}: {e}"))?;
+        TcpStream::connect(gateway_addr()).map_err(|e| format!("connect {}: {e}", gateway_addr()))?;
     let mut w = stream.try_clone().map_err(|e| e.to_string())?;
     // auth, then the streaming ask.
-    let auth = format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN));
+    let auth = format!("{{\"token\":\"{}\"}}\n", esc(&gateway_token()));
     w.write_all(auth.as_bytes()).map_err(|e| e.to_string())?;
     let ask = format!(
         "{{\"op\":\"ask\",\"agent\":\"{}\",\"message\":\"{}\"}}\n",
@@ -170,11 +177,11 @@ fn run_request(op: &str, path: &str) -> Option<Vec<String>> {
     use std::time::Duration;
     // Fast-fail connect + read timeout so an unreachable gateway can't wedge a
     // caller (the sync data seams fetch on mount).
-    let addr = GATEWAY_ADDR.parse().ok()?;
+    let addr = gateway_addr().parse().ok()?;
     let s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(6))).ok();
     let mut w = s.try_clone().ok()?;
-    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN)).as_bytes()).ok()?;
+    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(&gateway_token())).as_bytes()).ok()?;
     w.write_all(format!("{{\"op\":\"{}\",\"path\":\"{}\"}}\n", esc(op), esc(path)).as_bytes()).ok()?;
     w.flush().ok()?;
     let mut out = Vec::new();
@@ -213,11 +220,11 @@ fn run_tool_inner(tool: &str, args: &[&str]) -> Option<Vec<String>> {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpStream;
     use std::time::Duration;
-    let addr = GATEWAY_ADDR.parse().ok()?;
+    let addr = gateway_addr().parse().ok()?;
     let s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(10))).ok();
     let mut w = s.try_clone().ok()?;
-    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN)).as_bytes()).ok()?;
+    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(&gateway_token())).as_bytes()).ok()?;
     let args_json: String = args
         .iter()
         .map(|a| format!("\"{}\"", esc(a)))
@@ -263,11 +270,11 @@ fn agents_inner() -> Option<Vec<String>> {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpStream;
     use std::time::Duration;
-    let addr = GATEWAY_ADDR.parse().ok()?;
+    let addr = gateway_addr().parse().ok()?;
     let s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(6))).ok();
     let mut w = s.try_clone().ok()?;
-    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(GATEWAY_TOKEN)).as_bytes()).ok()?;
+    w.write_all(format!("{{\"token\":\"{}\"}}\n", esc(&gateway_token())).as_bytes()).ok()?;
     w.write_all(b"{\"op\":\"agents\"}\n").ok()?;
     w.flush().ok()?;
     let mut out = Vec::new();

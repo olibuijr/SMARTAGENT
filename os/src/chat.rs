@@ -35,7 +35,7 @@ pub fn Chat() -> Element {
             busy.set(true);
             live.set(Vec::new());
             let (tx, mut ev_rx) = futures_channel::mpsc::unbounded::<Ev>();
-            net::ask("jeeves", &text, tx);
+            net::ask(&crate::app::CHAT_TARGET(), &text, tx);
             while let Some(ev) = ev_rx.next().await {
                 match ev {
                     Ev::Done => break,

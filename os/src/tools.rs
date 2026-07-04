@@ -271,7 +271,7 @@ fn ToolPanel(
             } else {
                 verb.to_string()
             };
-            net::run_tool_async(tool, args).await
+            net::run_tool_async(tool, args.split_whitespace().map(String::from).collect()).await
         }
     });
 

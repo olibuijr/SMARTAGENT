@@ -237,7 +237,7 @@ fn detail(row: &AgentRow) -> Element {
 pub fn Inspector(agent: String) -> Element {
     // Roster fetch; `.restart()` re-fetches on the refresh button.
     let mut roster = use_resource(move || async move {
-        net::request_async("agents", String::new()).await
+        net::agents_async().await
     });
 
     rsx! {

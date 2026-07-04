@@ -9,7 +9,13 @@ mod code; // Code tab (Agent D)
 mod commands; // slash palette + choice dialogs (Agent F)
 mod cowork; // Cowork tab (Agent C)
 mod net; // gateway client (shared, read-only for feature agents)
+mod fleet;
+mod tools;
+mod inspector;
+mod runs;
+mod notify;
 mod sessions; // persistent chat sessions (Agent A)
+mod settings;
 mod theme; // system theme + safe area (Agent E)
 
 fn main() {
